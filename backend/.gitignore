@@ -1,0 +1,20 @@
+# Go binaries
+/backend/backend
+/backend/*.exe
+/backend/bin/
+
+# Environment Variables (CRITICAL: Do not commit your database passwords)
+.env
+.env.local
+
+# Python/Scraper ignores
+/scraper/venv/
+/scraper/__pycache__/
+*.pyc
+
+
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store

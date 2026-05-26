@@ -1,0 +1,24 @@
+# Go
+/backend/backend
+/backend/*.exe
+/backend/bin/
+.env
+
+# Flutter/Dart
+/client/.dart_tool/
+/client/.flutter-plugins
+/client/.flutter-plugins-dependencies
+/client/.pub-cache/
+/client/build/
+/client/android/key.properties
+/client/ios/.symlinks/
+
+# Python (For later)
+/scraper/venv/
+/scraper/__pycache__/
+*.pyc
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
