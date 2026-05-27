@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"time"
+	"github.com/Dhruv1249/Job-cruiser/backend/db"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -48,6 +49,12 @@ func main() {
 	// Format the raw time data into a readable text string.
 	formattedTime := serverTime.Format(time.RFC3339)
 	fmt.Printf("Successfully connected to CockroachDB! Server time: %s\n", formattedTime)
+
+	schemaError := db.InitSchema(databasePool)
+	if schemaError != nil {
+		log.Fatalf("CRITICAL ERROR: Failed to initialize database schema. Details: %v", schemaError)
+	}
+	println("Database schema initialized.")
 	
 	// Initialize the default Gin web router with basic logging and crash-recovery built in.
 	webRouter := gin.Default()
