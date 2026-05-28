@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 	"github.com/Dhruv1249/Job-cruiser/backend/db"
+		"github.com/Dhruv1249/Job-cruiser/backend/handlers"
+	"github.com/Dhruv1249/Job-cruiser/backend/middleware"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -55,24 +57,23 @@ func main() {
 		log.Fatalf("CRITICAL ERROR: Failed to initialize database schema. Details: %v", schemaError)
 	}
 	println("Database schema initialized.")
+
+	authHandler := &handlers.AuthHandler{DB: databasePool}
+	jobHandler := &handlers.JobHandler{DB: databasePool}
 	
 	// Initialize the default Gin web router with basic logging and crash-recovery built in.
 	webRouter := gin.Default()
 
-	// Group all our API endpoints under the "/api" path.
-	apiRoutes := webRouter.Group("/api")
+	public := webRouter.Group("/api")
 	{
-		// Define what happens when a user visits http://localhost:8080/api/jobs
-		apiRoutes.GET("/jobs", func(requestContext *gin.Context) {
-			
-			// Send a JSON response back to the user's browser or mobile app.
-			// 200 is the HTTP status code for "OK".
-			requestContext.JSON(200, gin.H{
-				"status": "success",
-				"message": "Jobs endpoint is active.",
-				"database_time": formattedTime,
-			})
-		})
+		public.POST("/signup", authHandler.Signup)
+		public.POST("/login", authHandler.Login)
+	}
+	// Protected Routes (Requires JWT)
+	protected := webRouter.Group("/api")
+	protected.Use(middleware.RequireAuth())
+	{
+		protected.GET("/jobs", jobHandler.GetJobs)
 	}
 
 	// Check if a specific network port was requested in the .env file.
