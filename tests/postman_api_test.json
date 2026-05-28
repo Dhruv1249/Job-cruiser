@@ -1,0 +1,183 @@
+{
+  "info": {
+    "_postman_id": "b8869a25-522a-4452-9b57-3fe6be212493",
+    "name": "Job-Cruiser API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "51829675",
+    "_collection_link": "https://go.postman.co/collection/51829675-b8869a25-522a-4452-9b57-3fe6be212493?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "1. Signup",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// 1. Verify the server accepted it",
+              "pm.test(\"Status code is 201 Created\", function () {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "",
+              "// 2. Verify the response structure",
+              "pm.test(\"Response contains token and user_id\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    ",
+              "    pm.expect(jsonData).to.have.property('token');",
+              "    pm.expect(jsonData).to.have.property('user_id');",
+              "    pm.expect(jsonData.message).to.eql(\"User created successfully\");",
+              "    ",
+              "    // 3. Automate the JWT: Save the token to your environment variables",
+              "    pm.environment.set(\"token\", jsonData.token);",
+              "    console.log(\"Token captured and saved to environment!\");",
+              "});"
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"full_name\": \"Test User\",\n    \"primary_email\": \"test@example.com\",\n    \"password\": \"password123\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/api/signup",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "signup"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "2. Login",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Token is received and saved\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('token');",
+              "    ",
+              "    // Save the fresh token",
+              "    pm.environment.set(\"token\", jsonData.token);",
+              "    console.log(\"Login successful, fresh token saved!\");",
+              "});"
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"primary_email\": \"test@example.com\",\n    \"password\": \"password123\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/api/login",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "login"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "3. Fetch Jobs (Paginated)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Pagination structure is correct\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    ",
+              "    // Check that our metadata exists",
+              "    pm.expect(jsonData).to.have.property('page');",
+              "    pm.expect(jsonData).to.have.property('limit');",
+              "    pm.expect(jsonData).to.have.property('data');",
+              "    ",
+              "    // Ensure data is actually an array",
+              "    pm.expect(jsonData.data).to.be.an('array');",
+              "});"
+            ],
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {}
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/jobs?page=1&limit=5",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "jobs"
+          ],
+          "query": [
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "5"
+            }
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}
