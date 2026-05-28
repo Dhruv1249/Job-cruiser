@@ -86,6 +86,116 @@ Authenticates a user and returns a JWT token.
   "error": "Invalid email or password"
 }
 ```
+---
+
+## Google SSO Login
+
+Authenticates a user using Google Single Sign-On and returns a custom JWT token.
+
+* **URL:** `/auth/google`
+* **Method:** `POST`
+* **Authentication Required:** No
+
+### Description
+
+The backend verifies the provided Google `id_token` against the configured Google Client ID.
+After successful verification, the server:
+
+1. Extracts the user's Google profile information.
+2. Creates or updates the user in the database.
+3. Generates and returns a custom JWT token for authenticated requests.
+
+---
+
+### Request Headers
+
+```http
+Content-Type: application/json
+```
+
+---
+
+### Request Body
+
+```json
+{
+  "id_token": "eyJhbGciOiJSUzI1NiIs..."
+}
+```
+
+> **Note:**
+> The `id_token` is the raw JWT received from the Flutter `google_sign_in` package.
+
+---
+
+### Success Response
+
+**Status:** `200 OK` (Existing User)
+
+or
+
+**Status:** `201 Created` (New User)
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "user": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "full_name": "Jane Doe",
+    "primary_email": "jane.doe@gmail.com",
+    "avatar_url": "https://lh3.googleusercontent.com/a/..."
+  }
+}
+```
+
+> **Note:**
+> The returned `token` is your application's custom JWT signed using `JWT_SECRET`.
+> Use this token as a Bearer token for protected endpoints.
+
+Example:
+
+```http
+Authorization: Bearer <your_jwt_token>
+```
+
+---
+
+### Error Responses
+
+#### Missing Token
+
+**Status:** `400 Bad Request`
+
+```json
+{
+  "error": "id_token is required"
+}
+```
+
+---
+
+#### Invalid Google Token
+
+**Status:** `401 Unauthorized`
+
+```json
+{
+  "error": "invalid google token"
+}
+```
+
+---
+
+#### Internal Server Error
+
+**Status:** `500 Internal Server Error`
+
+```json
+{
+  "error": "internal server error"
+}
+```
+
 
 ---
 
