@@ -19,6 +19,7 @@ var schemaQueries = []string{
 		timezone VARCHAR(50) DEFAULT 'Asia/Kolkata',
 		links JSONB DEFAULT '{}'::jsonb,
 		latex_cv TEXT,
+		avatar_url TEXT,
 		cv_updated_at TIMESTAMP,
 		parsed_experience JSONB DEFAULT '[]'::jsonb,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
