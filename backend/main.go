@@ -6,8 +6,9 @@ import (
 	"log"
 	"os"
 	"time"
+
 	"github.com/Dhruv1249/Job-cruiser/backend/db"
-		"github.com/Dhruv1249/Job-cruiser/backend/handlers"
+	"github.com/Dhruv1249/Job-cruiser/backend/handlers"
 	"github.com/Dhruv1249/Job-cruiser/backend/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -26,22 +27,22 @@ func main() {
 	if databaseURL == "" {
 		log.Fatal("CRITICAL ERROR: DATABASE_URL environment variable is missing.")
 	}
-	
+
 	// Create a background context for the database connection process.
 	backgroundContext := context.Background()
 
-	// Initialize a pool of connections to CockroachDB. 
+	// Initialize a pool of connections to CockroachDB.
 	// We use a pool instead of a single connection so multiple users can hit the API at once.
 	databasePool, connectionError := pgxpool.New(backgroundContext, databaseURL)
 	if connectionError != nil {
 		log.Fatalf("CRITICAL ERROR: Failed to connect to the database. Details: %v", connectionError)
 	}
-	
+
 	// 'defer' ensures the database connections are properly closed when the program shuts down.
 	defer databasePool.Close()
-	
+
 	var serverTime time.Time
-	
+
 	// Send a test query to ask the database for its current time.
 	queryError := databasePool.QueryRow(backgroundContext, "SELECT NOW()").Scan(&serverTime)
 	if queryError != nil {
@@ -60,7 +61,7 @@ func main() {
 
 	authHandler := &handlers.AuthHandler{DB: databasePool}
 	jobHandler := &handlers.JobHandler{DB: databasePool}
-	
+
 	// Initialize the default Gin web router with basic logging and crash-recovery built in.
 	webRouter := gin.Default()
 
@@ -68,6 +69,7 @@ func main() {
 	{
 		public.POST("/signup", authHandler.Signup)
 		public.POST("/login", authHandler.Login)
+		public.POST("/auth/google", authHandler.GoogleLogin)
 	}
 	// Protected Routes (Requires JWT)
 	protected := webRouter.Group("/api")
@@ -83,7 +85,7 @@ func main() {
 	}
 
 	fmt.Printf("Starting web server on port %s...\n", serverPort)
-	
+
 	// Turn the server on and lock it in an infinite loop listening for internet traffic.
 	serverError := webRouter.Run(":" + serverPort)
 	if serverError != nil {
