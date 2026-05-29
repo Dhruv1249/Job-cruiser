@@ -18,11 +18,9 @@ type JobHandler struct {
 
 // GetJobs fetches the latest scraped jobs from the database
 func (h *JobHandler) GetJobs(c *gin.Context) {
-	// Get pagination parameters from the URL, with safe defaults
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 
-	// Prevent users from requesting 10,000 jobs at once and crashing your DB
 	if limit > 100 {
 		limit = 100
 	}
@@ -30,14 +28,13 @@ func (h *JobHandler) GetJobs(c *gin.Context) {
 		page = 1
 	}
 
-	// Calculate the offset (e.g., Page 2 with limit 20 means skip the first 20)
 	offset := (page - 1) * limit
 
-	// Inject the variables safely using $1 and $2
+	// Updated query: Replaced salary and score with salary_min, salary_max, currency
 	query := `
-		SELECT id, company_id, title, location, salary, experience_required, 
-		       job_type, is_easy_apply, is_remote, source, url, posted_date, 
-		       tags, score, scraped_at 
+		SELECT id, company_id, title, location, salary_min, salary_max, currency, 
+		       experience_required, job_type, is_easy_apply, is_remote, source, 
+		       url, posted_date, tags, scraped_at 
 		FROM jobs 
 		ORDER BY scraped_at DESC 
 		LIMIT $1 OFFSET $2;
@@ -54,12 +51,14 @@ func (h *JobHandler) GetJobs(c *gin.Context) {
 	var jobs []models.Job
 	for rows.Next() {
 		var j models.Job
+		// Scan updated to match the exact order of the SELECT statement
 		err := rows.Scan(
-			&j.ID, &j.CompanyID, &j.Title, &j.Location, &j.Salary, &j.ExperienceRequired,
-			&j.JobType, &j.IsEasyApply, &j.IsRemote, &j.Source, &j.URL, &j.PostedDate,
-			&j.Tags, &j.Score, &j.ScrapedAt,
+			&j.ID, &j.CompanyID, &j.Title, &j.Location, &j.SalaryMin, &j.SalaryMax, &j.Currency,
+			&j.ExperienceRequired, &j.JobType, &j.IsEasyApply, &j.IsRemote, &j.Source,
+			&j.URL, &j.PostedDate, &j.Tags, &j.ScrapedAt,
 		)
 		if err != nil {
+			log.Printf("Row scan error: %v", err) // Helpful for debugging struct mismatches
 			continue
 		}
 		jobs = append(jobs, j)
@@ -69,7 +68,6 @@ func (h *JobHandler) GetJobs(c *gin.Context) {
 		jobs = []models.Job{}
 	}
 
-	// Send metadata alongside the data so Flutter knows what page it is on
 	c.JSON(http.StatusOK, gin.H{
 		"data":  jobs,
 		"page":  page,

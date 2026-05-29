@@ -61,6 +61,7 @@ func main() {
 
 	authHandler := &handlers.AuthHandler{DB: databasePool}
 	jobHandler := &handlers.JobHandler{DB: databasePool}
+	prefHandler := &handlers.PreferencesHandler{DB: databasePool}
 
 	// Initialize the default Gin web router with basic logging and crash-recovery built in.
 	webRouter := gin.Default()
@@ -76,6 +77,7 @@ func main() {
 	protected.Use(middleware.RequireAuth())
 	{
 		protected.GET("/jobs", jobHandler.GetJobs)
+		protected.POST("/preferences", prefHandler.UpdatePreferences)
 	}
 
 	// Check if a specific network port was requested in the .env file.

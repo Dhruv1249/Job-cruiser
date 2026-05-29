@@ -4,118 +4,100 @@
 
 ---
 
-# Authentication
+## Authentication
 
-## Signup
+### 1. Signup
 
-Creates a new user and returns a JWT token.
+Creates a new user with an email and password, returning a JWT token.
 
-* **URL:** `/signup`
-* **Method:** `POST`
-* **Authentication Required:** No
+- **URL:** `/signup`
+- **Method:** `POST`
+- **Authentication Required:** No
 
-### Request Body
+#### Request Body
 
-```json id="d1a9kq"
+```json
 {
-  "full_name": "John Doe",
   "primary_email": "john@example.com",
   "password": "securepassword123"
 }
 ```
 
-### Success Response
+#### Success Response
 
 **Status:** `201 Created`
 
-```json id="5j8cvm"
+```json
 {
   "message": "User created successfully",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token": "eyJhbGciOiJIUzI1NiIsIn...",
+  "user_id": "uuid-string",
+  "is_new_user": true
+}
+```
+
+#### Error Response
+
+**Status:** `409 Conflict`
+
+```json
+{
+  "error": "Email already exists or database error"
+}
+```
+
+---
+
+### 2. Login
+
+Authenticates an existing user and returns a JWT token.
+
+- **URL:** `/login`
+- **Method:** `POST`
+- **Authentication Required:** No
+
+#### Request Body
+
+```json
+{
+  "primary_email": "john@example.com",
+  "password": "securepassword123"
+}
+```
+
+#### Success Response
+
+**Status:** `200 OK`
+
+```json
+{
+  "message": "Login successful",
+  "token": "eyJhbGciOiJIUzI1NiIsIn...",
   "user_id": "uuid-string"
 }
 ```
 
-### Error Response
-
-**Status:** `400 Bad Request`
-
-```json id="n4r2xy"
-{
-  "error": "Email already exists"
-}
-```
-
----
-
-## Login
-
-Authenticates a user and returns a JWT token.
-
-* **URL:** `/login`
-* **Method:** `POST`
-* **Authentication Required:** No
-
-### Request Body
-
-```json id="8f3vla"
-{
-  "primary_email": "test@example.com",
-  "password": "password123"
-}
-```
-
-### Success Response
-
-**Status:** `200 OK`
-
-```json id="k9z1tr"
-{
-  "message": "Login successful",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "user_id": "15141970-3050-4598-b233-995296c6af72"
-}
-```
-
-### Error Response
+#### Error Response
 
 **Status:** `401 Unauthorized`
 
-```json id="0x7mep"
+```json
 {
-  "error": "Invalid email or password"
+  "error": "Invalid credentials"
 }
 ```
----
-
-## Google SSO Login
-
-Authenticates a user using Google Single Sign-On and returns a custom JWT token.
-
-* **URL:** `/auth/google`
-* **Method:** `POST`
-* **Authentication Required:** No
-
-### Description
-
-The backend verifies the provided Google `id_token` against the configured Google Client ID.
-After successful verification, the server:
-
-1. Extracts the user's Google profile information.
-2. Creates or updates the user in the database.
-3. Generates and returns a custom JWT token for authenticated requests.
 
 ---
 
-### Request Headers
+### 3. Google SSO Login
 
-```http
-Content-Type: application/json
-```
+Authenticates a user via Google. If the user doesn't exist, it creates a new record.
 
----
+- **URL:** `/auth/google`
+- **Method:** `POST`
+- **Authentication Required:** No
 
-### Request Body
+#### Request Body
 
 ```json
 {
@@ -123,119 +105,136 @@ Content-Type: application/json
 }
 ```
 
-> **Note:**
 > The `id_token` is the raw JWT received from the Flutter `google_sign_in` package.
 
----
+#### Success Response
 
-### Success Response
-
-**Status:** `200 OK` (Existing User)
-
-or
-
-**Status:** `201 Created` (New User)
+**Status:** `200 OK`
 
 ```json
 {
+  "message": "Google Login successful",
   "token": "eyJhbGciOiJIUzI1NiIs...",
-  "user": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "full_name": "Jane Doe",
-    "primary_email": "jane.doe@gmail.com",
-    "avatar_url": "https://lh3.googleusercontent.com/a/..."
-  }
+  "user_id": "uuid-string",
+  "is_new_user": true,
+  "suggested_name": "John Doe"
 }
 ```
 
-> **Note:**
-> The returned `token` is your application's custom JWT signed using `JWT_SECRET`.
-> Use this token as a Bearer token for protected endpoints.
+**Notes:**
 
-Example:
+- Use `is_new_user` on the frontend to redirect users to the Preferences onboarding screen.
+- Use `suggested_name` to pre-fill the user's name during onboarding.
 
-```http
-Authorization: Bearer <your_jwt_token>
-```
-
----
-
-### Error Responses
-
-#### Missing Token
-
-**Status:** `400 Bad Request`
-
-```json
-{
-  "error": "id_token is required"
-}
-```
-
----
-
-#### Invalid Google Token
+#### Error Response
 
 **Status:** `401 Unauthorized`
 
 ```json
 {
-  "error": "invalid google token"
+  "error": "Invalid Google token"
 }
 ```
 
 ---
 
-#### Internal Server Error
+## User Settings
 
-**Status:** `500 Internal Server Error`
+### 4. Update Preferences
 
-```json
-{
-  "error": "internal server error"
-}
-```
+Creates or updates a user's job search preferences. This is the primary onboarding endpoint for new users.
 
+- **URL:** `/preferences`
+- **Method:** `POST`
+- **Authentication Required:** Yes (Bearer Token)
 
----
+#### Headers
 
-# Jobs
-
-## Get Jobs (Paginated)
-
-Fetches the latest scraped jobs.
-
-* **URL:** `/jobs?page=1&limit=20`
-* **Method:** `GET`
-* **Authentication Required:** Yes (Bearer Token)
-
-### Headers
-
-```http id="3qu9wn"
+```http
 Authorization: Bearer <your_jwt_token>
 ```
 
-### Query Parameters
+#### Request Body
 
-| Parameter | Type    | Description             | Default |
-| --------- | ------- | ----------------------- | ------- |
-| `page`    | integer | Page number             | `1`     |
-| `limit`   | integer | Number of jobs per page | `20`    |
+```json
+{
+  "full_name": "John Doe",
+  "target_roles": [
+    "Backend Engineer",
+    "Go Developer"
+  ],
+  "work_models": [
+    "remote",
+    "hybrid"
+  ],
+  "min_salary": 120000,
+  "currency": "USD"
+}
+```
 
-### Success Response
+#### Success Response
 
 **Status:** `200 OK`
 
-```json id="y7m2du"
+```json
+{
+  "message": "Preferences saved successfully"
+}
+```
+
+---
+
+## Jobs Feed
+
+### 5. Get Jobs (Paginated)
+
+Fetches the latest scraped jobs from the database.
+
+- **URL:** `/jobs?page=1&limit=20`
+- **Method:** `GET`
+- **Authentication Required:** Yes (Bearer Token)
+
+#### Headers
+
+```http
+Authorization: Bearer <your_jwt_token>
+```
+
+#### Query Parameters
+
+| Parameter | Type | Description | Default |
+|------------|---------|-------------|---------|
+| page | integer | Page number | 1 |
+| limit | integer | Number of jobs per page | 20 |
+
+#### Success Response
+
+**Status:** `200 OK`
+
+```json
 {
   "data": [
     {
       "id": "job-uuid",
-      "title": "Go Developer",
-      "company": "Tech Corp",
-      "location": "Remote",
-      "job_type": "Full Time",
-      "posted_at": "2025-05-20T10:30:00Z"
+      "company_id": "company-uuid",
+      "title": "Senior Go Developer",
+      "location": "New York, NY",
+      "salary_min": 130000,
+      "salary_max": 160000,
+      "currency": "USD",
+      "experience_required": "5+ years",
+      "job_type": "Full-time",
+      "is_easy_apply": true,
+      "is_remote": false,
+      "source": "LinkedIn",
+      "url": "https://linkedin.com/jobs/...",
+      "posted_date": "2 hours ago",
+      "tags": [
+        "golang",
+        "postgres",
+        "docker"
+      ],
+      "scraped_at": "2026-05-29T10:30:00Z"
     }
   ],
   "page": 1,
@@ -243,50 +242,21 @@ Authorization: Bearer <your_jwt_token>
 }
 ```
 
-### Error Response
-
-**Status:** `401 Unauthorized`
-
-```json id="m5a1gh"
-{
-  "error": "Unauthorized"
-}
-```
+> Nullable fields such as `location`, `salary_min`, and `posted_date` may return `null` if the scraper could not find them.
 
 ---
 
-# Authentication Flow
+## General Authentication Flow
 
-1. Create an account using the `/signup` endpoint.
-2. Login using the `/login` endpoint.
-3. Copy the returned JWT token.
-4. Pass the token in the `Authorization` header for protected routes.
+1. Authenticate via one of:
+   - `/signup`
+   - `/login`
+   - `/auth/google`
 
-Example:
+2. Extract the `token` from the JSON response.
 
-```http id="9r4vbc"
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+3. Pass the token in the `Authorization` header for all protected routes:
+
+```http
+Authorization: Bearer <your_jwt_token>
 ```
-
----
-
-# Response Format
-
-All API responses are returned in JSON format.
-
-### Success Example
-
-```json id="e2q7ks"
-{
-  "message": "Success"
-}
-```
-
-### Error Example
-
-```json id="f8n6wp"
-{
-  "error": "Something went wrong"
-}
-```
-
