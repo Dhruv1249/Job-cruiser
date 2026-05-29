@@ -1,82 +1,76 @@
 import json
 import os
-from playwright.sync_api import sync_playwright
-from typing import List, Optional
-from pydantic import BaseModel, Field
-from bs4 import BeautifulSoup
-import google.generativeai as genai
 import time
+import re
+from urllib.parse import urljoin, urlparse
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+from typing import List
 
-class CompanyExtraction(BaseModel):
-    name: str = Field(description="Name of the company")
-    domain: Optional[str] = Field(None, description="Website domain of the company, e.g., stripe.com")
-    description: Optional[str] = Field(None, description="Brief description of what the company does")
-    industry: Optional[str] = Field(None, description="Industry the company operates in")
-    company_size: Optional[str] = Field(None, description="Estimated number of employees, e.g., 10-50, 1000+")
-    hq_location: Optional[str] = Field(None, description="Headquarters location of the company")
-    poc_name: Optional[str] = None
-    poc_email: Optional[str] = None
+# ==========================================
+# 1. TRADITIONAL EXTRACTION LOGIC (NO AI)
+# ==========================================
 
-class JobExtraction(BaseModel):
-    title: str = Field(description="The official job title")
-    location: Optional[str] = Field(None, description="Where the job is located")
-    salary: Optional[str] = Field(None, description="Salary range or exact salary mentioned")
-    experience_required: Optional[str] = Field(None, description="Years of experience required, e.g., '3-5 years'")
-    job_type: Optional[str] = Field(None, description="e.g., Full-time, Part-time, Contract")
-    is_remote: bool = Field(default=False, description="True if the job is remote or work-from-home")
-    tags: List[str] = Field(default_factory=list, description="List of technical skills or keywords (e.g., ['Python', 'React', 'AWS'])")
-
-class CombinedExtraction(BaseModel):
-    company: CompanyExtraction
-    job: JobExtraction
-
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-2.5-flash')
-
-def extract_structured_data(raw_html: str, url: str, source: str) -> dict:
-    print(f"Scraping from {url}...")
+def extract_comprehensive_data(raw_html: str, url: str, source: str) -> dict:
+    """
+    Takes raw HTML and uses BeautifulSoup and Regex to extract all possible 
+    structured data (lists, headings, metadata, emails) without AI.
+    """
+    print(f"Scraping from {url} (Traditional Parsing)...")
     
     soup = BeautifulSoup(raw_html, "html.parser")
     
-    for script in soup(["script", "style", "nav", "footer"]):
-        script.extract()
+    # 1. Extract Meta Information
+    title_tag = soup.find('title')
+    page_title = title_tag.get_text(strip=True) if title_tag else None
+    
+    meta_desc_tag = soup.find('meta', attrs={'name': 'description'})
+    meta_desc = meta_desc_tag['content'] if meta_desc_tag else None
+    
+    # 2. Extract prominent headings (h1, h2) for section titles
+    headings = {
+        "h1": [h.get_text(strip=True) for h in soup.find_all('h1')],
+        "h2": [h.get_text(strip=True) for h in soup.find_all('h2')]
+    }
+    
+    # 3. Clean the HTML for text extraction
+    for element in soup(["script", "style", "nav", "footer", "header", "aside"]):
+        element.extract()
         
     clean_text = soup.get_text(separator="\n", strip=True)
     
-    prompt = f"""
-    You are an expert data extraction assistant. I am providing you with the raw text scraped from a job posting.
-    Source URL: {url}
-    Job Board Source: {source}
+    # 4. Extract standard lists (usually used for Requirements & Benefits)
+    structured_lists = []
+    for ul in soup.find_all('ul'):
+        items = [li.get_text(strip=True) for li in ul.find_all('li') if li.get_text(strip=True)]
+        if items:
+            structured_lists.append(items)
+            
+    # 5. Extract contact emails using Regex
+    email_pattern = r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
+    emails_found = list(set(re.findall(email_pattern, clean_text)))
     
-    Extract the company information and job details from the text below. 
-    If a field is not mentioned in the text, leave it as null/None. Do not make up information.
-    For 'tags', extract the top 5-10 most important technical skills or domain keywords.
-    
-    Raw Job Description Text:
-    ---
-    {clean_text[:10000]} 
-    ---
-    """
-    
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.GenerationConfig(
-            response_mime_type="application/json",
-            response_schema=CombinedExtraction,
-            temperature=0.1, 
-        ),
-    )
-    
-    extracted_data = json.loads(response.text)
-    
-    extracted_data['job']['url'] = url
-    extracted_data['job']['source'] = source
-    extracted_data['job']['raw_desc'] = clean_text 
+    # Combine everything into a comprehensive JSON dictionary
+    extracted_data = {
+        "page_title": page_title,
+        "meta_description": meta_desc,
+        "headings": headings,
+        "structured_lists": structured_lists,
+        "contact_emails": emails_found,
+        "full_text": clean_text,
+        "_metadata": {
+            'url': url,
+            'source': source,
+            'scraped_at': time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'raw_text_length': len(clean_text)
+        }
+    }
     
     return extracted_data
 
-
-# PLAYWRIGHT
+# ==========================================
+# 2. WEB CRAWLER (PLAYWRIGHT)
+# ==========================================
 def fetch_page_html(url: str, page=None) -> str:
     """
     Fetches the HTML of a page. If a Playwright 'page' object is provided, 
@@ -88,6 +82,7 @@ def fetch_page_html(url: str, page=None) -> str:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         return page.content()
         
+    # Standalone mode fallback
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         new_page = browser.new_page()
@@ -96,52 +91,116 @@ def fetch_page_html(url: str, page=None) -> str:
         browser.close()
         return html
 
-
-def process_job_url(url: str, source_name: str, page=None) -> dict:
-
-    raw_html = fetch_page_html(url, page=page)
+# ==========================================
+# 3. DEEP CRAWLING PIPELINE
+# ==========================================
+def extract_links(raw_html: str, base_url: str, allowed_domain: str) -> List[str]:
+    """
+    Finds all href links on a page, normalizes them, and filters them 
+    so we only follow internal links (same domain).
+    """
+    soup = BeautifulSoup(raw_html, "html.parser")
+    valid_links = []
     
-    structured_data = extract_structured_data(raw_html, url, source_name)
-    
-    return structured_data
+    for a_tag in soup.find_all("a", href=True):
+        href = a_tag["href"]
+        # Resolve relative URLs (e.g., /about -> https://company.com/about)
+        full_url = urljoin(base_url, href)
+        # Strip URL fragments (e.g., #section1) to avoid scraping the same page twice
+        full_url = full_url.split("#")[0] 
+        
+        # Ensure we don't crawl external sites (like Twitter, LinkedIn)
+        link_domain = urlparse(full_url).netloc
+        if allowed_domain in link_domain:
+            valid_links.append(full_url)
+            
+    return list(set(valid_links)) # Remove duplicates
 
-def process_multiple_urls(job_listings: List[dict]) -> List[dict]:
+def crawl_site(start_url: str, source_name: str, page, max_pages: int = 5) -> List[dict]:
+    """
+    Crawls a starting URL and its subpages up to a max_pages limit.
+    Uses Breadth-First Search (BFS) to visit links level by level.
+    """
+    allowed_domain = urlparse(start_url).netloc
+    visited = set()
+    queue = [start_url]
+    site_results = []
     
-    results = []
+    print(f"\n--- Starting Deep Crawl for Domain: {allowed_domain} ---")
+    
+    while queue and len(visited) < max_pages:
+        current_url = queue.pop(0)
+        
+        if current_url in visited:
+            continue
+            
+        visited.add(current_url)
+        
+        try:
+            # 1. Fetch HTML
+            raw_html = fetch_page_html(current_url, page=page)
+            
+            # 2. Extract structured data from this page
+            page_data = extract_comprehensive_data(raw_html, current_url, source_name)
+            site_results.append(page_data)
+            
+            # 3. Find more links to add to our queue
+            new_links = extract_links(raw_html, current_url, allowed_domain)
+            for link in new_links:
+                if link not in visited and link not in queue:
+                    queue.append(link)
+                    
+            print(f"   -> Discovered {len(new_links)} internal links. Queue size: {len(queue)}")
+            
+            # Polite delay between page requests
+            time.sleep(2)
+            
+        except Exception as e:
+            print(f"❌ Error processing {current_url}: {e}")
+            
+    print(f"--- Finished crawling {allowed_domain} (Crawled {len(visited)} pages) ---")
+    return site_results
+
+def process_multiple_urls(starting_urls: List[dict], max_pages_per_url: int = 5) -> List[dict]:
+    """
+    Efficiently processes multiple seed URLs, deep crawling each one.
+    """
+    all_results = []
     
     with sync_playwright() as p:
-        print("Launching browser for batch processing...")
+        print("Launching browser for batch deep-crawling...")
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         
-        for item in job_listings:
+        for item in starting_urls:
             url = item.get("url")
             source = item.get("source", "Unknown")
             
-            try:
-                print(f"\n--- Processing: {url} ---")
-                data = process_job_url(url, source, page=page)
-                results.append(data)
-                
-                time.sleep(3) 
-                
-            except Exception as e:
-                print(f"Error processing {url}: {e}")
+            # Initiate deep crawl for this specific target
+            crawled_data = crawl_site(url, source, page, max_pages=max_pages_per_url)
+            all_results.extend(crawled_data)
                 
         browser.close()
         
-    return results
+    return all_results
 
 if __name__ == "__main__":
-
+    # Test with a list of URLs
     TARGET_JOBS = [
         {"url": "https://www.remote3.co", "source": "remote3"},
         {"url": "https://www.hirebasis.com", "source": "HireBasis"},
     ]
     
-    print(f"Starting batch data retrieval for {len(TARGET_JOBS)} URLs...")
+    # max_pages_per_url=3 means it will scrape the initial job post + up to 2 subpages per URL
+    print(f"Starting deep crawling for {len(TARGET_JOBS)} seed URLs...")
     
-    all_results = process_multiple_urls(TARGET_JOBS)
+    # Run the batch retrieval pipeline
+    all_results = process_multiple_urls(TARGET_JOBS, max_pages_per_url=3)
     
-    print(f"\nBATCH RETRIEVAL SUCCESSFUL ({len(all_results)}/{len(TARGET_JOBS)} scraped) ---\n")
-    print(json.dumps(all_results, indent=2))
+    print(f"\n--- ✅ BATCH RETRIEVAL SUCCESSFUL ({len(all_results)} total pages scraped) ---\n")
+    
+    # Saving to file instead of printing due to large output
+    output_filename = "crawled_data_dump.json"
+    with open(output_filename, "w", encoding="utf-8") as f:
+        json.dump(all_results, f, indent=2)
+    print(f"Data saved to {output_filename}")
