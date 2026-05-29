@@ -20,3 +20,14 @@ type Job struct {
 	Tags               any       `json:"tags"` // or json.RawMessage
 	ScrapedAt          time.Time `json:"scraped_at"`
 }
+
+type UserJobMatch struct {
+	UserID          string    `json:"user_id"`
+	JobID           string    `json:"job_id"`
+	MatchScore      int       `json:"match_score"`
+	MatchReasons    []string  `json:"match_reasons"`
+	SuggestedAction string    `json:"suggested_action"`
+	IsDismissed     bool      `json:"is_dismissed"`
+	IsAIMatched     bool      `json:"is_ai_matched"`
+	CreatedAt       time.Time `json:"created_at"`
+}

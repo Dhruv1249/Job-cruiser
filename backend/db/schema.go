@@ -21,6 +21,7 @@ var schemaQueries = []string{
 		avatar_url TEXT,
 		cv_updated_at TIMESTAMP,
 		parsed_experience JSONB DEFAULT '[]'::jsonb,
+		subscription_tier VARCHAR(20) DEFAULT 'free',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`,
 
@@ -142,7 +143,9 @@ var schemaQueries = []string{
 		job_id UUID REFERENCES jobs(id) ON DELETE CASCADE,
 		match_score INTEGER DEFAULT 0,
 		match_reasons JSONB DEFAULT '[]'::jsonb,
+		suggested_action VARCHAR(30) DEFAULT 'review',
 		is_dismissed BOOLEAN DEFAULT false,
+		is_ai_matched BOOLEAN DEFAULT false,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (user_id, job_id)
 	);`,
