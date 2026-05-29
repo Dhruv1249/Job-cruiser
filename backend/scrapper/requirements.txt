@@ -1,0 +1,5 @@
+pydantic
+bs4
+playwright
+google-generativeai
+# after installing playwright, run: playwright install chromium
