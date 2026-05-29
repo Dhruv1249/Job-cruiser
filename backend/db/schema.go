@@ -11,7 +11,6 @@ var schemaQueries = []string{
 	// 1. Core Identity & Templates
 	`CREATE TABLE IF NOT EXISTS users (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		full_name TEXT NOT NULL,
 		primary_email TEXT UNIQUE NOT NULL,
 		password_hash TEXT,
 		phone TEXT,
@@ -35,6 +34,7 @@ var schemaQueries = []string{
 	// 2. User Dependencies
 	`CREATE TABLE IF NOT EXISTS user_preferences (
 		user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+		full_name TEXT,
 		target_roles JSONB DEFAULT '[]'::jsonb,
 		work_models JSONB DEFAULT '[]'::jsonb,
 		min_salary INTEGER DEFAULT 0,
@@ -115,23 +115,36 @@ var schemaQueries = []string{
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`,
 
+	
+
 	`CREATE TABLE IF NOT EXISTS jobs (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
 		title TEXT NOT NULL,
 		location TEXT,
-		salary TEXT,
+		salary_min INTEGER,
+		salary_max INTEGER,
+		currency VARCHAR(10) DEFAULT 'USD',
 		experience_required TEXT,
 		job_type VARCHAR(20),
 		is_easy_apply BOOLEAN DEFAULT false,
 		is_remote BOOLEAN DEFAULT false,
 		source VARCHAR(50) NOT NULL,
-		url TEXT NOT NULL,
+		url TEXT UNIQUE NOT NULL, -- Added UNIQUE
 		posted_date TEXT,
 		tags JSONB DEFAULT '[]'::jsonb,
 		raw_desc TEXT,
-		score INTEGER DEFAULT 0,
 		scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);`,
+
+	`CREATE TABLE IF NOT EXISTS user_job_matches (
+		user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+		job_id UUID REFERENCES jobs(id) ON DELETE CASCADE,
+		match_score INTEGER DEFAULT 0,
+		match_reasons JSONB DEFAULT '[]'::jsonb,
+		is_dismissed BOOLEAN DEFAULT false,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (user_id, job_id)
 	);`,
 
 	// 4. The Pipeline
