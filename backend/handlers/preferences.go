@@ -58,3 +58,36 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Preferences saved successfully"})
 }
+
+// GetPreferences fetches a user's current settings
+func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
+	// Grab the secure user_id injected by the RequireAuth middleware
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	query := `
+		SELECT full_name, target_roles, work_models, min_salary, currency 
+		FROM user_preferences 
+		WHERE user_id = $1;
+	`
+
+	var pref PreferencesRequest
+	err := h.DB.QueryRow(context.Background(), query, userID).Scan(
+		&pref.FullName, &pref.TargetRoles, &pref.WorkModels, &pref.MinSalary, &pref.Currency,
+	)
+
+	if err != nil {
+		// If they haven't set preferences yet, return a clean 200 with null data
+		if err.Error() == "no rows in result set" {
+			c.JSON(http.StatusOK, gin.H{"data": nil, "message": "No preferences set yet"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch preferences"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": pref})
+}
