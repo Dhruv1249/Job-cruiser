@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.flutter_app"
+    namespace = "com.example.job_cruiser"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 

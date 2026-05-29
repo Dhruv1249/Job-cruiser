@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_app/services/api_service.dart';
 import 'preferences.dart' as preferences_page;
 import 'main.dart' show AppColors;
 
@@ -40,10 +41,28 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   preferences_page.PreferenceSummary? _preferenceSummary;
 
+  final ApiService _apiService = ApiService();
+
+  Map<String, dynamic>? _userProfile;
+  bool _isLoadingProfile = true;
+
   @override
   void initState() {
     super.initState();
     _loadSavedPreferences();
+    _loadUserProfile();
+  }
+
+  Future<void> _loadUserProfile() async {
+    final profile = await _apiService.fetchProfile();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _userProfile = profile;
+      _isLoadingProfile = false;
+    });
   }
 
   Future<void> _loadSavedPreferences() async {
@@ -110,8 +129,11 @@ class _ProfilePageState extends State<ProfilePage> {
               shape: BoxShape.circle,
               border: Border.all(color: AppColors.outlineVariant),
             ),
-            child: const Icon(Icons.person_outline,
-                color: AppColors.outline, size: 24),
+            child: const Icon(
+              Icons.person_outline,
+              color: AppColors.outline,
+              size: 24,
+            ),
           ),
           const SizedBox(width: 12),
           const Text(
@@ -129,6 +151,19 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildProfileBento(BuildContext context) {
+    if (_isLoadingProfile) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+    final String fullName = _userProfile?['full_name'] ?? 'Guest User';
+    final String? avatarUrl = _userProfile?['avatar_url'];
+    final String primaryEmail =
+        _userProfile?['primary_email'] ?? 'No email provided';
+
     final bool isMobile = MediaQuery.of(context).size.width < 768;
 
     Widget personalInfoCard = Container(
@@ -139,10 +174,10 @@ class _ProfilePageState extends State<ProfilePage> {
         border: Border.all(color: AppColors.outlineVariant),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha : 0.02),
+            color: Colors.black.withValues(alpha: 0.02),
             blurRadius: 4,
             offset: const Offset(0, 2),
-          )
+          ),
         ],
       ),
       child: Row(
@@ -150,23 +185,37 @@ class _ProfilePageState extends State<ProfilePage> {
           Container(
             width: 80,
             height: 80,
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: AppColors.surfaceContainer,
               shape: BoxShape.circle,
-              image: DecorationImage(
-                image: NetworkImage(
-                    'https://lh3.googleusercontent.com/aida-public/AB6AXuA_EGZpVSHCBxt5lvxRaATVgnuEPDlCaMzipRN6ngkH0rpWNi7YQUECW_45pjTOVrtOche_ONEsLbS6KDugfuFoJh9i0o4-KyEBb8mk2I5JurStO-ZJnwepvlgV1myKPh3B5q9eew41ElkFJzlM_iMnoo1tZPQ2hwzpts9vIANluEkdYcx1LVMvvxaxQTT8Jyb03KMoh83EgVjDI0fzAnKb3cGxpcJiZKq2EMcTI5sPaJAcHqFq4yBxAlqEWiZYgXWI-pOd76aqBD4'),
-                fit: BoxFit.cover,
-              ),
+              image: avatarUrl != null
+                  ? DecorationImage(
+                      image: NetworkImage(avatarUrl),
+                      fit: BoxFit.cover,
+                    )
+                  : null,
             ),
+            child: avatarUrl == null
+                ? Center(
+                    child: Text(
+                      fullName.isNotEmpty ? fullName[0].toUpperCase() : '?',
+                      style: const TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors
+                            .outline, // Matches your fallback icon color
+                      ),
+                    ),
+                  )
+                : null,
           ),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Alex Mercer',
+                Text(
+                  fullName,
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w600,
@@ -174,8 +223,8 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  'Senior Product Marketing Manager',
+                Text(
+                  primaryEmail,
                   style: TextStyle(
                     fontSize: 14,
                     color: AppColors.onSurfaceVariant,
@@ -183,18 +232,23 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
                 const SizedBox(height: 8),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
-                    color: AppColors.tertiaryFixedDim.withValues(alpha : 0.2),
+                    color: AppColors.tertiaryFixedDim.withValues(alpha: 0.2),
                     border: Border.all(color: AppColors.tertiaryFixedDim),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.verified,
-                          color: AppColors.onTertiaryContainer, size: 14),
+                      Icon(
+                        Icons.verified,
+                        color: AppColors.onTertiaryContainer,
+                        size: 14,
+                      ),
                       SizedBox(width: 4),
                       Text(
                         'Identity Verified',
@@ -224,7 +278,7 @@ class _ProfilePageState extends State<ProfilePage> {
             color: Colors.black.withValues(alpha: .05),
             blurRadius: 4,
             offset: const Offset(0, 2),
-          )
+          ),
         ],
       ),
       child: Stack(
@@ -236,7 +290,7 @@ class _ProfilePageState extends State<ProfilePage> {
               width: 128,
               height: 128,
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha : 0.05),
+                color: Colors.white.withValues(alpha: 0.05),
                 shape: BoxShape.circle,
               ),
             ),
@@ -247,8 +301,11 @@ class _ProfilePageState extends State<ProfilePage> {
             children: [
               const Row(
                 children: [
-                  Icon(Icons.trending_up,
-                      color: AppColors.tertiaryFixed, size: 20),
+                  Icon(
+                    Icons.trending_up,
+                    color: AppColors.tertiaryFixed,
+                    size: 20,
+                  ),
                   SizedBox(width: 8),
                   Text(
                     'PROFILE STRENGTH',
@@ -277,17 +334,14 @@ class _ProfilePageState extends State<ProfilePage> {
                   SizedBox(width: 4),
                   Text(
                     '/ 100',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: AppColors.outline,
-                    ),
+                    style: TextStyle(fontSize: 14, color: AppColors.outline),
                   ),
                 ],
               ),
               const SizedBox(height: 12),
               LinearProgressIndicator(
                 value: 0.92,
-                backgroundColor: AppColors.surfaceTint.withValues(alpha : 0.3),
+                backgroundColor: AppColors.surfaceTint.withValues(alpha: 0.3),
                 color: AppColors.tertiaryFixed,
                 minHeight: 4,
                 borderRadius: BorderRadius.circular(2),
@@ -300,11 +354,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
     if (isMobile) {
       return Column(
-        children: [
-          personalInfoCard,
-          const SizedBox(height: 12),
-          strengthCard,
-        ],
+        children: [personalInfoCard, const SizedBox(height: 12), strengthCard],
       );
     } else {
       return Row(
@@ -327,10 +377,10 @@ class _ProfilePageState extends State<ProfilePage> {
         border: Border.all(color: AppColors.outlineVariant),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha : 0.02),
+            color: Colors.black.withValues(alpha: 0.02),
             blurRadius: 4,
             offset: const Offset(0, 2),
-          )
+          ),
         ],
       ),
       child: Row(
@@ -439,7 +489,10 @@ class _ProfilePageState extends State<ProfilePage> {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
                 elevation: 1,
                 textStyle: const TextStyle(
                   fontSize: 12,
@@ -465,10 +518,10 @@ class _ProfilePageState extends State<ProfilePage> {
         border: Border.all(color: AppColors.outlineVariant),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha : 0.02),
+            color: Colors.black.withValues(alpha: 0.02),
             blurRadius: 4,
             offset: const Offset(0, 2),
-          )
+          ),
         ],
       ),
       child: Column(
@@ -489,9 +542,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 onPressed: () => _openPreferences(context),
                 icon: const Icon(Icons.edit, size: 16),
                 label: const Text('Edit Preferences'),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppColors.primary,
-                ),
+                style: TextButton.styleFrom(foregroundColor: AppColors.primary),
               ),
             ],
           ),
@@ -503,13 +554,14 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _openPreferences(BuildContext context) async {
-    final result = await Navigator.of(context).push<preferences_page.PreferenceSummary>(
-      MaterialPageRoute(
-        builder: (_) => preferences_page.SetPreferencesScreen(
-          initialPreferences: _preferenceSummary,
-        ),
-      ),
-    );
+    final result = await Navigator.of(context)
+        .push<preferences_page.PreferenceSummary>(
+          MaterialPageRoute(
+            builder: (_) => preferences_page.SetPreferencesScreen(
+              initialPreferences: _preferenceSummary,
+            ),
+          ),
+        );
 
     if (!mounted || result == null) {
       return;
@@ -532,7 +584,7 @@ class _ProfilePageState extends State<ProfilePage> {
           bottom: isLast
               ? BorderSide.none
               : BorderSide(
-                  color: AppColors.outlineVariant.withValues(alpha : 0.5),
+                  color: AppColors.outlineVariant.withValues(alpha: 0.5),
                 ),
         ),
       ),
@@ -567,7 +619,9 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  List<Widget> _buildPreferenceRows(preferences_page.PreferenceSummary summary) {
+  List<Widget> _buildPreferenceRows(
+    preferences_page.PreferenceSummary summary,
+  ) {
     final entries = <MapEntry<String, String>>[];
 
     if (summary.industries.isNotEmpty) {
@@ -601,10 +655,10 @@ class _ProfilePageState extends State<ProfilePage> {
         border: Border.all(color: AppColors.outlineVariant),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha : 0.02),
+            color: Colors.black.withValues(alpha: 0.02),
             blurRadius: 4,
             offset: const Offset(0, 2),
-          )
+          ),
         ],
       ),
       child: Column(
@@ -632,7 +686,7 @@ class _ProfilePageState extends State<ProfilePage> {
     bool isDestructive = false,
   }) {
     final color = isDestructive ? AppColors.error : AppColors.primary;
-    
+
     return InkWell(
       onTap: () {},
       child: Container(
@@ -641,7 +695,7 @@ class _ProfilePageState extends State<ProfilePage> {
           border: hasBorder
               ? Border(
                   bottom: BorderSide(
-                    color: AppColors.outlineVariant.withValues(alpha : 0.5),
+                    color: AppColors.outlineVariant.withValues(alpha: 0.5),
                   ),
                 )
               : null,
@@ -653,13 +707,7 @@ class _ProfilePageState extends State<ProfilePage> {
               children: [
                 Icon(icon, color: color, size: 24),
                 const SizedBox(width: 12),
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: color,
-                  ),
-                ),
+                Text(title, style: TextStyle(fontSize: 14, color: color)),
               ],
             ),
             if (!isDestructive)
@@ -684,5 +732,5 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
     );
   }
-
 }
+

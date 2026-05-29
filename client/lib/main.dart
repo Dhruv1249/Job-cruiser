@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
 import 'details.dart' as details_page;
 import 'profile.dart';
+import 'auth.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-void main() {
+Future<void> main() async {
+  // Ensure Flutter engine is initialized before loading files
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Load the environment variables
+  await dotenv.load(fileName: ".env");
   runApp(const MyApp());
 }
 
@@ -101,7 +108,7 @@ class MyApp extends StatelessWidget {
           }),
         ),
       ),
-      home: const JobCruiserShell(),
+      home: const AuthScreen(),
     );
   }
 }
