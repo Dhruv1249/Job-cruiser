@@ -10,6 +10,7 @@ import (
 	"github.com/Dhruv1249/Job-cruiser/backend/db"
 	"github.com/Dhruv1249/Job-cruiser/backend/handlers"
 	"github.com/Dhruv1249/Job-cruiser/backend/middleware"
+	"github.com/Dhruv1249/Job-cruiser/backend/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -58,11 +59,28 @@ func main() {
 		log.Fatalf("CRITICAL ERROR: Failed to initialize database schema. Details: %v", schemaError)
 	}
 	println("Database schema initialized.")
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		log.Println("WARNING: GEMINI_API_KEY missing. Premium AI features will fail.")
+	}
+
+	aiMatcherService := &services.AIMatcherService{
+		DB:     databasePool,
+		APIKey: apiKey,
+	}
+	basicMatcherService := &services.BasicMatcherService{
+		DB: databasePool,
+	}
 
 	authHandler := &handlers.AuthHandler{DB: databasePool}
 	jobHandler := &handlers.JobHandler{DB: databasePool}
 	prefHandler := &handlers.PreferencesHandler{DB: databasePool}
 	appHandler := &handlers.ApplicationHandler{DB: databasePool}
+	matchHandler := &handlers.MatchHandler{
+		DB:           databasePool,
+		AIService:    aiMatcherService,
+		BasicService: basicMatcherService,
+	}
 
 	// Initialize the default Gin web router with basic logging and crash-recovery built in.
 	webRouter := gin.Default()
@@ -84,6 +102,7 @@ func main() {
 		protected.POST("/applications", appHandler.CreateApplication)
 		protected.GET("/applications", appHandler.GetUserApplications)
 		protected.PUT("/applications/:id/status", appHandler.UpdateApplicationStatus)
+		protected.POST("/jobs/match", matchHandler.EvaluateJobMatch)
 	}
 
 	// Check if a specific network port was requested in the .env file.
