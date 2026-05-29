@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:logger/logger.dart';
 
@@ -11,7 +12,7 @@ class ApiService {
   // The key we will use to store the JWT in the secure enclave
   static const String _tokenKey = 'jwt_token';
 
-  final String _baseUrl = 'http://localhost:8080/api';
+  final String _baseUrl = dotenv.env['API_BASE_URL'] ?? " ";
 
   ApiService() {
     // Configure the base URL
