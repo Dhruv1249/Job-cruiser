@@ -260,3 +260,174 @@ Authorization: Bearer <your_jwt_token>
 ```http
 Authorization: Bearer <your_jwt_token>
 ```
+
+---
+
+### 6. Get Preferences
+
+Fetches the user's currently saved job search preferences.
+
+- **URL:** `/preferences`
+- **Method:** `GET`
+- **Authentication Required:** Yes (Bearer Token)
+
+#### Headers
+
+```http
+Authorization: Bearer <your_jwt_token>
+```
+
+#### Success Response
+
+**Status:** `200 OK`
+
+```json
+{
+  "data": {
+    "full_name": "John Doe",
+    "target_roles": [
+      "Backend Engineer",
+      "Go Developer"
+    ],
+    "work_models": [
+      "remote",
+      "hybrid"
+    ],
+    "min_salary": 120000,
+    "currency": "USD"
+  }
+}
+```
+
+> If the user has never saved preferences, `data` will return `null`.
+
+---
+
+## Applications (Kanban Pipeline)
+
+### 7. Save / Apply to Job
+
+Adds a job to the user's application pipeline.
+
+- **URL:** `/applications`
+- **Method:** `POST`
+- **Authentication Required:** Yes (Bearer Token)
+
+#### Headers
+
+```http
+Authorization: Bearer <your_jwt_token>
+```
+
+#### Request Body
+
+```json
+{
+  "job_id": "uuid-string-of-the-job",
+  "status": "bookmarked"
+}
+```
+
+**Valid statuses:**
+
+- `bookmarked`
+- `applied`
+- `interviewing`
+- `rejected`
+
+> Defaults to `bookmarked` if omitted.
+
+#### Success Response
+
+**Status:** `201 Created`
+
+```json
+{
+  "message": "Job saved successfully",
+  "application_id": "uuid-string"
+}
+```
+
+#### Error Response
+
+**Status:** `409 Conflict`
+
+```json
+{
+  "error": "Job already saved"
+}
+```
+
+> Returned when the user has already saved the specified job.
+
+---
+
+### 8. Get Pipeline
+
+Fetches all jobs the user has saved, applied to, or interviewed for.
+
+- **URL:** `/applications`
+- **Method:** `GET`
+- **Authentication Required:** Yes (Bearer Token)
+
+#### Headers
+
+```http
+Authorization: Bearer <your_jwt_token>
+```
+
+#### Success Response
+
+**Status:** `200 OK`
+
+```json
+{
+  "data": [
+    {
+      "application_id": "app-uuid",
+      "job_id": "job-uuid",
+      "company_id": "company-uuid",
+      "title": "Senior Go Developer",
+      "location": "New York, NY",
+      "status": "interviewing",
+      "applied_at": "2026-05-29T10:30:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### 9. Update Pipeline Status
+
+Moves a job across the user's Kanban board (for example, from `applied` to `interviewing`).
+
+- **URL:** `/applications/:id/status`
+- **Method:** `PUT`
+- **Authentication Required:** Yes (Bearer Token)
+
+> Replace `:id` with the `application_id`.
+
+#### Headers
+
+```http
+Authorization: Bearer <your_jwt_token>
+```
+
+#### Request Body
+
+```json
+{
+  "status": "interviewing"
+}
+```
+
+#### Success Response
+
+**Status:** `200 OK`
+
+```json
+{
+  "message": "Status updated successfully"
+}
+```
