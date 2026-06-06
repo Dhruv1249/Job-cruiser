@@ -1,206 +1,198 @@
-import json
-import os
-import time
+import asyncio
+import logging
 import re
+import json
 from urllib.parse import urljoin, urlparse
-from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
-from typing import List
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
-# ==========================================
-# 1. TRADITIONAL EXTRACTION LOGIC (NO AI)
-# ==========================================
+# Configure basic logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def extract_comprehensive_data(raw_html: str, url: str, source: str) -> dict:
-    """
-    Takes raw HTML and uses BeautifulSoup and Regex to extract all possible 
-    structured data (lists, headings, metadata, emails) without AI.
-    """
-    print(f"Scraping from {url} (Traditional Parsing)...")
-    
-    soup = BeautifulSoup(raw_html, "html.parser")
-    
-    # 1. Extract Meta Information
-    title_tag = soup.find('title')
-    page_title = title_tag.get_text(strip=True) if title_tag else None
-    
-    meta_desc_tag = soup.find('meta', attrs={'name': 'description'})
-    meta_desc = meta_desc_tag['content'] if meta_desc_tag else None
-    
-    # 2. Extract prominent headings (h1, h2) for section titles
-    headings = {
-        "h1": [h.get_text(strip=True) for h in soup.find_all('h1')],
-        "h2": [h.get_text(strip=True) for h in soup.find_all('h2')]
-    }
-    
-    # 3. Clean the HTML for text extraction
-    for element in soup(["script", "style", "nav", "footer", "header", "aside"]):
-        element.extract()
+class UniversalJobScraper:
+    def __init__(self, base_url, max_pages=50, max_depth=3):
+        """
+        Initializes the scraper with the target job site.
+        Edge Cases Handled: Limits maximum pages and depth to prevent infinite loops.
+        """
+        self.base_url = base_url
+        self.domain = urlparse(base_url).netloc
+        self.max_pages = max_pages
+        self.max_depth = max_depth
         
-    clean_text = soup.get_text(separator="\n", strip=True)
-    
-    # 4. Extract standard lists (usually used for Requirements & Benefits)
-    structured_lists = []
-    for ul in soup.find_all('ul'):
-        items = [li.get_text(strip=True) for li in ul.find_all('li') if li.get_text(strip=True)]
-        if items:
-            structured_lists.append(items)
-            
-    # 5. Extract contact emails using Regex
-    email_pattern = r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
-    emails_found = list(set(re.findall(email_pattern, clean_text)))
-    
-    # Combine everything into a comprehensive JSON dictionary
-    extracted_data = {
-        "page_title": page_title,
-        "meta_description": meta_desc,
-        "headings": headings,
-        "structured_lists": structured_lists,
-        "contact_emails": emails_found,
-        "full_text": clean_text,
-        "_metadata": {
-            'url': url,
-            'source': source,
-            'scraped_at': time.strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'raw_text_length': len(clean_text)
-        }
-    }
-    
-    return extracted_data
+        self.visited_urls = set()
+        self.job_listings = []
+        
+        # Heuristics to identify if a URL is likely a job detail page
+        self.job_url_patterns = re.compile(r'(/jobs?/|/careers?/|/position/|/opening/|jobId=|-job-|-role-)', re.IGNORECASE)
+        
+    async def init_browser(self):
+        """Sets up the headless browser with realistic parameters to bypass basic anti-bot software."""
+        self.playwright = await async_playwright().start()
+        # Launch chromium. Edge Case: Use standard viewport and user-agent to look like a real user.
+        self.browser = await self.playwright.chromium.launch(headless=True)
+        self.context = await self.browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            ignore_https_errors=True
+        )
 
-# ==========================================
-# 2. WEB CRAWLER (PLAYWRIGHT)
-# ==========================================
-def fetch_page_html(url: str, page=None) -> str:
-    """
-    Fetches the HTML of a page. If a Playwright 'page' object is provided, 
-    it reuses it (faster for batching). Otherwise, it spins up a new browser.
-    """
-    print(f"Fetching HTML for {url}...")
-    
-    if page:
-        page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        return page.content()
-        
-    # Standalone mode fallback
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        new_page = browser.new_page()
-        new_page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        html = new_page.content()
-        browser.close()
-        return html
+    async def close_browser(self):
+        """Cleans up browser resources."""
+        await self.context.close()
+        await self.browser.close()
+        await self.playwright.stop()
 
-# ==========================================
-# 3. DEEP CRAWLING PIPELINE
-# ==========================================
-def extract_links(raw_html: str, base_url: str, allowed_domain: str) -> List[str]:
-    """
-    Finds all href links on a page, normalizes them, and filters them 
-    so we only follow internal links (same domain).
-    """
-    soup = BeautifulSoup(raw_html, "html.parser")
-    valid_links = []
-    
-    for a_tag in soup.find_all("a", href=True):
-        href = a_tag["href"]
-        # Resolve relative URLs (e.g., /about -> https://company.com/about)
-        full_url = urljoin(base_url, href)
-        # Strip URL fragments (e.g., #section1) to avoid scraping the same page twice
-        full_url = full_url.split("#")[0] 
-        
-        # Ensure we don't crawl external sites (like Twitter, LinkedIn)
-        link_domain = urlparse(full_url).netloc
-        if allowed_domain in link_domain:
-            valid_links.append(full_url)
-            
-    return list(set(valid_links)) # Remove duplicates
+    def is_internal_link(self, url):
+        """Edge Case: Ensure the crawler doesn't wander off to external sites (like Twitter or Facebook)."""
+        return self.domain in urlparse(url).netloc
 
-def crawl_site(start_url: str, source_name: str, page, max_pages: int = 5) -> List[dict]:
-    """
-    Crawls a starting URL and its subpages up to a max_pages limit.
-    Uses Breadth-First Search (BFS) to visit links level by level.
-    """
-    allowed_domain = urlparse(start_url).netloc
-    visited = set()
-    queue = [start_url]
-    site_results = []
-    
-    print(f"\n--- Starting Deep Crawl for Domain: {allowed_domain} ---")
-    
-    while queue and len(visited) < max_pages:
-        current_url = queue.pop(0)
+    async def crawl(self, start_url):
+        """
+        Breadth-first asynchronous crawler.
+        Edge Cases: Network timeouts, bad links, dynamic loading.
+        """
+        queue = [(start_url, 0)]  # (url, depth)
         
-        if current_url in visited:
-            continue
-            
-        visited.add(current_url)
-        
-        try:
-            # 1. Fetch HTML
-            raw_html = fetch_page_html(current_url, page=page)
-            
-            # 2. Extract structured data from this page
-            page_data = extract_comprehensive_data(raw_html, current_url, source_name)
-            site_results.append(page_data)
-            
-            # 3. Find more links to add to our queue
-            new_links = extract_links(raw_html, current_url, allowed_domain)
-            for link in new_links:
-                if link not in visited and link not in queue:
-                    queue.append(link)
-                    
-            print(f"   -> Discovered {len(new_links)} internal links. Queue size: {len(queue)}")
-            
-            # Polite delay between page requests
-            time.sleep(2)
-            
-        except Exception as e:
-            print(f"❌ Error processing {current_url}: {e}")
-            
-    print(f"--- Finished crawling {allowed_domain} (Crawled {len(visited)} pages) ---")
-    return site_results
+        page = await self.context.new_page()
 
-def process_multiple_urls(starting_urls: List[dict], max_pages_per_url: int = 5) -> List[dict]:
-    """
-    Efficiently processes multiple seed URLs, deep crawling each one.
-    """
-    all_results = []
-    
-    with sync_playwright() as p:
-        print("Launching browser for batch deep-crawling...")
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        
-        for item in starting_urls:
-            url = item.get("url")
-            source = item.get("source", "Unknown")
-            
-            # Initiate deep crawl for this specific target
-            crawled_data = crawl_site(url, source, page, max_pages=max_pages_per_url)
-            all_results.extend(crawled_data)
+        while queue and len(self.visited_urls) < self.max_pages:
+            current_url, depth = queue.pop(0)
+
+            # Edge Case: Prevent duplicate visits and trailing slash discrepancies
+            normalized_url = current_url.rstrip('/')
+            if normalized_url in self.visited_urls or depth > self.max_depth:
+                continue
+
+            self.visited_urls.add(normalized_url)
+            logging.info(f"Crawling (Depth {depth}): {normalized_url}")
+
+            try:
+                # Edge Case: "networkidle" often times out on modern sites due to continuous background trackers.
+                # Changed to "domcontentloaded" and increased the timeout to 60 seconds to be safer.
+                await page.goto(current_url, timeout=60000, wait_until="domcontentloaded")
                 
-        browser.close()
+                # Human-like delay to avoid rate limiting and allow JavaScript frameworks to render data
+                await asyncio.sleep(4)
+                
+                html_content = await page.content()
+                soup = BeautifulSoup(html_content, 'html.parser')
+
+                # 1. If it looks like a job page, extract data
+                if self.job_url_patterns.search(normalized_url):
+                    job_data = self.extract_job_details(soup, normalized_url)
+                    if job_data['title']:  # Only save if we actually found a title
+                        self.job_listings.append(job_data)
+                        logging.info(f"Found Job: {job_data['title']} at {job_data['company']}")
+
+                # 2. Extract links for further crawling
+                if depth < self.max_depth:
+                    links = soup.find_all('a', href=True)
+                    for link in links:
+                        href = link['href']
+                        # Edge Case: Handle relative URLs (e.g., href="/about")
+                        absolute_url = urljoin(current_url, href).split('#')[0] # Remove fragment identifiers
+                        
+                        if self.is_internal_link(absolute_url) and absolute_url not in self.visited_urls:
+                            queue.append((absolute_url, depth + 1))
+
+            except PlaywrightTimeoutError:
+                logging.warning(f"Timeout while loading {current_url}. Skipping.")
+            except Exception as e:
+                logging.error(f"Error processing {current_url}: {e}")
+
+        await page.close()
+
+    def extract_job_details(self, soup, url):
+        """
+        Heuristic-based extractor.
+        Edge Case: Sites use different HTML tags. We check JSON-LD first (industry standard), 
+        then fall back to common HTML class names.
+        """
+        job_data = {
+            'url': url,
+            'title': None,
+            'company': None,
+            'location': None,
+            'description': None
+        }
+
+        # Strategy 1: Check for JSON-LD structured data (Google Jobs standard)
+        script_tags = soup.find_all('script', type='application/ld+json')
+        for tag in script_tags:
+            try:
+                data = json.loads(tag.string if tag.string else "")
+                # Handle both dicts and lists of dicts
+                if isinstance(data, list):
+                    for item in data:
+                        if item.get('@type') == 'JobPosting':
+                            data = item
+                            break
+                
+                if isinstance(data, dict) and data.get('@type') == 'JobPosting':
+                    job_data['title'] = data.get('title')
+                    job_data['company'] = data.get('hiringOrganization', {}).get('name')
+                    job_data['description'] = BeautifulSoup(data.get('description', ''), 'html.parser').get_text(strip=True)
+                    return job_data  # Best quality data, return immediately
+            except json.JSONDecodeError:
+                continue
+
+        # Strategy 2: Fallback to HTML DOM heuristics if JSON-LD isn't present
         
-    return all_results
+        # Find Title (Usually an h1)
+        h1 = soup.find('h1')
+        if h1:
+            job_data['title'] = h1.get_text(strip=True)
+
+        # Find Company (Looking for common class names)
+        company_tag = soup.find(class_=re.compile(r'company|employer', re.I))
+        if company_tag:
+            job_data['company'] = company_tag.get_text(strip=True)
+
+        # Find Location
+        location_tag = soup.find(class_=re.compile(r'location|city', re.I))
+        if location_tag:
+            job_data['location'] = location_tag.get_text(strip=True)
+
+        # Find Description (Usually the largest text block on the page)
+        description_container = soup.find(class_=re.compile(r'description|details|content', re.I))
+        if description_container:
+            job_data['description'] = description_container.get_text(separator='\n', strip=True)
+        else:
+            # Absolute fallback: Get all paragraph text
+            paragraphs = soup.find_all('p')
+            job_data['description'] = '\n'.join([p.get_text(strip=True) for p in paragraphs if len(p.get_text(strip=True)) > 20])
+
+        return job_data
+
+    def save_to_json(self, filename="job_results.json"):
+        """Saves the extracted listings to a JSON file."""
+        if not self.job_listings:
+            logging.info("No jobs found to save.")
+            return
+
+        try:
+            with open(filename, 'w', encoding='utf-8') as output_file:
+                json.dump(self.job_listings, output_file, ensure_ascii=False, indent=4)
+            logging.info(f"Successfully saved {len(self.job_listings)} jobs to {filename}")
+        except Exception as e:
+            logging.error(f"Failed to save JSON: {e}")
+
+async def main():
+    # Example Target: Replace this with the target job board or company career page
+    target_url = "https://hirebasis.com/" # Updated to your target
+    
+    logging.info(f"Starting scraper for {target_url}")
+    
+    # Increased max_pages to allow the crawler to get past the initial category pages
+    scraper = UniversalJobScraper(base_url=target_url, max_pages=100, max_depth=3)
+    
+    await scraper.init_browser()
+    await scraper.crawl(target_url)
+    await scraper.close_browser()
+    
+    scraper.save_to_json("extracted_jobs.json")
 
 if __name__ == "__main__":
-    # Test with a list of URLs
-    TARGET_JOBS = [
-        {"url": "https://www.remote3.co", "source": "remote3"},
-        {"url": "https://www.hirebasis.com", "source": "HireBasis"},
-    ]
-    
-    # max_pages_per_url=3 means it will scrape the initial job post + up to 2 subpages per URL
-    print(f"Starting deep crawling for {len(TARGET_JOBS)} seed URLs...")
-    
-    # Run the batch retrieval pipeline
-    all_results = process_multiple_urls(TARGET_JOBS, max_pages_per_url=3)
-    
-    print(f"\n--- ✅ BATCH RETRIEVAL SUCCESSFUL ({len(all_results)} total pages scraped) ---\n")
-    
-    # Saving to file instead of printing due to large output
-    output_filename = "crawled_data_dump.json"
-    with open(output_filename, "w", encoding="utf-8") as f:
-        json.dump(all_results, f, indent=2)
-    print(f"Data saved to {output_filename}")
+    # Run the async loop
+    asyncio.run(main())
