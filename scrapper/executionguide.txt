@@ -1,0 +1,17 @@
+1.Run the Scraper
+    Downloads job, office, and department data from Greenhouse and stores it in the data/ folder.
+
+2.Build the Index
+    Generates data/index.json containing a summary of all scraped companies.
+
+3.Search Jobs (optional)
+    Enter a keyword when prompted to search through the downloaded jobs locally.
+
+
+Execution Order:
+
+scrapper.py
+↓
+index.py
+↓
+jobsearch.py (optional)
