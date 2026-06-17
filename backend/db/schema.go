@@ -13,6 +13,8 @@ var schemaQueries = []string{
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		primary_email TEXT UNIQUE NOT NULL,
 		password_hash TEXT,
+		google_id TEXT,
+		auth_provider VARCHAR(50) DEFAULT 'local',
 		phone TEXT,
 		location TEXT,
 		timezone VARCHAR(50) DEFAULT 'Asia/Kolkata',
@@ -24,6 +26,9 @@ var schemaQueries = []string{
 		subscription_tier VARCHAR(20) DEFAULT 'free',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`,
+
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT;`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(50) DEFAULT 'local';`,
 
 	`CREATE TABLE IF NOT EXISTS cv_templates (
 		id SERIAL PRIMARY KEY,
