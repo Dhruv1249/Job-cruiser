@@ -258,21 +258,63 @@ def count_nodes(nodes):
     return total
 
 # ==========================================================
+# BACKEND TELEMETRY & INGESTION HELPERS
+# ==========================================================
+
+def start_run():
+    headers = {
+        "X-Ingest-Key": INGEST_API_KEY,
+        "Content-Type": "application/json"
+    }
+    try:
+        url = f"{BACKEND_API_URL}/scraper/start"
+        print(f"Registering scraper run with backend: {url}")
+        resp = session.post(url, headers=headers, timeout=20)
+        if resp.status_code == 200:
+            run_id = resp.json().get("run_id")
+            print(f"Scraper run registered successfully. Run ID: {run_id}")
+            return run_id
+        else:
+            print(f"Backend rejected run registration: Status {resp.status_code}, Response: {resp.text}")
+    except Exception as e:
+        print(f"Failed to register scraper run with backend: {e}")
+    return None
+
+
+def finish_run(run_id, status, error_message=None):
+    headers = {
+        "X-Ingest-Key": INGEST_API_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "run_id": run_id,
+        "status": status,
+        "error_message": error_message
+    }
+    try:
+        url = f"{BACKEND_API_URL}/scraper/finish"
+        resp = session.post(url, json=payload, headers=headers, timeout=20)
+        if resp.status_code == 200:
+            print("Successfully closed scraper run telemetry on backend.")
+        else:
+            print(f"Failed to close scraper run on backend: Status {resp.status_code}, Response: {resp.text}")
+    except Exception as e:
+        print(f"Exception closing scraper run: {e}")
+
+
+# ==========================================================
 # PROCESS COMPANY
 # ==========================================================
 
-def process_company(company):
+def process_company(company, run_id=None):
 
     if not board_exists(company):
-
         return {
             "company": company,
             "status": "invalid"
         }
 
-    print(
-        f"Processing {company}"
-    )
+    print(f"Processing {company}")
 
     company_dir = (
         DATA_DIR / company
@@ -287,61 +329,55 @@ def process_company(company):
     departments = get_departments(company)
 
     metadata = {
-
-        "company":
-            company,
-
-        "scraped_at":
-            datetime.utcnow()
-            .isoformat()
-            + "Z",
-
-        "job_count":
-            len(jobs),
-
-        "office_count":
-            count_nodes(
-                offices.get(
-                    "offices",
-                    []
-                )
-            ),
-
-        "department_count":
-            count_nodes(
-                departments.get(
-                    "departments",
-                    []
-                )
-            ),
-
-        "status":
-            "success"
+        "company": company,
+        "scraped_at": datetime.utcnow().isoformat() + "Z",
+        "job_count": len(jobs),
+        "office_count": count_nodes(offices.get("offices", [])),
+        "department_count": count_nodes(departments.get("departments", [])),
+        "status": "success"
     }
 
     save_json(
         metadata,
-        company_dir /
-        "company.json"
+        company_dir / "company.json"
     )
 
     save_json(
         jobs,
-        company_dir /
-        "jobs_flat.json"
+        company_dir / "jobs_flat.json"
     )
 
     save_json(
         offices,
-        company_dir /
-        "offices_hierarchy.json"
+        company_dir / "offices_hierarchy.json"
     )
 
     save_json(
         departments,
-        company_dir /
-        "departments_hierarchy.json"
+        company_dir / "departments_hierarchy.json"
     )
+
+    # Ingest directly into Go Backend if run_id is active
+    if run_id:
+        ingest_payload = {
+            "run_id": run_id,
+            "company": company,
+            "jobs": jobs
+        }
+        headers = {
+            "X-Ingest-Key": INGEST_API_KEY,
+            "Content-Type": "application/json"
+        }
+        try:
+            ingest_url = f"{BACKEND_API_URL}/scraper/ingest"
+            print(f"Ingesting {len(jobs)} jobs for {company} to backend...")
+            resp = session.post(ingest_url, json=ingest_payload, headers=headers, timeout=60)
+            if resp.status_code == 200:
+                print(f"Ingestion successful for {company}: {resp.json().get('jobs_added')} jobs updated.")
+            else:
+                print(f"Failed ingestion for {company}: Status {resp.status_code}, Response: {resp.text}")
+        except Exception as e:
+            print(f"Exception during ingestion call for {company}: {e}")
 
     return metadata
 
@@ -360,48 +396,52 @@ def main():
         "r",
         encoding="utf-8"
     ) as f:
-
         companies = [
             c.strip()
             for c in f
             if c.strip()
         ]
 
+    # Initialize scraper run telemetry with backend if backend is reachable
+    run_id = start_run()
+    if not run_id:
+        print("Backend run registration skipped or failed. Operating in local-only storage mode.")
+
     results = []
 
-    with ThreadPoolExecutor(
-        max_workers=
-        MAX_WORKERS
-    ) as executor:
+    try:
+        with ThreadPoolExecutor(
+            max_workers=MAX_WORKERS
+        ) as executor:
 
-        futures = {
+            futures = {
+                executor.submit(
+                    process_company,
+                    company,
+                    run_id
+                ): company
+                for company in companies
+            }
 
-            executor.submit(
-                process_company,
-                company
-            ): company
+            for future in as_completed(futures):
+                results.append(future.result())
 
-            for company
-            in companies
-        }
+        # If we successfully completed the scraping, notify the backend
+        if run_id:
+            finish_run(run_id, "success")
 
-        for future in as_completed(
-            futures
-        ):
-
-            results.append(
-                future.result()
-            )
+    except Exception as e:
+        print(f"Scraper run encountered critical error: {e}")
+        if run_id:
+            finish_run(run_id, "failed", str(e))
+        raise e
 
     save_json(
         results,
-        DATA_DIR /
-        "manifest.json"
+        DATA_DIR / "manifest.json"
     )
 
-    print(
-        "\nScraping Complete"
-    )
+    print("\nScraping Complete")
 
 if __name__ == "__main__":
     main()

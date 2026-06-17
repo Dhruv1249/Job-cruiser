@@ -6165,72 +6165,6 @@
           "child_ids": [],
           "jobs": [
             {
-              "absolute_url": "https://www.brex.com/careers/8492798002?gh_jid=8492798002",
-              "data_compliance": [
-                {
-                  "type": "gdpr",
-                  "requires_consent": false,
-                  "requires_processing_consent": false,
-                  "requires_retention_consent": false,
-                  "retention_period": null,
-                  "demographic_data_consent_applies": false
-                }
-              ],
-              "internal_job_id": 6392260002,
-              "location": {
-                "name": "Salt Lake City, Utah, United States"
-              },
-              "metadata": [
-                {
-                  "id": 108496618002,
-                  "name": "Job Post Department",
-                  "value": "Customer Experience",
-                  "value_type": "single_select"
-                }
-              ],
-              "id": 8492798002,
-              "updated_at": "2026-06-10T13:59:16-04:00",
-              "requisition_id": "1787",
-              "title": "Support Specialist",
-              "company_name": "Brex",
-              "first_published": "2026-04-02T18:51:44-04:00",
-              "language": "en",
-              "application_deadline": null
-            },
-            {
-              "absolute_url": "https://www.brex.com/careers/8493078002?gh_jid=8493078002",
-              "data_compliance": [
-                {
-                  "type": "gdpr",
-                  "requires_consent": false,
-                  "requires_processing_consent": false,
-                  "requires_retention_consent": false,
-                  "retention_period": null,
-                  "demographic_data_consent_applies": false
-                }
-              ],
-              "internal_job_id": 6392260002,
-              "location": {
-                "name": "Vancouver, British Columbia, Canada"
-              },
-              "metadata": [
-                {
-                  "id": 108496618002,
-                  "name": "Job Post Department",
-                  "value": "Customer Experience",
-                  "value_type": "single_select"
-                }
-              ],
-              "id": 8493078002,
-              "updated_at": "2026-06-10T13:59:16-04:00",
-              "requisition_id": "1787",
-              "title": "Support Specialist",
-              "company_name": "Brex",
-              "first_published": "2026-04-02T18:54:41-04:00",
-              "language": "en",
-              "application_deadline": null
-            },
-            {
               "absolute_url": "https://www.brex.com/careers/8548765002?gh_jid=8548765002",
               "data_compliance": [
                 {
@@ -8336,72 +8270,6 @@
               "application_deadline": null
             },
             {
-              "absolute_url": "https://www.brex.com/careers/8492798002?gh_jid=8492798002",
-              "data_compliance": [
-                {
-                  "type": "gdpr",
-                  "requires_consent": false,
-                  "requires_processing_consent": false,
-                  "requires_retention_consent": false,
-                  "retention_period": null,
-                  "demographic_data_consent_applies": false
-                }
-              ],
-              "internal_job_id": 6392260002,
-              "location": {
-                "name": "Salt Lake City, Utah, United States"
-              },
-              "metadata": [
-                {
-                  "id": 108496618002,
-                  "name": "Job Post Department",
-                  "value": "Customer Experience",
-                  "value_type": "single_select"
-                }
-              ],
-              "id": 8492798002,
-              "updated_at": "2026-06-10T13:59:16-04:00",
-              "requisition_id": "1787",
-              "title": "Support Specialist",
-              "company_name": "Brex",
-              "first_published": "2026-04-02T18:51:44-04:00",
-              "language": "en",
-              "application_deadline": null
-            },
-            {
-              "absolute_url": "https://www.brex.com/careers/8493078002?gh_jid=8493078002",
-              "data_compliance": [
-                {
-                  "type": "gdpr",
-                  "requires_consent": false,
-                  "requires_processing_consent": false,
-                  "requires_retention_consent": false,
-                  "retention_period": null,
-                  "demographic_data_consent_applies": false
-                }
-              ],
-              "internal_job_id": 6392260002,
-              "location": {
-                "name": "Vancouver, British Columbia, Canada"
-              },
-              "metadata": [
-                {
-                  "id": 108496618002,
-                  "name": "Job Post Department",
-                  "value": "Customer Experience",
-                  "value_type": "single_select"
-                }
-              ],
-              "id": 8493078002,
-              "updated_at": "2026-06-10T13:59:16-04:00",
-              "requisition_id": "1787",
-              "title": "Support Specialist",
-              "company_name": "Brex",
-              "first_published": "2026-04-02T18:54:41-04:00",
-              "language": "en",
-              "application_deadline": null
-            },
-            {
               "absolute_url": "https://www.brex.com/careers/8523637002?gh_jid=8523637002",
               "data_compliance": [
                 {
@@ -9684,39 +9552,6 @@
               "title": "Senior Software Engineer, Product Data Platform",
               "company_name": "Brex",
               "first_published": "2026-02-19T14:33:39-05:00",
-              "language": "en",
-              "application_deadline": null
-            },
-            {
-              "absolute_url": "https://www.brex.com/careers/8443298002?gh_jid=8443298002",
-              "data_compliance": [
-                {
-                  "type": "gdpr",
-                  "requires_consent": false,
-                  "requires_processing_consent": false,
-                  "requires_retention_consent": false,
-                  "retention_period": null,
-                  "demographic_data_consent_applies": false
-                }
-              ],
-              "internal_job_id": 6372690002,
-              "location": {
-                "name": "Seattle, Washington, United States"
-              },
-              "metadata": [
-                {
-                  "id": 108496618002,
-                  "name": "Job Post Department",
-                  "value": "Engineering",
-                  "value_type": "single_select"
-                }
-              ],
-              "id": 8443298002,
-              "updated_at": "2026-06-10T13:59:16-04:00",
-              "requisition_id": "JR101348",
-              "title": "Engineering Program Manager, AI",
-              "company_name": "Brex",
-              "first_published": "2026-02-27T19:16:54-05:00",
               "language": "en",
               "application_deadline": null
             },
@@ -16924,7 +16759,7 @@
                 }
               ],
               "id": 8443298002,
-              "updated_at": "2026-06-10T13:59:16-04:00",
+              "updated_at": "2026-06-16T12:47:05-04:00",
               "requisition_id": "JR101348",
               "title": "Engineering Program Manager, AI",
               "company_name": "Brex",
@@ -20804,138 +20639,6 @@
               "first_published": "2024-10-01T18:51:30-04:00",
               "language": "en",
               "application_deadline": null
-            },
-            {
-              "absolute_url": "https://www.brex.com/careers/8045208002?gh_jid=8045208002",
-              "data_compliance": [
-                {
-                  "type": "gdpr",
-                  "requires_consent": false,
-                  "requires_processing_consent": false,
-                  "requires_retention_consent": false,
-                  "retention_period": null,
-                  "demographic_data_consent_applies": false
-                }
-              ],
-              "internal_job_id": 6184496002,
-              "location": {
-                "name": "San Francisco, California, United States"
-              },
-              "metadata": [
-                {
-                  "id": 108496618002,
-                  "name": "Job Post Department",
-                  "value": "Sales",
-                  "value_type": "single_select"
-                }
-              ],
-              "id": 8045208002,
-              "updated_at": "2026-06-10T13:59:16-04:00",
-              "requisition_id": "JR101190",
-              "title": "Sales Manager, Commercial",
-              "company_name": "Brex",
-              "first_published": "2025-06-27T16:10:20-04:00",
-              "language": "en",
-              "application_deadline": null
-            },
-            {
-              "absolute_url": "https://www.brex.com/careers/8198217002?gh_jid=8198217002",
-              "data_compliance": [
-                {
-                  "type": "gdpr",
-                  "requires_consent": false,
-                  "requires_processing_consent": false,
-                  "requires_retention_consent": false,
-                  "retention_period": null,
-                  "demographic_data_consent_applies": false
-                }
-              ],
-              "internal_job_id": 6184496002,
-              "location": {
-                "name": "Seattle, Washington, United States"
-              },
-              "metadata": [
-                {
-                  "id": 108496618002,
-                  "name": "Job Post Department",
-                  "value": "Sales",
-                  "value_type": "single_select"
-                }
-              ],
-              "id": 8198217002,
-              "updated_at": "2026-06-10T13:59:16-04:00",
-              "requisition_id": "JR101190",
-              "title": "Sales Manager, Commercial",
-              "company_name": "Brex",
-              "first_published": "2025-10-03T16:03:11-04:00",
-              "language": "en",
-              "application_deadline": null
-            },
-            {
-              "absolute_url": "https://www.brex.com/careers/8213586002?gh_jid=8213586002",
-              "data_compliance": [
-                {
-                  "type": "gdpr",
-                  "requires_consent": false,
-                  "requires_processing_consent": false,
-                  "requires_retention_consent": false,
-                  "retention_period": null,
-                  "demographic_data_consent_applies": false
-                }
-              ],
-              "internal_job_id": 6184496002,
-              "location": {
-                "name": "New York, New York, United States"
-              },
-              "metadata": [
-                {
-                  "id": 108496618002,
-                  "name": "Job Post Department",
-                  "value": "Sales",
-                  "value_type": "single_select"
-                }
-              ],
-              "id": 8213586002,
-              "updated_at": "2026-06-10T13:59:16-04:00",
-              "requisition_id": "JR101190",
-              "title": "Sales Manager, Commercial",
-              "company_name": "Brex",
-              "first_published": "2025-10-15T13:15:18-04:00",
-              "language": "en",
-              "application_deadline": null
-            },
-            {
-              "absolute_url": "https://www.brex.com/careers/8549073002?gh_jid=8549073002",
-              "data_compliance": [
-                {
-                  "type": "gdpr",
-                  "requires_consent": false,
-                  "requires_processing_consent": false,
-                  "requires_retention_consent": false,
-                  "retention_period": null,
-                  "demographic_data_consent_applies": false
-                }
-              ],
-              "internal_job_id": 6184496002,
-              "location": {
-                "name": "Salt Lake City, Utah, United States"
-              },
-              "metadata": [
-                {
-                  "id": 108496618002,
-                  "name": "Job Post Department",
-                  "value": "Sales",
-                  "value_type": "single_select"
-                }
-              ],
-              "id": 8549073002,
-              "updated_at": "2026-06-10T13:59:16-04:00",
-              "requisition_id": "JR101190",
-              "title": "Sales Manager, Commercial",
-              "company_name": "Brex",
-              "first_published": "2026-05-13T22:29:07-04:00",
-              "language": "en",
-              "application_deadline": null
             }
           ]
         },
@@ -23731,72 +23434,6 @@
               "title": "Manager, Sales Development",
               "company_name": "Brex",
               "first_published": "2026-03-24T14:12:25-04:00",
-              "language": "en",
-              "application_deadline": null
-            },
-            {
-              "absolute_url": "https://www.brex.com/careers/8492798002?gh_jid=8492798002",
-              "data_compliance": [
-                {
-                  "type": "gdpr",
-                  "requires_consent": false,
-                  "requires_processing_consent": false,
-                  "requires_retention_consent": false,
-                  "retention_period": null,
-                  "demographic_data_consent_applies": false
-                }
-              ],
-              "internal_job_id": 6392260002,
-              "location": {
-                "name": "Salt Lake City, Utah, United States"
-              },
-              "metadata": [
-                {
-                  "id": 108496618002,
-                  "name": "Job Post Department",
-                  "value": "Customer Experience",
-                  "value_type": "single_select"
-                }
-              ],
-              "id": 8492798002,
-              "updated_at": "2026-06-10T13:59:16-04:00",
-              "requisition_id": "1787",
-              "title": "Support Specialist",
-              "company_name": "Brex",
-              "first_published": "2026-04-02T18:51:44-04:00",
-              "language": "en",
-              "application_deadline": null
-            },
-            {
-              "absolute_url": "https://www.brex.com/careers/8493078002?gh_jid=8493078002",
-              "data_compliance": [
-                {
-                  "type": "gdpr",
-                  "requires_consent": false,
-                  "requires_processing_consent": false,
-                  "requires_retention_consent": false,
-                  "retention_period": null,
-                  "demographic_data_consent_applies": false
-                }
-              ],
-              "internal_job_id": 6392260002,
-              "location": {
-                "name": "Vancouver, British Columbia, Canada"
-              },
-              "metadata": [
-                {
-                  "id": 108496618002,
-                  "name": "Job Post Department",
-                  "value": "Customer Experience",
-                  "value_type": "single_select"
-                }
-              ],
-              "id": 8493078002,
-              "updated_at": "2026-06-10T13:59:16-04:00",
-              "requisition_id": "1787",
-              "title": "Support Specialist",
-              "company_name": "Brex",
-              "first_published": "2026-04-02T18:54:41-04:00",
               "language": "en",
               "application_deadline": null
             },

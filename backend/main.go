@@ -76,6 +76,7 @@ func main() {
 	jobHandler := &handlers.JobHandler{DB: databasePool}
 	prefHandler := &handlers.PreferencesHandler{DB: databasePool}
 	appHandler := &handlers.ApplicationHandler{DB: databasePool}
+	ingestHandler := &handlers.IngestHandler{DB: databasePool}
 	matchHandler := &handlers.MatchHandler{
 		DB:           databasePool,
 		AIService:    aiMatcherService,
@@ -91,6 +92,16 @@ func main() {
 		public.POST("/login", authHandler.Login)
 		public.POST("/auth/google", authHandler.GoogleLogin)
 	}
+	
+	// Serverless Ingest & Scrapper Telemetry Routes
+	scraperIngest := webRouter.Group("/api/scraper")
+	scraperIngest.Use(middleware.RequireIngestKey())
+	{
+		scraperIngest.POST("/start", ingestHandler.StartRun)
+		scraperIngest.POST("/ingest", ingestHandler.IngestJobs)
+		scraperIngest.POST("/finish", ingestHandler.FinishRun)
+	}
+
 	// Protected Routes (Requires JWT)
 	protected := webRouter.Group("/api")
 	protected.Use(middleware.RequireAuth())
