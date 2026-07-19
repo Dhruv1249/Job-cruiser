@@ -140,6 +140,8 @@ var schemaQueries = []string{
 		posted_date TEXT,
 		tags JSONB DEFAULT '[]'::jsonb,
 		raw_desc TEXT,
+		seniority VARCHAR(50),
+		summary TEXT,
 		scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`,
 

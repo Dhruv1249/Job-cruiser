@@ -31,7 +31,14 @@ type IngestJobPayload struct {
 	Departments     []string    `json:"departments"`
 	Offices         []string    `json:"offices"`
 	DescriptionText string      `json:"description_text"`
+	Seniority       string      `json:"seniority"`
+	Summary         string      `json:"summary"`
+	TechStack       []string    `json:"tech_stack"`
+	SalaryMin       int         `json:"salary_min"`
+	SalaryMax       int         `json:"salary_max"`
+	Currency        string      `json:"currency"`
 }
+
 
 type IngestRequest struct {
 	RunID   string             `json:"run_id" binding:"required"`
@@ -149,8 +156,16 @@ func (h *IngestHandler) IngestJobs(c *gin.Context) {
 			}
 		}
 		
-		techTags := extractTechTags(job.Title, job.DescriptionText)
-		tags = append(tags, techTags...)
+		if len(job.TechStack) > 0 {
+			for _, ts := range job.TechStack {
+				if ts != "" {
+					tags = append(tags, strings.ToLower(ts))
+				}
+			}
+		} else {
+			techTags := extractTechTags(job.Title, job.DescriptionText)
+			tags = append(tags, techTags...)
+		}
 		
 		tagsJSON, _ := json.Marshal(tags)
 
@@ -171,9 +186,30 @@ func (h *IngestHandler) IngestJobs(c *gin.Context) {
 			expParam = &expRequired
 		}
 
+		var salMinParam, salMaxParam *int
+		if job.SalaryMin > 0 {
+			salMinParam = &job.SalaryMin
+		}
+		if job.SalaryMax > 0 {
+			salMaxParam = &job.SalaryMax
+		}
+
+		curr := job.Currency
+		if curr == "" {
+			curr = "USD"
+		}
+
+		var seniorityParam, summaryParam *string
+		if job.Seniority != "" {
+			seniorityParam = &job.Seniority
+		}
+		if job.Summary != "" {
+			summaryParam = &job.Summary
+		}
+
 		jobQuery := `
-			INSERT INTO jobs (company_id, title, location, is_remote, source, url, tags, raw_desc, job_type, experience_required, scraped_at)
-			VALUES ($1, $2, $3, $4, 'Greenhouse', $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+			INSERT INTO jobs (company_id, title, location, is_remote, source, url, tags, raw_desc, job_type, experience_required, salary_min, salary_max, currency, seniority, summary, scraped_at)
+			VALUES ($1, $2, $3, $4, 'Greenhouse', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
 			ON CONFLICT (url) 
 			DO UPDATE SET
 				title = EXCLUDED.title,
@@ -183,9 +219,14 @@ func (h *IngestHandler) IngestJobs(c *gin.Context) {
 				raw_desc = EXCLUDED.raw_desc,
 				job_type = EXCLUDED.job_type,
 				experience_required = EXCLUDED.experience_required,
+				salary_min = EXCLUDED.salary_min,
+				salary_max = EXCLUDED.salary_max,
+				currency = EXCLUDED.currency,
+				seniority = EXCLUDED.seniority,
+				summary = EXCLUDED.summary,
 				scraped_at = CURRENT_TIMESTAMP;
 		`
-		_, err = tx.Exec(ctx, jobQuery, companyID, job.Title, loc, isRemote, job.AbsoluteURL, tagsJSON, job.DescriptionText, jobType, expParam)
+		_, err = tx.Exec(ctx, jobQuery, companyID, job.Title, loc, isRemote, job.AbsoluteURL, tagsJSON, job.DescriptionText, jobType, expParam, salMinParam, salMaxParam, curr, seniorityParam, summaryParam)
 		if err != nil {
 			log.Printf("Failed to insert job %s: %v", job.Title, err)
 			continue

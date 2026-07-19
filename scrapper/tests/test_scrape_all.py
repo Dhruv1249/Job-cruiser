@@ -1,0 +1,139 @@
+import unittest
+from unittest.mock import Mock, patch
+from scrape_all import normalize_job_post, deduplicate_jobs, run_orchestration
+
+class TestScrapeAllOrchestrator(unittest.TestCase):
+    """
+    Unit tests for the scrape_all orchestrator
+    """
+
+    def test_normalize_job_post_jobspy(self):
+        """
+        Verify that job posts from jobspy are normalized correctly
+        """
+        jobspy_post = Mock()
+        jobspy_post.id = "job-123"
+        jobspy_post.title = "Software Engineer"
+        jobspy_post.company_name = "Notion"
+        jobspy_post.job_url = "https://jobs.notion.so/123"
+        jobspy_post.description = "We are hiring..."
+        
+        mock_location = Mock()
+        mock_location.display_location.return_value = "San Francisco, CA"
+        jobspy_post.location = mock_location
+        
+        mock_date = Mock()
+        mock_date.isoformat.return_value = "2026-07-19"
+        jobspy_post.date_posted = mock_date
+
+        normalized = normalize_job_post(jobspy_post, "linkedin")
+
+        self.assertEqual(normalized["job_id"], "job-123")
+        self.assertEqual(normalized["title"], "Software Engineer")
+        self.assertEqual(normalized["absolute_url"], "https://jobs.notion.so/123")
+        self.assertEqual(normalized["location"], "San Francisco, CA")
+        self.assertEqual(normalized["description_text"], "We are hiring...")
+        self.assertEqual(normalized["updated_at"], "2026-07-19T00:00:00Z")
+
+    def test_deduplicate_jobs(self):
+        """
+        Verify that duplicate jobs based on title, company, and location are removed
+        """
+        jobs = [
+            {
+                "title": "Engineer",
+                "company": "Stripe",
+                "location": "Remote",
+                "absolute_url": "https://stripe.com/1"
+            },
+            {
+                "title": "Engineer",
+                "company": "Stripe",
+                "location": "Remote",
+                "absolute_url": "https://stripe.com/2"
+            },
+            {
+                "title": "Designer",
+                "company": "Stripe",
+                "location": "Remote",
+                "absolute_url": "https://stripe.com/3"
+            }
+        ]
+        deduped = deduplicate_jobs(jobs)
+        self.assertEqual(len(deduped), 2)
+
+    @patch("scrape_all.load_yaml_config")
+    @patch("scrape_all.scrape_jobs")
+    @patch("scrape_all.process_company")
+    @patch("scrape_all.start_run")
+    @patch("scrape_all.finish_run")
+    @patch("scrape_all.save_json")
+    def test_run_orchestration(
+        self,
+        mock_save_json,
+        mock_finish_run,
+        mock_start_run,
+        mock_process_company,
+        mock_scrape_jobs,
+        mock_load_config
+    ):
+        """
+        Verify the complete orchestration pipeline execution
+        """
+        mock_load_config.return_value = {
+            "greenhouse": ["airbnb"],
+            "lever": ["spotify"],
+            "ashby": []
+        }
+        mock_start_run.return_value = "run-123"
+        mock_process_company.return_value = {
+            "company": "airbnb",
+            "platform": "greenhouse",
+            "jobs": [],
+            "status": "success"
+        }
+
+        mock_pandas_df = Mock()
+        mock_pandas_df.itertuples.return_value = []
+        mock_scrape_jobs.return_value = mock_pandas_df
+
+        results = run_orchestration()
+
+        self.assertIn("manifest", results)
+        self.assertEqual(mock_scrape_jobs.call_count, 5)
+        mock_process_company.assert_any_call("airbnb", "greenhouse", "run-123")
+        mock_process_company.assert_any_call("spotify", "lever", "run-123")
+        mock_finish_run.assert_called_once_with("run-123", "success")
+
+    @patch("scrape_all.requests.post")
+    @patch("scrape_all.GEMINI_API_KEY", "test-key")
+    def test_extract_job_details_with_gemini_success(self, mock_post):
+        """
+        Verify extract_job_details_with_gemini returns parsed JSON fields on success
+        """
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "text": '{"seniority": "Senior", "summary": "A senior role", "tech_stack": ["python", "go"], "salary_min": 120000, "salary_max": 150000, "currency": "USD"}'
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        mock_post.return_value = mock_response
+
+        from scrape_all import extract_job_details_with_gemini
+        result = extract_job_details_with_gemini("Staff Engineer", "Looking for a Python dev...")
+
+        self.assertEqual(result["seniority"], "Senior")
+        self.assertEqual(result["summary"], "A senior role")
+        self.assertEqual(result["tech_stack"], ["python", "go"])
+        self.assertEqual(result["salary_min"], 120000)
+        self.assertEqual(result["salary_max"], 150000)
+

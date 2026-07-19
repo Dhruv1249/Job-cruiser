@@ -1,5 +1,19 @@
+"""
+Configuration settings for the job board scraper pipeline.
+"""
+
 import os
 from pathlib import Path
+
+env_path = Path(__file__).resolve().parent / ".env"
+if env_path.exists():
+    with open(env_path, "r") as f:
+        for line in f:
+            stripped_line = line.strip()
+            if stripped_line and not stripped_line.startswith("#"):
+                key, val = stripped_line.split("=", 1)
+                os.environ[key.strip()] = val.strip()
+
 
 BASE_URL = "https://boards-api.greenhouse.io/v1/boards"
 
@@ -17,6 +31,6 @@ RETRY_COUNT = 5
 
 COMPANIES_FILE = "companies.txt"
 
-# Ingestion configuration for serverless deployment
 BACKEND_API_URL = os.environ.get("BACKEND_API_URL", "http://localhost:8080/api")
 INGEST_API_KEY = os.environ.get("INGEST_API_KEY", "dev-ingest-key-12345")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
