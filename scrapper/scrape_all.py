@@ -1,10 +1,13 @@
 """
-Unified scraper orchestrator running both custom ATS clients and JobSpy scrapers.
+Unified scraper orchestrator running custom ATS clients and JobSpy scrapers with twin Gemma 4 AI parallel evaluation and self-growing ATS discovery.
 """
 
 import json
+import os
+import re
+import threading
+import time
 from pathlib import Path
-from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -15,20 +18,35 @@ from config import (
     BACKEND_API_URL,
     INGEST_API_KEY,
     USER_AGENT,
-    GEMINI_API_KEY
+    GEMINI_API_KEY,
+    GEMMA_MOE_MODEL,
+    GEMMA_DENSE_MODEL,
+    DISABLE_AI_EXTRACTION
 )
-from job_sources.greenhouse import GreenhouseClient
-from job_sources.lever import LeverClient
-from job_sources.ashby import AshbyClient
-from job_sources.smartrecruiters import SmartRecruitersClient
-from job_sources.workday import WorkdayClient
 from job_sources.utils import load_yaml_config
 
 from jobspy import scrape_jobs
 from jobspy.model import Site
 
-KEYWORDS = ["software engineer", "developer", "backend", "frontend", "full stack"]
-JOBSPY_SITES = [Site.REMOTEOK, Site.WEWORKREMOTELY, Site.HN_HIRING, Site.THE_MUSE]
+KEYWORDS = ["software", "developer", "engineer", "tech", "systems"]
+JOBSPY_SITES = [
+    Site.REMOTEOK,
+    Site.WEWORKREMOTELY,
+    Site.HN_HIRING,
+    Site.THE_MUSE,
+    Site.HIMALAYAS,
+    Site.JOBSPRESSO,
+    Site.RUST_CAREERS,
+    Site.WORKING_NOMADS,
+    Site.WEB3_CAREER,
+    Site.CRYPTO_JOBS
+]
+
+companies_yaml_lock = threading.Lock()
+gemma_limits = {
+    GEMMA_MOE_MODEL: {"lock": threading.Lock(), "last_called": 0.0},
+    GEMMA_DENSE_MODEL: {"lock": threading.Lock(), "last_called": 0.0}
+}
 
 def start_run() -> str:
     """
@@ -98,55 +116,127 @@ def sanitize_company_name(name: str) -> str:
     clean_name = clean_name.strip()[:50].strip()
     return clean_name if clean_name else "Unknown"
 
-existing_jobs_cache = {}
+def extract_ats_slug(url: str) -> tuple[str, str] | None:
+    """
+    Extract ATS platform and company slug from a job board or career page URL.
+    """
+    if not url:
+        return None
+        
+    url_lower = url.lower()
+    
+    if "boards.greenhouse.io/" in url_lower or "boards-api.greenhouse.io/" in url_lower:
+        parts = [p for p in url.split("/") if p]
+        for i, part in enumerate(parts):
+            if "greenhouse.io" in part and i + 1 < len(parts):
+                return "greenhouse", parts[i+1].split("?")[0].split("#")[0].strip()
+                
+    if "jobs.lever.co/" in url_lower:
+        parts = [p for p in url.split("/") if p]
+        for i, part in enumerate(parts):
+            if "lever.co" in part and i + 1 < len(parts):
+                return "lever", parts[i+1].split("?")[0].split("#")[0].strip()
+                
+    if "jobs.ashbyhq.com/" in url_lower:
+        parts = [p for p in url.split("/") if p]
+        for i, part in enumerate(parts):
+            if "ashbyhq.com" in part and i + 1 < len(parts):
+                return "ashby", parts[i+1].split("?")[0].split("#")[0].strip()
+                
+    if "jobs.smartrecruiters.com/" in url_lower:
+        parts = [p for p in url.split("/") if p]
+        for i, part in enumerate(parts):
+            if "smartrecruiters.com" in part and i + 1 < len(parts):
+                return "smartrecruiters", parts[i+1].split("?")[0].split("#")[0].strip()
+                
+    if ".myworkdaysite.com/" in url_lower:
+        domain = url.split("://")[-1].split("/")[0]
+        if "myworkdaysite.com" in domain:
+            return "workday", domain.split(".")[0].strip()
+            
+    return None
 
-def load_existing_jobs_cache() -> None:
+def register_discovered_company(platform: str, slug: str):
     """
-    Load previously scraped jobs from jobs_flat.json to cache AI extractions.
+    Register a discovered company slug in companies.yaml if not already present.
     """
-    global existing_jobs_cache
-    jobs_flat_path = DATA_DIR / "jobs_flat.json"
-    if not jobs_flat_path.exists():
+    if not slug:
         return
-    try:
-        with open(jobs_flat_path, "r") as f:
-            for job in json.load(f):
-                url = job.get("absolute_url")
-                if url:
-                    existing_jobs_cache[url] = {
-                        "seniority": job.get("seniority", "Unknown"),
-                        "summary": job.get("summary", ""),
-                        "tech_stack": job.get("tech_stack", []),
-                        "salary_min": job.get("salary_min", 0),
-                        "salary_max": job.get("salary_max", 0),
-                        "currency": job.get("currency", "USD")
-                    }
-    except Exception:
-        pass
+        
+    with companies_yaml_lock:
+        config_path = Path(__file__).resolve().parent / "companies.yaml"
+        config = load_yaml_config(str(config_path))
+        
+        if platform not in config:
+            config[platform] = []
+            
+        if slug not in config[platform]:
+            config[platform].append(slug)
+            with open(config_path, "w", encoding="utf-8") as f:
+                for p in ["greenhouse", "lever", "ashby", "smartrecruiters", "workday"]:
+                    f.write(f"{p}:\n")
+                    slugs = sorted(list(set(config.get(p, []))))
+                    for s in slugs:
+                        if s:
+                            f.write(f"  - {s}\n")
+                    f.write("\n")
 
-def extract_job_details_with_gemini(title: str, description: str) -> dict:
+def call_gemma_model(model_name: str, payload: dict) -> dict:
     """
-    Extract structured job details using Gemini API.
+    Call the specified Gemma 4 model while respecting the 30 RPM limit.
     """
-    default_result = {
-        "seniority": "Unknown",
-        "summary": "",
-        "tech_stack": [],
-        "salary_min": 0,
-        "salary_max": 0,
-        "currency": "USD"
-    }
-    if not GEMINI_API_KEY:
-        return default_result
+    limit_info = gemma_limits[model_name]
+    with limit_info["lock"]:
+        elapsed = time.time() - limit_info["last_called"]
+        if elapsed < 2.0:
+            time.sleep(2.0 - elapsed)
+        limit_info["last_called"] = time.time()
+        
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+    response = requests.post(url, json=payload, timeout=45)
+    return response.json() if response.status_code == 200 else {}
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={GEMINI_API_KEY}"
-    prompt = f"Analyze the following job posting.\nTitle: {title}\nDescription: {description}\n\nExtract the following structured details:\n1. Seniority (e.g. Junior, Mid, Senior, Lead, Executive, or Unknown)\n2. A short summary of the role (1-2 sentences)\n3. Tech stack (list of languages/frameworks/tools)\n4. Minimum salary (integer, 0 if not mentioned)\n5. Maximum salary (integer, 0 if not mentioned)\n6. Currency (e.g. USD, EUR, GBP)"
+def extract_and_filter_batch_with_gemma(jobs_batch: list[dict], batch_idx: int) -> list[dict]:
+    """
+    Evaluate a batch of 5 jobs in parallel using twin Gemma 4 models.
+    """
+    if DISABLE_AI_EXTRACTION or not GEMINI_API_KEY:
+        return [
+            {
+                **job,
+                "seniority": "Unknown",
+                "summary": "AI extraction disabled",
+                "tech_stack": [],
+                "salary_min": 0,
+                "salary_max": 0,
+                "currency": "USD"
+            }
+            for job in jobs_batch
+        ]
+
+    model_name = GEMMA_MOE_MODEL if batch_idx % 2 == 0 else GEMMA_DENSE_MODEL
+    
+    prompt = """Analyze the following batch of job postings.
+For each job, determine:
+1. Is it a junior/fresher position (0-3 years of experience required)?
+2. Is the location either Remote (Global) or based in India (remote/onsite/hybrid)?
+
+Only if BOTH conditions are met, mark "is_matched": true and extract:
+- seniority: (Junior, Mid, Senior, Lead, Executive, or Unknown)
+- summary: A short 1-2 sentence description of the role.
+- tech_stack: List of languages, frameworks, or tools mentioned.
+- salary_min: Minimum salary (integer, 0 if not mentioned).
+- salary_max: Maximum salary (integer, 0 if not mentioned).
+- currency: Currency code (e.g. USD, INR, EUR).
+
+For jobs that do not match both conditions, return "is_matched": false and empty/default values for other fields.
+"""
 
     payload = {
         "contents": [
             {
                 "parts": [
-                    {"text": prompt}
+                    {"text": prompt + "\nJobs to evaluate:\n" + json.dumps([{"job_id": j["job_id"], "title": j["title"], "description": j["description_text"]} for j in jobs_batch])}
                 ]
             }
         ],
@@ -155,31 +245,56 @@ def extract_job_details_with_gemini(title: str, description: str) -> dict:
             "responseSchema": {
                 "type": "OBJECT",
                 "properties": {
-                    "seniority": {"type": "STRING"},
-                    "summary": {"type": "STRING"},
-                    "tech_stack": {"type": "ARRAY", "items": {"type": "STRING"}},
-                    "salary_min": {"type": "INTEGER"},
-                    "salary_max": {"type": "INTEGER"},
-                    "currency": {"type": "STRING"}
+                    "results": {
+                        "type": "ARRAY",
+                        "items": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "job_id": {"type": "STRING"},
+                                "is_matched": {"type": "BOOLEAN"},
+                                "seniority": {"type": "STRING"},
+                                "summary": {"type": "STRING"},
+                                "tech_stack": {"type": "ARRAY", "items": {"type": "STRING"}},
+                                "salary_min": {"type": "INTEGER"},
+                                "salary_max": {"type": "INTEGER"},
+                                "currency": {"type": "STRING"}
+                            },
+                            "required": ["job_id", "is_matched", "seniority", "summary", "tech_stack"]
+                        }
+                    }
                 },
-                "required": ["seniority", "summary", "tech_stack"]
+                "required": ["results"]
             }
         }
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=30)
-        if response.status_code == 200:
-            res_json = response.json()
-            candidates = res_json.get("candidates", [])
-            if candidates:
-                text_content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                if text_content:
-                    return json.loads(text_content)
+        res_data = call_gemma_model(model_name, payload)
+        candidates = res_data.get("candidates", [])
+        if candidates:
+            text_content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            if text_content:
+                results = json.loads(text_content).get("results", [])
+                results_map = {r["job_id"]: r for r in results}
+                
+                merged_jobs = []
+                for job in jobs_batch:
+                    ai_res = results_map.get(job["job_id"], {})
+                    if ai_res.get("is_matched", False):
+                        merged_jobs.append({
+                            **job,
+                            "seniority": ai_res.get("seniority", "Unknown"),
+                            "summary": ai_res.get("summary", ""),
+                            "tech_stack": ai_res.get("tech_stack", []),
+                            "salary_min": ai_res.get("salary_min", 0),
+                            "salary_max": ai_res.get("salary_max", 0),
+                            "currency": ai_res.get("currency", "USD")
+                        })
+                return merged_jobs
     except Exception:
         pass
-
-    return default_result
+        
+    return []
 
 def normalize_job_post(job, source: str, company_name: str = None) -> dict:
     """
@@ -221,13 +336,8 @@ def normalize_job_post(job, source: str, company_name: str = None) -> dict:
         departments = getattr(job, "departments", [])
         offices = getattr(job, "offices", [])
 
-    if url in existing_jobs_cache:
-        details = existing_jobs_cache[url]
-    else:
-        details = extract_job_details_with_gemini(title, description)
-
     return {
-        "job_id": job_id,
+        "job_id": str(job_id),
         "title": title,
         "updated_at": updated_at,
         "absolute_url": url,
@@ -236,15 +346,8 @@ def normalize_job_post(job, source: str, company_name: str = None) -> dict:
         "offices": offices,
         "description_text": description,
         "company": sanitize_company_name(company),
-        "source": source,
-        "seniority": details.get("seniority", "Unknown"),
-        "summary": details.get("summary", ""),
-        "tech_stack": details.get("tech_stack", []),
-        "salary_min": details.get("salary_min", 0),
-        "salary_max": details.get("salary_max", 0),
-        "currency": details.get("currency", "USD")
+        "source": source
     }
-
 
 def deduplicate_jobs(jobs: list[dict]) -> list[dict]:
     """
@@ -265,46 +368,28 @@ def deduplicate_jobs(jobs: list[dict]) -> list[dict]:
 
 def process_company(company: str, platform: str, run_id: str = None) -> dict:
     """
-    Fetch and normalize jobs for a company from an ATS platform.
+    Fetch and normalize jobs for a company from an ATS platform using JobSpy.
     """
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": USER_AGENT,
-        "Accept": "application/json"
-    })
-
-    if platform == "greenhouse":
-        client = GreenhouseClient(session=session)
-    elif platform == "lever":
-        client = LeverClient(session=session)
-    elif platform == "ashby":
-        client = AshbyClient(session=session)
-    elif platform == "smartrecruiters":
-        client = SmartRecruitersClient(session=session)
-    elif platform == "workday":
-        client = WorkdayClient(session=session)
-    else:
-        return {
-            "company": company,
-            "platform": platform,
-            "status": "invalid_platform"
-        }
-
-    if not client.board_exists(company):
-        return {
-            "company": company,
-            "platform": platform,
-            "status": "invalid"
-        }
-
-    jobs = client.get_jobs(company)
-    normalized_jobs = [normalize_job_post(j, platform, company) for j in jobs]
+    try:
+        df = scrape_jobs(
+            site_name=[platform],
+            search_term=company,
+            results_wanted=100
+        )
+        jobs = []
+        for row in df.itertuples():
+            normalized = normalize_job_post(row, platform, company)
+            jobs.append(normalized)
+        status = "success"
+    except Exception:
+        jobs = []
+        status = "failed"
 
     return {
         "company": company,
         "platform": platform,
-        "jobs": normalized_jobs,
-        "status": "success"
+        "jobs": jobs,
+        "status": status
     }
 
 def run_orchestration() -> dict:
@@ -312,12 +397,24 @@ def run_orchestration() -> dict:
     Execute the full scraping pipeline and return execution status.
     """
     ensure_dir(DATA_DIR)
-    load_existing_jobs_cache()
+    
+    existing_jobs_cache = {}
+    jobs_flat_path = DATA_DIR / "jobs_flat.json"
+    if jobs_flat_path.exists():
+        try:
+            with open(jobs_flat_path, "r") as f:
+                for job in json.load(f):
+                    url = job.get("absolute_url")
+                    if url:
+                        existing_jobs_cache[url] = job
+        except Exception:
+            pass
+
     config_file_path = Path(__file__).resolve().parent / "companies.yaml"
     config = load_yaml_config(str(config_file_path))
 
     run_id = start_run()
-    all_jobs = []
+    all_raw_jobs = []
     manifest = []
 
     try:
@@ -337,27 +434,58 @@ def run_orchestration() -> dict:
                     "status": res["status"]
                 })
                 if res["status"] == "success":
-                    all_jobs.extend(res["jobs"])
+                    all_raw_jobs.extend(res["jobs"])
 
         for keyword in KEYWORDS:
             try:
                 df = scrape_jobs(
                     site_name=JOBSPY_SITES,
                     search_term=keyword,
-                    results_wanted=30
+                    results_wanted=100,
+                    hours_old=24
                 )
                 for row in df.itertuples():
                     source = getattr(row, "site", "jobspy")
                     normalized = normalize_job_post(row, source)
-                    all_jobs.append(normalized)
+                    all_raw_jobs.append(normalized)
             except Exception:
                 pass
 
-        deduped_jobs = deduplicate_jobs(all_jobs)
-        save_json(deduped_jobs, DATA_DIR / "jobs_flat.json")
+        unique_raw_jobs = deduplicate_jobs(all_raw_jobs)
+        
+        for job in unique_raw_jobs:
+            ats_info = extract_ats_slug(job["absolute_url"])
+            if ats_info:
+                register_discovered_company(ats_info[0], ats_info[1])
+
+        new_jobs = []
+        cached_matched_jobs = []
+        
+        for job in unique_raw_jobs:
+            url = job["absolute_url"]
+            if url in existing_jobs_cache:
+                cached_job = existing_jobs_cache[url]
+                cached_matched_jobs.append(cached_job)
+            else:
+                new_jobs.append(job)
+
+        batches = [new_jobs[i:i + 5] for i in range(0, len(new_jobs), 5)]
+        processed_new_jobs = []
+        
+        with ThreadPoolExecutor(max_workers=2) as ai_executor:
+            ai_futures = []
+            for idx, batch in enumerate(batches):
+                ai_futures.append(
+                    ai_executor.submit(extract_and_filter_batch_with_gemma, batch, idx)
+                )
+            for future in as_completed(ai_futures):
+                processed_new_jobs.extend(future.result())
+
+        final_jobs = deduplicate_jobs(cached_matched_jobs + processed_new_jobs)
+        save_json(final_jobs, DATA_DIR / "jobs_flat.json")
 
         company_jobs = {}
-        for job in deduped_jobs:
+        for job in final_jobs:
             comp = job["company"]
             if comp not in company_jobs:
                 company_jobs[comp] = []

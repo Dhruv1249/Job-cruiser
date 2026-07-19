@@ -1,8 +1,10 @@
+"""
+Local job search helper to find postings by keyword.
+"""
+
 import json
 from pathlib import Path
 from config import DATA_DIR
-
-#DATA_DIR = Path("data")
 
 keyword = input(
     "Enter keyword: "

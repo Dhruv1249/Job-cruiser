@@ -34,3 +34,7 @@ COMPANIES_FILE = "companies.txt"
 BACKEND_API_URL = os.environ.get("BACKEND_API_URL", "http://localhost:8080/api")
 INGEST_API_KEY = os.environ.get("INGEST_API_KEY", "dev-ingest-key-12345")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+GEMMA_MOE_MODEL = "gemma-4-26b-a4b-it"
+GEMMA_DENSE_MODEL = "gemma-4-31b-it"
+DISABLE_AI_EXTRACTION = os.environ.get("DISABLE_AI_EXTRACTION", "false").lower() == "true"

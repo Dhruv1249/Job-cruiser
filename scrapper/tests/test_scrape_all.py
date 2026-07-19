@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import Mock, patch
-from scrape_all import normalize_job_post, deduplicate_jobs, run_orchestration
+from scrape_all import normalize_job_post, deduplicate_jobs, run_orchestration, extract_and_filter_batch_with_gemma
 
 class TestScrapeAllOrchestrator(unittest.TestCase):
     """
@@ -107,9 +107,10 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
 
     @patch("scrape_all.requests.post")
     @patch("scrape_all.GEMINI_API_KEY", "test-key")
-    def test_extract_job_details_with_gemini_success(self, mock_post):
+    @patch("scrape_all.DISABLE_AI_EXTRACTION", False)
+    def test_extract_and_filter_batch_with_gemma_success(self, mock_post):
         """
-        Verify extract_job_details_with_gemini returns parsed JSON fields on success
+        Verify extract_and_filter_batch_with_gemma returns parsed JSON fields on success
         """
         mock_response = Mock()
         mock_response.status_code = 200
@@ -119,7 +120,7 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
                     "content": {
                         "parts": [
                             {
-                                "text": '{"seniority": "Senior", "summary": "A senior role", "tech_stack": ["python", "go"], "salary_min": 120000, "salary_max": 150000, "currency": "USD"}'
+                                "text": '{"results": [{"job_id": "job-123", "is_matched": true, "seniority": "Junior", "summary": "A junior role", "tech_stack": ["python", "go"], "salary_min": 120000, "salary_max": 150000, "currency": "USD"}]}'
                             }
                         ]
                     }
@@ -128,12 +129,17 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         }
         mock_post.return_value = mock_response
 
-        from scrape_all import extract_job_details_with_gemini
-        result = extract_job_details_with_gemini("Staff Engineer", "Looking for a Python dev...")
+        jobs_batch = [
+            {
+                "job_id": "job-123",
+                "title": "Junior Python Dev",
+                "description_text": "Looking for python..."
+            }
+        ]
 
-        self.assertEqual(result["seniority"], "Senior")
-        self.assertEqual(result["summary"], "A senior role")
-        self.assertEqual(result["tech_stack"], ["python", "go"])
-        self.assertEqual(result["salary_min"], 120000)
-        self.assertEqual(result["salary_max"], 150000)
+        result = extract_and_filter_batch_with_gemma(jobs_batch, 0)
 
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["seniority"], "Junior")
+        self.assertEqual(result[0]["summary"], "A junior role")
+        self.assertEqual(result[0]["tech_stack"], ["python", "go"])
