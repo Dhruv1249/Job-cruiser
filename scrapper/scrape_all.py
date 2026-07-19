@@ -181,14 +181,14 @@ def extract_job_details_with_gemini(title: str, description: str) -> dict:
 
     return default_result
 
-def normalize_job_post(job, source: str) -> dict:
+def normalize_job_post(job, source: str, company_name: str = None) -> dict:
     """
     Normalize a job post from any source format into the standard schema.
     """
     if isinstance(job, dict):
         job_id = job.get("job_id") or job.get("id") or ""
         title = job.get("title") or ""
-        company = job.get("company") or job.get("company_name") or ""
+        company = company_name or job.get("company") or job.get("company_name") or ""
         url = job.get("absolute_url") or job.get("job_url") or ""
         location = job.get("location") or ""
         description = job.get("description_text") or job.get("description") or ""
@@ -198,7 +198,7 @@ def normalize_job_post(job, source: str) -> dict:
     else:
         job_id = getattr(job, "id", "") or getattr(job, "job_id", "") or ""
         title = getattr(job, "title", "")
-        company = getattr(job, "company_name", "") or getattr(job, "company", "") or ""
+        company = company_name or getattr(job, "company_name", "") or getattr(job, "company", "") or ""
         url = getattr(job, "job_url", "") or getattr(job, "absolute_url", "") or ""
         
         location_obj = getattr(job, "location", None)
@@ -298,7 +298,7 @@ def process_company(company: str, platform: str, run_id: str = None) -> dict:
         }
 
     jobs = client.get_jobs(company)
-    normalized_jobs = [normalize_job_post(j, platform) for j in jobs]
+    normalized_jobs = [normalize_job_post(j, platform, company) for j in jobs]
 
     return {
         "company": company,
