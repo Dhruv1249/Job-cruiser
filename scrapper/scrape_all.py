@@ -30,6 +30,11 @@ from jobspy.model import Site
 
 KEYWORDS = ["software", "developer", "engineer", "tech", "systems"]
 JOBSPY_SITES = [
+    Site.LINKEDIN,
+    Site.INDEED,
+    Site.GLASSDOOR,
+    Site.GOOGLE,
+    Site.NAUKRI,
     Site.REMOTEOK,
     Site.WEWORKREMOTELY,
     Site.HN_HIRING,
@@ -216,20 +221,30 @@ def extract_and_filter_batch_with_gemma(jobs_batch: list[dict], batch_idx: int) 
 
     model_name = GEMMA_MOE_MODEL if batch_idx % 2 == 0 else GEMMA_DENSE_MODEL
     
-    prompt = """Analyze the following batch of job postings.
-For each job, determine:
-1. Is it a junior/fresher position (0-3 years of experience required)?
-2. Is the location either Remote (Global) or based in India (remote/onsite/hybrid)?
+    prompt = """You are a strict job filter. Analyze the following batch of job postings.
+
+CONDITION 1 — EXPERIENCE LEVEL (STRICT):
+Mark a job as matched ONLY if it explicitly targets candidates with 0-3 years of experience.
+Indicators of a match: "0-3 years", "entry level", "junior", "fresher", "new grad", "associate", "intern", "graduate".
+REJECT the job if the title or description mentions: "Senior", "Staff", "Lead", "Principal", "Director", "Manager", "Head of", "VP", "Executive", "5+ years", "7+ years", or any experience requirement above 3 years.
+If no experience level is stated, use the job title to judge — titles without seniority prefixes AND in a technical individual contributor role are acceptable.
+
+CONDITION 2 — LOCATION (STRICT):
+Match ONLY if the job is:
+- Fully remote with no geographic restriction (Global remote), OR
+- Based in India (any city, remote/onsite/hybrid within India), OR
+- Remote open to India applicants.
+REJECT if it is US-only remote, UK-only, Europe-only, or restricted to a specific non-India country.
 
 Only if BOTH conditions are met, mark "is_matched": true and extract:
-- seniority: (Junior, Mid, Senior, Lead, Executive, or Unknown)
+- seniority: must be exactly one of: "Junior", "Mid", or "Intern". Never return Senior/Lead/Staff/Executive for a matched job.
 - summary: A short 1-2 sentence description of the role.
 - tech_stack: List of languages, frameworks, or tools mentioned.
 - salary_min: Minimum salary (integer, 0 if not mentioned).
 - salary_max: Maximum salary (integer, 0 if not mentioned).
 - currency: Currency code (e.g. USD, INR, EUR).
 
-For jobs that do not match both conditions, return "is_matched": false and empty/default values for other fields.
+For jobs that do not match both conditions, return "is_matched": false.
 """
 
     payload = {
@@ -436,20 +451,59 @@ def run_orchestration() -> dict:
                 if res["status"] == "success":
                     all_raw_jobs.extend(res["jobs"])
 
+        india_pass_sites = [
+            Site.LINKEDIN,
+            Site.INDEED,
+            Site.GLASSDOOR,
+            Site.GOOGLE,
+            Site.NAUKRI,
+        ]
+        remote_pass_sites = [
+            Site.LINKEDIN,
+            Site.INDEED,
+            Site.REMOTEOK,
+            Site.WEWORKREMOTELY,
+            Site.HN_HIRING,
+            Site.THE_MUSE,
+            Site.HIMALAYAS,
+            Site.JOBSPRESSO,
+            Site.RUST_CAREERS,
+            Site.WORKING_NOMADS,
+            Site.WEB3_CAREER,
+            Site.CRYPTO_JOBS
+        ]
+
         for keyword in KEYWORDS:
             try:
-                df = scrape_jobs(
-                    site_name=JOBSPY_SITES,
+                df_india = scrape_jobs(
+                    site_name=india_pass_sites,
                     search_term=keyword,
-                    results_wanted=100,
+                    location="India",
+                    results_wanted=200,
                     hours_old=24
                 )
-                for row in df.itertuples():
+                for row in df_india.itertuples():
                     source = getattr(row, "site", "jobspy")
                     normalized = normalize_job_post(row, source)
                     all_raw_jobs.append(normalized)
             except Exception:
                 pass
+
+            try:
+                df_remote = scrape_jobs(
+                    site_name=remote_pass_sites,
+                    search_term=keyword,
+                    results_wanted=200,
+                    hours_old=24,
+                    is_remote=True
+                )
+                for row in df_remote.itertuples():
+                    source = getattr(row, "site", "jobspy")
+                    normalized = normalize_job_post(row, source)
+                    all_raw_jobs.append(normalized)
+            except Exception:
+                pass
+
 
         unique_raw_jobs = deduplicate_jobs(all_raw_jobs)
         
