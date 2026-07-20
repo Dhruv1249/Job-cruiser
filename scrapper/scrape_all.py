@@ -325,6 +325,13 @@ For jobs that do not match both conditions, return "is_matched": false.
     except Exception as e:
         print(f"[AI Evaluation Error] Batch {batch_idx + 1} via {model_name} failed: {e}", flush=True)
         
+STRICT_EXCLUSION_PATTERNS = [
+    "us remote", "u.s. remote", "usa remote", "uk remote", "u.k. remote", "eu remote", "europe remote",
+    "us only", "u.s. only", "usa only", "uk only", "u.k. only", "eu only", "europe only",
+    "us residents", "us citizens", "us candidates", "us timezones", "est only", "pst only",
+    "north america"
+]
+
 REJECT_LOCATION_KEYWORDS = [
     "united states", "us", "u.s.", "usa", "san francisco", "new york", "austin", "seattle",
     "boston", "chicago", "los angeles", "united kingdom", "uk", "u.k.", "london", "germany",
@@ -334,7 +341,9 @@ REJECT_LOCATION_KEYWORDS = [
 
 ACCEPT_LOCATION_KEYWORDS = [
     "india", "bengaluru", "bangalore", "hyderabad", "pune", "mumbai", "delhi", "noida",
-    "gurgaon", "chennai", "remote", "global", "worldwide", "anywhere", "work from home"
+    "gurgaon", "chennai", "remote", "global", "worldwide", "anywhere", "work from home",
+    "wfh", "work-from-home", "flexible", "distributed", "virtual", "telecommute",
+    "home-based", "home based"
 ]
 
 def is_location_in_scope(location_str: str) -> bool:
@@ -346,6 +355,10 @@ def is_location_in_scope(location_str: str) -> bool:
         
     loc_lower = location_str.lower()
     
+    for exclusion in STRICT_EXCLUSION_PATTERNS:
+        if exclusion in loc_lower:
+            return False
+
     for accept in ACCEPT_LOCATION_KEYWORDS:
         if accept in loc_lower:
             return True
