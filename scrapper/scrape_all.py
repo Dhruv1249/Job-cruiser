@@ -28,7 +28,128 @@ from job_sources.utils import load_yaml_config
 from jobspy import scrape_jobs
 from jobspy.model import Site
 
-KEYWORDS = ["software", "developer", "engineer", "tech", "systems"]
+THROTTLE_SENSITIVE_KEYWORD = "software engineer"
+KEYWORDS = [
+    "backend engineer",
+    "backend developer",
+    "software engineer backend",
+    "backend intern",
+    "junior backend engineer",
+    "node.js developer",
+    "express.js developer",
+    "api developer",
+    "rest api developer",
+    "microservices engineer",
+    "distributed systems engineer",
+    "cloud backend engineer",
+    "server-side developer",
+    "platform backend engineer",
+    "full stack engineer",
+    "full stack developer",
+    "fullstack developer",
+    "mern stack developer",
+    "next.js developer",
+    "react developer",
+    "frontend engineer",
+    "javascript developer",
+    "typescript developer",
+    "software developer",
+    "web developer",
+    "cloud engineer",
+    "cloud developer",
+    "cloud infrastructure engineer",
+    "cloud software engineer",
+    "aws engineer",
+    "aws developer",
+    "gcp engineer",
+    "google cloud engineer",
+    "cloud platform engineer",
+    "devops engineer",
+    "devops intern",
+    "junior devops engineer",
+    "platform engineer",
+    "infrastructure engineer",
+    "site reliability engineer",
+    "sre intern",
+    "build engineer",
+    "release engineer",
+    "ci/cd engineer",
+    "kubernetes engineer",
+    "docker engineer",
+    "container platform engineer",
+    "cloud native engineer",
+    "kubernetes developer",
+    "systems engineer",
+    "systems programmer",
+    "systems software engineer",
+    "kernel engineer",
+    "kernel developer",
+    "operating systems engineer",
+    "embedded systems engineer",
+    "low level software engineer",
+    "firmware engineer",
+    "rust developer",
+    "rust systems engineer",
+    "rust backend engineer",
+    "rust systems developer",
+    "c developer",
+    "c systems programmer",
+    "systems research engineer",
+    "ai infrastructure engineer",
+    "ai platform engineer",
+    "ml infrastructure engineer",
+    "mlops engineer",
+    "ml platform engineer",
+    "ai backend engineer",
+    "ai systems engineer",
+    "genai infrastructure engineer",
+    "python developer",
+    "python backend engineer",
+    "fastapi developer",
+    "python software engineer",
+    "observability engineer",
+    "monitoring engineer",
+    "reliability engineer",
+    "automation engineer",
+    "infrastructure automation engineer",
+    "devops automation engineer",
+    "forward deployed engineer",
+    "forward deployed software engineer",
+    "founding engineer",
+    "founding software engineer",
+    "founding backend engineer",
+    "founding full stack engineer",
+    "early stage engineer",
+    "startup software engineer",
+    "startup backend engineer",
+    "software engineer i",
+    "graduate software engineer",
+    "new grad software engineer",
+    "software engineer intern",
+    "software development engineer",
+    "sde i",
+    "graduate backend engineer",
+    "graduate cloud engineer",
+    "graduate devops engineer",
+    "entry level software engineer",
+    "infrastructure software engineer",
+    "platform software engineer",
+    "cloud platform developer",
+    "infrastructure developer",
+    "reliability platform engineer",
+    "backend engineer new grad",
+    "cloud engineer entry level",
+    "devops engineer graduate",
+    "platform engineer new grad",
+    "sre new grad",
+    "kubernetes engineer junior",
+    "aws backend engineer",
+    "software engineer cloud",
+    "software engineer infrastructure",
+    "software engineer",
+]
+AI_FILTER_BATCH_SIZE = 15
+DESCRIPTION_FILTER_CHARS = 200
 JOBSPY_SITES = [
     Site.LINKEDIN,
     Site.INDEED,
@@ -210,7 +331,8 @@ def call_gemma_model(model_name: str, payload: dict) -> dict:
 
 def extract_and_filter_batch_with_gemma(jobs_batch: list[dict], batch_idx: int) -> list[dict]:
     """
-    Evaluate a batch of 5 jobs in parallel using twin Gemma 4 models.
+    Evaluate a batch of jobs using twin Gemma 4 models. Descriptions are truncated to
+    DESCRIPTION_FILTER_CHARS characters to stay within the 16K TPM per-model budget.
     """
     if DISABLE_AI_EXTRACTION or not GEMINI_API_KEY:
         return [
@@ -258,7 +380,7 @@ For jobs that do not match both conditions, return "is_matched": false.
         "contents": [
             {
                 "parts": [
-                    {"text": prompt + "\nJobs to evaluate:\n" + json.dumps([{"job_id": j["job_id"], "title": j["title"], "description": j["description_text"]} for j in jobs_batch])}
+                    {"text": prompt + "\nJobs to evaluate:\n" + json.dumps([{"job_id": j["job_id"], "title": j["title"], "location": j["location"], "description": (j["description_text"] or "")[:DESCRIPTION_FILTER_CHARS]} for j in jobs_batch])}
                 ]
             }
         ],
@@ -325,49 +447,65 @@ For jobs that do not match both conditions, return "is_matched": false.
     except Exception as e:
         print(f"[AI Evaluation Error] Batch {batch_idx + 1} via {model_name} failed: {e}", flush=True)
         
-STRICT_EXCLUSION_PATTERNS = [
-    "us remote", "u.s. remote", "usa remote", "uk remote", "u.k. remote", "eu remote", "europe remote",
-    "us only", "u.s. only", "usa only", "uk only", "u.k. only", "eu only", "europe only",
-    "us residents", "us citizens", "us candidates", "us timezones", "est only", "pst only",
-    "north america"
-]
-
-REJECT_LOCATION_KEYWORDS = [
-    "united states", "us", "u.s.", "usa", "san francisco", "new york", "austin", "seattle",
-    "boston", "chicago", "los angeles", "united kingdom", "uk", "u.k.", "london", "germany",
-    "berlin", "france", "paris", "canada", "toronto", "vancouver", "australia", "sydney",
-    "singapore", "netherlands", "amsterdam", "brazil", "spain", "madrid"
-]
-
-ACCEPT_LOCATION_KEYWORDS = [
+INDIAN_LOCATIONS = [
     "india", "bengaluru", "bangalore", "hyderabad", "pune", "mumbai", "delhi", "noida",
-    "gurgaon", "chennai", "remote", "global", "worldwide", "anywhere", "work from home",
-    "wfh", "work-from-home", "flexible", "distributed", "virtual", "telecommute",
-    "home-based", "home based"
+    "gurgaon", "gurugram", "chennai", "kolkata", "ahmedabad", "indore", "kochi", "trivandrum",
+    "chandigarh", "jaipur", "coimbatore", "cochin", "thiruvananthapuram", "karnataka",
+    "telangana", "maharashtra", "tamil nadu", "haryana", "uttar pradesh", "kerala",
+    "west bengal", "gujarat", "punjab", "rajasthan"
 ]
 
-def is_location_in_scope(location_str: str) -> bool:
+REMOTE_INDICATORS = [
+    "remote", "wfh", "work from home", "work-from-home", "global", "worldwide", "anywhere",
+    "flexible", "distributed", "virtual", "telecommute", "home-based", "home based", "everywhere"
+]
+
+EXPLICIT_NON_INDIA_RESTRICTIONS = [
+    "us citizenship required", "us citizen required", "us resident only", "must reside in us",
+    "must reside in the us", "must reside in the united states", "must reside in uk",
+    "must reside in canada", "us security clearance", "active secret clearance",
+    "top secret clearance", "us time zone required", "us timezone required", "est timezone only",
+    "pst timezone only", "us/canada only", "canada only", "us remote only", "u.s. remote only",
+    "uk remote only", "eu remote only", "europe remote only"
+]
+
+NON_INDIA_ONSITE_LOCATIONS = [
+    "san francisco", "new york", "austin", "seattle", "boston", "chicago", "los angeles",
+    "london", "berlin", "paris", "toronto", "vancouver", "sydney", "singapore", "amsterdam",
+    "madrid", "united states", "united kingdom", "germany", "france", "canada", "australia",
+    "netherlands", "spain"
+]
+
+def is_location_in_scope(location_str: str, is_remote: bool = False) -> bool:
     """
-    Check if a job location is within scope (India or Global Remote) and not country-restricted to non-India locations.
+    Classify if a job location is in scope (India or Global Remote).
+
+    Accept only when:
+      - location is empty/unknown (benefit of the doubt)
+      - location explicitly names an Indian city/state/region
+      - job carries a remote/WFH indicator AND is not restricted to a non-India country via
+        an explicit phrase (e.g. "US Remote Only"), city names alone do not block remote jobs
+
+    Reject everything else by default, including any non-empty location with no India/remote signal.
     """
     if not location_str:
         return True
-        
-    loc_lower = location_str.lower()
-    
-    for exclusion in STRICT_EXCLUSION_PATTERNS:
-        if exclusion in loc_lower:
-            return False
 
-    for accept in ACCEPT_LOCATION_KEYWORDS:
-        if accept in loc_lower:
+    loc_lower = location_str.lower()
+
+    if any(excl in loc_lower for excl in EXPLICIT_NON_INDIA_RESTRICTIONS):
+        return False
+
+    for indian_loc in INDIAN_LOCATIONS:
+        if indian_loc in loc_lower:
             return True
-            
-    for reject in REJECT_LOCATION_KEYWORDS:
-        if reject in loc_lower:
-            return False
-            
-    return True
+
+    has_remote_indicator = is_remote or any(rem in loc_lower for rem in REMOTE_INDICATORS)
+    if has_remote_indicator:
+        return True
+
+    return False
+
 
 def normalize_job_post(job, source: str, company_name: str = None) -> dict:
     """
@@ -452,7 +590,8 @@ def process_company(company: str, platform: str, run_id: str = None) -> dict:
         jobs = []
         for row in df.itertuples():
             normalized = normalize_job_post(row, platform, company)
-            if is_location_in_scope(normalized["location"]):
+            is_remote_flag = getattr(row, "is_remote", False) or "remote" in normalized["location"].lower()
+            if is_location_in_scope(normalized["location"], is_remote_flag):
                 jobs.append(normalized)
         status = "success"
     except Exception:
@@ -510,14 +649,30 @@ def run_orchestration() -> dict:
                 if res["status"] == "success":
                     all_raw_jobs.extend(res["jobs"])
 
-        india_pass_sites = [
+        throttle_sensitive_india_sites = [
             Site.LINKEDIN,
+            Site.GLASSDOOR,
+        ]
+        throttle_sensitive_remote_sites = [
+            Site.LINKEDIN,
+            Site.GLASSDOOR,
+        ]
+        high_volume_india_sites = [
             Site.INDEED,
             Site.GOOGLE,
+            Site.NAUKRI,
+            Site.AMAZON,
+            Site.MICROSOFT,
         ]
-        remote_pass_sites = [
-            Site.LINKEDIN,
+        high_volume_remote_sites = [
             Site.INDEED,
+            Site.DICE,
+            Site.SIMPLYHIRED,
+            Site.BUILTIN,
+            Site.WELLFOUND,
+            Site.LEVELSFYI,
+        ]
+        niche_remote_sites = [
             Site.REMOTEOK,
             Site.WEWORKREMOTELY,
             Site.HN_HIRING,
@@ -527,7 +682,10 @@ def run_orchestration() -> dict:
             Site.RUST_CAREERS,
             Site.WORKING_NOMADS,
             Site.WEB3_CAREER,
-            Site.CRYPTO_JOBS
+            Site.CRYPTO_JOBS,
+            Site.OTTA,
+            Site.CORD,
+            Site.DIRECT_CAREERS,
         ]
 
         board_raw_jobs_lock = threading.Lock()
@@ -552,7 +710,8 @@ def run_orchestration() -> dict:
                 for row in df.itertuples():
                     source = getattr(row, "site", site.value)
                     normalized = normalize_job_post(row, source)
-                    if is_location_in_scope(normalized["location"]):
+                    is_remote_flag = is_remote or getattr(row, "is_remote", False) or "remote" in normalized["location"].lower()
+                    if is_location_in_scope(normalized["location"], is_remote_flag):
                         scraped.append(normalized)
                 if scraped:
                     with board_raw_jobs_lock:
@@ -562,12 +721,24 @@ def run_orchestration() -> dict:
 
         board_futures = []
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as board_executor:
+            for site in throttle_sensitive_india_sites:
+                board_futures.append(
+                    board_executor.submit(scrape_board_site_keyword, site, THROTTLE_SENSITIVE_KEYWORD, "India", False)
+                )
+            for site in throttle_sensitive_remote_sites:
+                board_futures.append(
+                    board_executor.submit(scrape_board_site_keyword, site, THROTTLE_SENSITIVE_KEYWORD, None, True)
+                )
             for keyword in KEYWORDS:
-                for site in india_pass_sites:
+                for site in high_volume_india_sites:
                     board_futures.append(
                         board_executor.submit(scrape_board_site_keyword, site, keyword, "India", False)
                     )
-                for site in remote_pass_sites:
+                for site in high_volume_remote_sites:
+                    board_futures.append(
+                        board_executor.submit(scrape_board_site_keyword, site, keyword, None, True)
+                    )
+                for site in niche_remote_sites:
                     board_futures.append(
                         board_executor.submit(scrape_board_site_keyword, site, keyword, None, True)
                     )
@@ -596,7 +767,7 @@ def run_orchestration() -> dict:
             else:
                 new_jobs.append(job)
 
-        batches = [new_jobs[i:i + 5] for i in range(0, len(new_jobs), 5)]
+        batches = [new_jobs[i:i + AI_FILTER_BATCH_SIZE] for i in range(0, len(new_jobs), AI_FILTER_BATCH_SIZE)]
         processed_new_jobs = []
         
         print(f"[AI Phase] Total raw jobs: {len(unique_raw_jobs)}. Uncached new jobs to evaluate: {len(new_jobs)} across {len(batches)} batches.", flush=True)

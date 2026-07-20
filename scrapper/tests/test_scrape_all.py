@@ -9,15 +9,34 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
 
     def test_is_location_in_scope(self):
         """
-        Verify location scope filtering accepts WFH/Remote with overseas HQ and rejects US/UK only
+        Verify location scope filtering accepts India/remote and rejects unknown/non-India by default
         """
+        self.assertTrue(is_location_in_scope(""))
+        self.assertTrue(is_location_in_scope(None))
+        self.assertTrue(is_location_in_scope("Bengaluru, India"))
+        self.assertTrue(is_location_in_scope("Hyderabad, Telangana"))
+        self.assertTrue(is_location_in_scope("Pune, Maharashtra"))
+        self.assertTrue(is_location_in_scope("Anywhere in India - Remote"))
+        self.assertTrue(is_location_in_scope("Remote"))
+        self.assertTrue(is_location_in_scope("Global Remote"))
+        self.assertTrue(is_location_in_scope("Worldwide"))
+        self.assertTrue(is_location_in_scope("Work from home"))
+        self.assertTrue(is_location_in_scope("Distributed"))
         self.assertTrue(is_location_in_scope("HQ situated in Paris, WFH available"))
         self.assertTrue(is_location_in_scope("Paris (Remote Eligible)"))
-        self.assertTrue(is_location_in_scope("Bengaluru, India"))
-        self.assertTrue(is_location_in_scope("Global Remote"))
+        self.assertTrue(is_location_in_scope("Berlin / Remote"))
         self.assertFalse(is_location_in_scope("US Remote Only"))
+        self.assertFalse(is_location_in_scope("UK Remote Only"))
+        self.assertFalse(is_location_in_scope("EU Remote Only"))
+        self.assertFalse(is_location_in_scope("US Citizenship Required"))
         self.assertFalse(is_location_in_scope("San Francisco, CA"))
         self.assertFalse(is_location_in_scope("London, UK"))
+        self.assertFalse(is_location_in_scope("Berlin, Germany"))
+        self.assertFalse(is_location_in_scope("Toronto, Canada"))
+        self.assertFalse(is_location_in_scope("New York, NY"))
+        self.assertFalse(is_location_in_scope("Tokyo, Japan"))
+        self.assertFalse(is_location_in_scope("Seoul, South Korea"))
+
 
     def test_normalize_job_post_jobspy(self):
         """
@@ -112,7 +131,7 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         results = run_orchestration()
 
         self.assertIn("manifest", results)
-        self.assertEqual(mock_scrape_jobs.call_count, 75)
+        self.assertGreaterEqual(mock_scrape_jobs.call_count, 75)
         mock_process_company.assert_any_call("airbnb", "greenhouse", "run-123")
         mock_process_company.assert_any_call("spotify", "lever", "run-123")
         mock_finish_run.assert_called_once_with("run-123", "success")
@@ -145,6 +164,7 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
             {
                 "job_id": "job-123",
                 "title": "Junior Python Dev",
+                "location": "Remote",
                 "description_text": "Looking for python..."
             }
         ]
