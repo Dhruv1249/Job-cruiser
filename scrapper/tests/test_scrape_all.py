@@ -1,11 +1,23 @@
 import unittest
 from unittest.mock import Mock, patch
-from scrape_all import normalize_job_post, deduplicate_jobs, run_orchestration, extract_and_filter_batch_with_gemma
+from scrape_all import normalize_job_post, deduplicate_jobs, run_orchestration, extract_and_filter_batch_with_gemma, is_location_in_scope
 
 class TestScrapeAllOrchestrator(unittest.TestCase):
     """
     Unit tests for the scrape_all orchestrator
     """
+
+    def test_is_location_in_scope(self):
+        """
+        Verify location scope filtering accepts WFH/Remote with overseas HQ and rejects US/UK only
+        """
+        self.assertTrue(is_location_in_scope("HQ situated in Paris, WFH available"))
+        self.assertTrue(is_location_in_scope("Paris (Remote Eligible)"))
+        self.assertTrue(is_location_in_scope("Bengaluru, India"))
+        self.assertTrue(is_location_in_scope("Global Remote"))
+        self.assertFalse(is_location_in_scope("US Remote Only"))
+        self.assertFalse(is_location_in_scope("San Francisco, CA"))
+        self.assertFalse(is_location_in_scope("London, UK"))
 
     def test_normalize_job_post_jobspy(self):
         """
