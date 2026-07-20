@@ -9,13 +9,15 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Dhruv1249/Job-cruiser/backend/services"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type IngestHandler struct {
-	DB *pgxpool.Pool
+	DB             *pgxpool.Pool
+	MistralService *services.MistralBatchMatchService
 }
 
 type StartRunResponse struct {
@@ -25,6 +27,7 @@ type StartRunResponse struct {
 type IngestJobPayload struct {
 	JobID           interface{} `json:"job_id"`
 	Title           string      `json:"title"`
+	Source          string      `json:"source"`
 	UpdatedAt       string      `json:"updated_at"`
 	AbsoluteURL     string      `json:"absolute_url"`
 	Location        string      `json:"location"`
@@ -37,6 +40,11 @@ type IngestJobPayload struct {
 	SalaryMin       int         `json:"salary_min"`
 	SalaryMax       int         `json:"salary_max"`
 	Currency        string      `json:"currency"`
+}
+
+type IngestRawRequest struct {
+	RunID string             `json:"run_id" binding:"required"`
+	Jobs  []IngestJobPayload `json:"jobs" binding:"required"`
 }
 
 
@@ -68,6 +76,151 @@ func (h *IngestHandler) StartRun(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, StartRunResponse{RunID: runID})
+}
+
+// IngestRaw stores the complete batch of scraped jobs from a scraper run without
+// any AI filtering. Each job is upserted by URL and marked ai_evaluated=false so
+// the Mistral batch matcher picks it up after the run finishes.
+func (h *IngestHandler) IngestRaw(c *gin.Context) {
+	var req IngestRawRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input payload: " + err.Error()})
+		return
+	}
+
+	ctx := context.Background()
+
+	var currentStatus string
+	checkRunQuery := `SELECT status FROM scraper_runs WHERE id = $1`
+	err := h.DB.QueryRow(ctx, checkRunQuery, req.RunID).Scan(&currentStatus)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Scraper run not found"})
+		return
+	}
+	if currentStatus != "running" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Scraper run is not active"})
+		return
+	}
+
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to begin transaction"})
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	insertedCount := 0
+
+	for _, job := range req.Jobs {
+		if job.AbsoluteURL == "" {
+			continue
+		}
+
+		cleanCompanyName := strings.TrimSpace(job.Title)
+		companyName := "Unknown"
+		if job.Departments != nil && len(job.Departments) > 0 {
+			companyName = job.Departments[0]
+		}
+		_ = cleanCompanyName
+
+		var companyID string
+		compLookup := `SELECT id FROM companies WHERE LOWER(name) = LOWER($1)`
+		compErr := tx.QueryRow(ctx, compLookup, companyName).Scan(&companyID)
+		if compErr != nil {
+			insertCompQuery := `INSERT INTO companies (name) VALUES ($1) RETURNING id`
+			if scanErr := tx.QueryRow(ctx, insertCompQuery, companyName).Scan(&companyID); scanErr != nil {
+				continue
+			}
+		}
+
+		loc := job.Location
+		isRemote := strings.Contains(strings.ToLower(loc), "remote") ||
+			strings.Contains(strings.ToLower(loc), "anywhere") ||
+			strings.Contains(strings.ToLower(loc), "wfh")
+
+		source := job.Source
+		if source == "" {
+			source = "unknown"
+		}
+
+		var tags []string
+		for _, dep := range job.Departments {
+			if dep != "" {
+				tags = append(tags, strings.ToLower(dep))
+			}
+		}
+		for _, ts := range job.TechStack {
+			if ts != "" {
+				tags = append(tags, strings.ToLower(ts))
+			}
+		}
+		tagsJSON, _ := json.Marshal(tags)
+
+		jobType := "Full-time"
+		titleLower := strings.ToLower(job.Title)
+		if strings.Contains(titleLower, "intern") || strings.Contains(titleLower, "co-op") {
+			jobType = "Internship"
+		} else if strings.Contains(titleLower, "contract") {
+			jobType = "Contract"
+		}
+
+		var salMinParam, salMaxParam *int
+		if job.SalaryMin > 0 {
+			salMinParam = &job.SalaryMin
+		}
+		if job.SalaryMax > 0 {
+			salMaxParam = &job.SalaryMax
+		}
+		curr := job.Currency
+		if curr == "" {
+			curr = "USD"
+		}
+
+		upsertQuery := `
+			INSERT INTO jobs (company_id, title, location, is_remote, source, url, tags, raw_desc, job_type,
+			                  salary_min, salary_max, currency, scraped_at, ai_evaluated)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, false)
+			ON CONFLICT (url) DO UPDATE SET
+				title        = EXCLUDED.title,
+				location     = EXCLUDED.location,
+				is_remote    = EXCLUDED.is_remote,
+				source       = EXCLUDED.source,
+				tags         = EXCLUDED.tags,
+				raw_desc     = EXCLUDED.raw_desc,
+				job_type     = EXCLUDED.job_type,
+				salary_min   = EXCLUDED.salary_min,
+				salary_max   = EXCLUDED.salary_max,
+				currency     = EXCLUDED.currency,
+				scraped_at   = CURRENT_TIMESTAMP,
+				ai_evaluated = false;
+		`
+		_, execErr := tx.Exec(ctx, upsertQuery,
+			companyID, job.Title, loc, isRemote, source, job.AbsoluteURL,
+			tagsJSON, job.DescriptionText, jobType, salMinParam, salMaxParam, curr,
+		)
+		if execErr != nil {
+			log.Printf("IngestRaw: failed to upsert job %s: %v", job.Title, execErr)
+			continue
+		}
+		insertedCount++
+	}
+
+	updateRunQuery := `
+		UPDATE scraper_runs SET jobs_added = jobs_added + $1 WHERE id = $2;
+	`
+	if _, execErr := tx.Exec(ctx, updateRunQuery, insertedCount, req.RunID); execErr != nil {
+		log.Printf("IngestRaw: failed to update run telemetry: %v", execErr)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit raw job ingestion"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "Raw jobs ingested successfully",
+		"jobs_added": insertedCount,
+	})
 }
 
 // IngestJobs processes a batch of jobs for a company and registers them in CockroachDB
@@ -209,7 +362,7 @@ func (h *IngestHandler) IngestJobs(c *gin.Context) {
 
 		jobQuery := `
 			INSERT INTO jobs (company_id, title, location, is_remote, source, url, tags, raw_desc, job_type, experience_required, salary_min, salary_max, currency, seniority, summary, scraped_at)
-			VALUES ($1, $2, $3, $4, 'Greenhouse', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP)
 			ON CONFLICT (url) 
 			DO UPDATE SET
 				title = EXCLUDED.title,
@@ -224,9 +377,14 @@ func (h *IngestHandler) IngestJobs(c *gin.Context) {
 				currency = EXCLUDED.currency,
 				seniority = EXCLUDED.seniority,
 				summary = EXCLUDED.summary,
-				scraped_at = CURRENT_TIMESTAMP;
+				scraped_at = CURRENT_TIMESTAMP,
+				ai_evaluated = false;
 		`
-		_, err = tx.Exec(ctx, jobQuery, companyID, job.Title, loc, isRemote, job.AbsoluteURL, tagsJSON, job.DescriptionText, jobType, expParam, salMinParam, salMaxParam, curr, seniorityParam, summaryParam)
+		source := job.Source
+		if source == "" {
+			source = "unknown"
+		}
+		_, err = tx.Exec(ctx, jobQuery, companyID, job.Title, loc, isRemote, source, job.AbsoluteURL, tagsJSON, job.DescriptionText, jobType, expParam, salMinParam, salMaxParam, curr, seniorityParam, summaryParam)
 		if err != nil {
 			log.Printf("Failed to insert job %s: %v", job.Title, err)
 			continue
@@ -278,7 +436,7 @@ func (h *IngestHandler) IngestJobs(c *gin.Context) {
 	})
 }
 
-// FinishRun marks a scraper run as completed
+// FinishRun marks a scraper run as completed and triggers AI evaluation in the background.
 func (h *IngestHandler) FinishRun(c *gin.Context) {
 	var req FinishRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -303,6 +461,13 @@ func (h *IngestHandler) FinishRun(c *gin.Context) {
 		log.Printf("Failed to finish scraper run: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update scraper run closure status"})
 		return
+	}
+
+	if statusClean == "success" && h.MistralService != nil {
+		go func() {
+			log.Printf("[IngestHandler] Triggering Mistral AI evaluation goroutine.")
+			h.MistralService.EvaluatePendingForAllUsers(context.Background())
+		}()
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Scraper run recorded as completed"})

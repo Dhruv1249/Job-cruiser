@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -64,6 +65,17 @@ func main() {
 		log.Println("WARNING: GEMINI_API_KEY missing. Premium AI features will fail.")
 	}
 
+	mistralKey := os.Getenv("MISTRAL_API_KEY")
+	if mistralKey == "" {
+		log.Println("WARNING: MISTRAL_API_KEY missing. Batch AI job matching will be disabled.")
+	}
+
+	mistralMatchService := &services.MistralBatchMatchService{
+		DB:         databasePool,
+		MistralKey: mistralKey,
+		HTTPClient: &http.Client{Timeout: 60 * time.Second},
+	}
+
 	aiMatcherService := &services.AIMatcherService{
 		DB:     databasePool,
 		APIKey: apiKey,
@@ -76,7 +88,11 @@ func main() {
 	jobHandler := &handlers.JobHandler{DB: databasePool}
 	prefHandler := &handlers.PreferencesHandler{DB: databasePool}
 	appHandler := &handlers.ApplicationHandler{DB: databasePool}
-	ingestHandler := &handlers.IngestHandler{DB: databasePool}
+	ingestHandler := &handlers.IngestHandler{
+		DB:             databasePool,
+		MistralService: mistralMatchService,
+	}
+	matchedJobsHandler := &handlers.MatchedJobsHandler{DB: databasePool}
 	matchHandler := &handlers.MatchHandler{
 		DB:           databasePool,
 		AIService:    aiMatcherService,
@@ -98,6 +114,7 @@ func main() {
 	scraperIngest.Use(middleware.RequireIngestKey())
 	{
 		scraperIngest.POST("/start", ingestHandler.StartRun)
+		scraperIngest.POST("/ingest-raw", ingestHandler.IngestRaw)
 		scraperIngest.POST("/ingest", ingestHandler.IngestJobs)
 		scraperIngest.POST("/finish", ingestHandler.FinishRun)
 	}
@@ -107,6 +124,7 @@ func main() {
 	protected.Use(middleware.RequireAuth())
 	{
 		protected.GET("/jobs", jobHandler.GetJobs)
+		protected.GET("/jobs/matched", matchedJobsHandler.GetMatchedJobs)
 		protected.POST("/preferences", prefHandler.UpdatePreferences)
 		protected.GET("/preferences", prefHandler.GetPreferences)
 

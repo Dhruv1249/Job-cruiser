@@ -236,6 +236,23 @@ var schemaQueries = []string{
 		metadata JSONB DEFAULT '{}'::jsonb,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`,
+
+	// 6. Incremental schema migrations (idempotent ALTER TABLE statements)
+	`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ai_evaluated BOOLEAN DEFAULT false;`,
+	`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ai_evaluated_at TIMESTAMP;`,
+
+	`ALTER TABLE user_job_matches ADD COLUMN IF NOT EXISTS match_score INTEGER DEFAULT 0;`,
+	`ALTER TABLE user_job_matches ADD COLUMN IF NOT EXISTS match_reasoning TEXT;`,
+	`ALTER TABLE user_job_matches ADD COLUMN IF NOT EXISTS seniority VARCHAR(50);`,
+	`ALTER TABLE user_job_matches ADD COLUMN IF NOT EXISTS tech_stack JSONB DEFAULT '[]'::jsonb;`,
+	`ALTER TABLE user_job_matches ADD COLUMN IF NOT EXISTS ai_model VARCHAR(100) DEFAULT 'mistral-small-2506';`,
+	`ALTER TABLE user_job_matches ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;`,
+
+	`CREATE INDEX IF NOT EXISTS idx_jobs_ai_evaluated ON jobs(ai_evaluated) WHERE ai_evaluated = false;`,
+	`CREATE INDEX IF NOT EXISTS idx_jobs_source ON jobs(source);`,
+	`CREATE INDEX IF NOT EXISTS idx_jobs_scraped_at ON jobs(scraped_at DESC);`,
+	`CREATE INDEX IF NOT EXISTS idx_user_job_matches_score ON user_job_matches(user_id, match_score DESC);`,
+
 }
 
 // InitSchema executes the queries in sequence.

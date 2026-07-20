@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import Mock, patch
-from scrape_all import normalize_job_post, deduplicate_jobs, run_orchestration, extract_and_filter_batch_with_gemma, is_location_in_scope
+from scrape_all import normalize_job_post, deduplicate_jobs, run_orchestration, is_location_in_scope
 
 class TestScrapeAllOrchestrator(unittest.TestCase):
     """
@@ -135,43 +135,3 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         mock_process_company.assert_any_call("airbnb", "greenhouse", "run-123")
         mock_process_company.assert_any_call("spotify", "lever", "run-123")
         mock_finish_run.assert_called_once_with("run-123", "success")
-
-    @patch("scrape_all.requests.post")
-    @patch("scrape_all.GEMINI_API_KEY", "test-key")
-    @patch("scrape_all.DISABLE_AI_EXTRACTION", False)
-    def test_extract_and_filter_batch_with_gemma_success(self, mock_post):
-        """
-        Verify extract_and_filter_batch_with_gemma returns parsed JSON fields on success
-        """
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "candidates": [
-                {
-                    "content": {
-                        "parts": [
-                            {
-                                "text": '{"results": [{"job_id": "job-123", "is_matched": true, "seniority": "Junior", "summary": "A junior role", "tech_stack": ["python", "go"], "salary_min": 120000, "salary_max": 150000, "currency": "USD"}]}'
-                            }
-                        ]
-                    }
-                }
-            ]
-        }
-        mock_post.return_value = mock_response
-
-        jobs_batch = [
-            {
-                "job_id": "job-123",
-                "title": "Junior Python Dev",
-                "location": "Remote",
-                "description_text": "Looking for python..."
-            }
-        ]
-
-        result = extract_and_filter_batch_with_gemma(jobs_batch, 0)
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["seniority"], "Junior")
-        self.assertEqual(result[0]["summary"], "A junior role")
-        self.assertEqual(result[0]["tech_stack"], ["python", "go"])
