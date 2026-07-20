@@ -454,9 +454,7 @@ def run_orchestration() -> dict:
         india_pass_sites = [
             Site.LINKEDIN,
             Site.INDEED,
-            Site.GLASSDOOR,
             Site.GOOGLE,
-            Site.NAUKRI,
         ]
         remote_pass_sites = [
             Site.LINKEDIN,
@@ -473,36 +471,47 @@ def run_orchestration() -> dict:
             Site.CRYPTO_JOBS
         ]
 
-        for keyword in KEYWORDS:
+        board_raw_jobs_lock = threading.Lock()
+
+        def scrape_board_site_keyword(site: Site, keyword: str, location: str | None, is_remote: bool) -> None:
+            """
+            Scrape a single board site for one keyword and append results to all_raw_jobs.
+            """
             try:
-                df_india = scrape_jobs(
-                    site_name=india_pass_sites,
-                    search_term=keyword,
-                    location="India",
-                    results_wanted=200,
-                    hours_old=24
-                )
-                for row in df_india.itertuples():
-                    source = getattr(row, "site", "jobspy")
-                    normalized = normalize_job_post(row, source)
-                    all_raw_jobs.append(normalized)
+                kwargs = {
+                    "site_name": [site],
+                    "search_term": keyword,
+                    "results_wanted": 200,
+                    "hours_old": 24,
+                }
+                if location:
+                    kwargs["location"] = location
+                if is_remote:
+                    kwargs["is_remote"] = True
+                df = scrape_jobs(**kwargs)
+                scraped = []
+                for row in df.itertuples():
+                    source = getattr(row, "site", site.value)
+                    scraped.append(normalize_job_post(row, source))
+                if scraped:
+                    with board_raw_jobs_lock:
+                        all_raw_jobs.extend(scraped)
             except Exception:
                 pass
 
-            try:
-                df_remote = scrape_jobs(
-                    site_name=remote_pass_sites,
-                    search_term=keyword,
-                    results_wanted=200,
-                    hours_old=24,
-                    is_remote=True
-                )
-                for row in df_remote.itertuples():
-                    source = getattr(row, "site", "jobspy")
-                    normalized = normalize_job_post(row, source)
-                    all_raw_jobs.append(normalized)
-            except Exception:
-                pass
+        board_futures = []
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as board_executor:
+            for keyword in KEYWORDS:
+                for site in india_pass_sites:
+                    board_futures.append(
+                        board_executor.submit(scrape_board_site_keyword, site, keyword, "India", False)
+                    )
+                for site in remote_pass_sites:
+                    board_futures.append(
+                        board_executor.submit(scrape_board_site_keyword, site, keyword, None, True)
+                    )
+            for future in as_completed(board_futures):
+                future.result()
 
 
         unique_raw_jobs = deduplicate_jobs(all_raw_jobs)
