@@ -100,7 +100,7 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         results = run_orchestration()
 
         self.assertIn("manifest", results)
-        self.assertEqual(mock_scrape_jobs.call_count, 5)
+        self.assertEqual(mock_scrape_jobs.call_count, 75)
         mock_process_company.assert_any_call("airbnb", "greenhouse", "run-123")
         mock_process_company.assert_any_call("spotify", "lever", "run-123")
         mock_finish_run.assert_called_once_with("run-123", "success")

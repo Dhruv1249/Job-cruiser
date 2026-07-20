@@ -44,7 +44,14 @@ JOBSPY_SITES = [
     Site.RUST_CAREERS,
     Site.WORKING_NOMADS,
     Site.WEB3_CAREER,
-    Site.CRYPTO_JOBS
+    Site.CRYPTO_JOBS,
+    Site.WELLFOUND,
+    Site.DICE,
+    Site.BUILTIN,
+    Site.SIMPLYHIRED,
+    Site.OTTA,
+    Site.LEVELSFYI,
+    Site.CORD
 ]
 
 companies_yaml_lock = threading.Lock()
@@ -318,7 +325,36 @@ For jobs that do not match both conditions, return "is_matched": false.
     except Exception as e:
         print(f"[AI Evaluation Error] Batch {batch_idx + 1} via {model_name} failed: {e}", flush=True)
         
-    return []
+REJECT_LOCATION_KEYWORDS = [
+    "united states", "us", "u.s.", "usa", "san francisco", "new york", "austin", "seattle",
+    "boston", "chicago", "los angeles", "united kingdom", "uk", "u.k.", "london", "germany",
+    "berlin", "france", "paris", "canada", "toronto", "vancouver", "australia", "sydney",
+    "singapore", "netherlands", "amsterdam", "brazil", "spain", "madrid"
+]
+
+ACCEPT_LOCATION_KEYWORDS = [
+    "india", "bengaluru", "bangalore", "hyderabad", "pune", "mumbai", "delhi", "noida",
+    "gurgaon", "chennai", "remote", "global", "worldwide", "anywhere", "work from home"
+]
+
+def is_location_in_scope(location_str: str) -> bool:
+    """
+    Check if a job location is within scope (India or Global Remote) and not country-restricted to non-India locations.
+    """
+    if not location_str:
+        return True
+        
+    loc_lower = location_str.lower()
+    
+    for accept in ACCEPT_LOCATION_KEYWORDS:
+        if accept in loc_lower:
+            return True
+            
+    for reject in REJECT_LOCATION_KEYWORDS:
+        if reject in loc_lower:
+            return False
+            
+    return True
 
 def normalize_job_post(job, source: str, company_name: str = None) -> dict:
     """
@@ -403,7 +439,8 @@ def process_company(company: str, platform: str, run_id: str = None) -> dict:
         jobs = []
         for row in df.itertuples():
             normalized = normalize_job_post(row, platform, company)
-            jobs.append(normalized)
+            if is_location_in_scope(normalized["location"]):
+                jobs.append(normalized)
         status = "success"
     except Exception:
         jobs = []
@@ -501,7 +538,9 @@ def run_orchestration() -> dict:
                 scraped = []
                 for row in df.itertuples():
                     source = getattr(row, "site", site.value)
-                    scraped.append(normalize_job_post(row, source))
+                    normalized = normalize_job_post(row, source)
+                    if is_location_in_scope(normalized["location"]):
+                        scraped.append(normalized)
                 if scraped:
                     with board_raw_jobs_lock:
                         all_raw_jobs.extend(scraped)

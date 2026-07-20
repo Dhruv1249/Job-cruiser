@@ -81,6 +81,7 @@ greenhouse:
   - blenheimchalcotindia
   - blinkhealth
   - blitzapp
+  - block
   - bluehole
   - bluevineindia
   - bold
@@ -133,6 +134,7 @@ greenhouse:
   - crystaldynamics
   - daredrop
   - databricks
+  - datadog
   - dataiku
   - decisions
   - deepmind
@@ -153,6 +155,7 @@ greenhouse:
   - discord
   - dmarket
   - domo
+  - door-dash
   - dots
   - dpsgames
   - droit
@@ -333,6 +336,7 @@ greenhouse:
   - memryx
   - mercury
   - merqube
+  - meta
   - micoworks
   - midsummerstudios
   - miqdigital
@@ -404,6 +408,7 @@ greenhouse:
   - outschool
   - overdare
   - paciolan
+  - palantir
   - panicbutton
   - pay2dc
   - paypay
@@ -453,6 +458,7 @@ greenhouse:
   - resi
   - rev
   - rippling
+  - robinhood
   - rockstargames
   - roku
   - roll7
@@ -492,6 +498,7 @@ greenhouse:
   - smartbear
   - snapmobileinc
   - snorkelai
+  - snowflake
   - snyk
   - socialpoint
   - sofi
@@ -511,6 +518,7 @@ greenhouse:
   - sphereentertainment
   - splice
   - spotoncorporate
+  - square
   - stabilityai
   - stackblitz
   - stacklok
@@ -563,7 +571,9 @@ greenhouse:
   - turbo
   - turbotenant
   - turtlerockstudios
+  - twilio
   - twitch
+  - uber
   - udemy
   - undeadlabsllc
   - unispace
@@ -609,6 +619,7 @@ greenhouse:
   - xgames
   - yext
   - yugalabs
+  - zendesk
   - zenoti
   - zetaglobal
   - zinnia
@@ -657,7 +668,9 @@ lever:
   - applike
   - appzen
   - arootah
+  - asana
   - athena-education
+  - atlassian
   - attentive
   - avalanchestudios
   - axiomzen
@@ -678,6 +691,7 @@ lever:
   - bold-orange
   - bonfirestudios
   - bounteous
+  - box
   - branch.gg
   - brightedge
   - brightmachines
@@ -784,6 +798,7 @@ lever:
   - loopgames
   - lumapictures
   - luni
+  - lyft
   - m33
   - madbox
   - madisonlogic
@@ -803,6 +818,7 @@ lever:
   - mountaintop
   - nahc
   - neednova
+  - netflix
   - netomi
   - nielsen
   - ninjavan
@@ -815,6 +831,7 @@ lever:
   - oliverwyman
   - opengov
   - pachama
+  - palantir
   - paradoxum-gg
   - parallelwireless
   - payactiv
@@ -1063,6 +1080,7 @@ ashby:
   - peakmetrics
   - periodic-labs
   - permitflow
+  - perplexity
   - plaid
   - plain
   - planera
@@ -1090,6 +1108,7 @@ ashby:
   - reflectionai
   - regressiongg
   - restream
+  - retool
   - rocketsciencegg
   - runway
   - sahara
@@ -1097,6 +1116,7 @@ ashby:
   - sardine
   - semgrep
   - seneca
+  - sentry
   - seriesai
   - serval
   - sesame
@@ -1183,6 +1203,7 @@ smartrecruiters:
   - blueislestudios
   - bookerdimaio
   - bootloaderstudio
+  - bosch
   - boschgroup
   - buckeyebroadband
   - bytedance
@@ -1262,6 +1283,7 @@ smartrecruiters:
   - loral
   - lottiefiles
   - lumengames
+  - mcdonalds
   - mgmresortsinternational
   - missionboxsolutions
   - mitratech
@@ -1298,6 +1320,7 @@ smartrecruiters:
   - softsuavetechnologies
   - speedlabs
   - springernature
+  - square
   - starkflow
   - starmarketing
   - suse
@@ -1333,7 +1356,11 @@ smartrecruiters:
 
 workday:
   - adobe
+  - cisco
+  - nvidia
   - salesforce
+  - walmart
   - wd1
   - wd3
+  - workday
 
