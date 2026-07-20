@@ -148,8 +148,6 @@ KEYWORDS = [
     "software engineer infrastructure",
     "software engineer",
 ]
-AI_FILTER_BATCH_SIZE = 15
-DESCRIPTION_FILTER_CHARS = 200
 JOBSPY_SITES = [
     Site.LINKEDIN,
     Site.INDEED,
@@ -176,10 +174,7 @@ JOBSPY_SITES = [
 ]
 
 companies_yaml_lock = threading.Lock()
-gemma_limits = {
-    GEMMA_MOE_MODEL: {"lock": threading.Lock(), "last_called": 0.0},
-    GEMMA_DENSE_MODEL: {"lock": threading.Lock(), "last_called": 0.0}
-}
+
 
 def start_run() -> str:
     """
@@ -314,138 +309,7 @@ def register_discovered_company(platform: str, slug: str):
                             f.write(f"  - {s}\n")
                     f.write("\n")
 
-def call_gemma_model(model_name: str, payload: dict) -> dict:
-    """
-    Call the specified Gemma 4 model while respecting the 30 RPM limit.
-    """
-    limit_info = gemma_limits[model_name]
-    with limit_info["lock"]:
-        elapsed = time.time() - limit_info["last_called"]
-        if elapsed < 2.0:
-            time.sleep(2.0 - elapsed)
-        limit_info["last_called"] = time.time()
-        
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
-    response = requests.post(url, json=payload, timeout=45, verify=False)
-    return response.json() if response.status_code == 200 else {}
 
-def extract_and_filter_batch_with_gemma(jobs_batch: list[dict], batch_idx: int) -> list[dict]:
-    """
-    Evaluate a batch of jobs using twin Gemma 4 models. Descriptions are truncated to
-    DESCRIPTION_FILTER_CHARS characters to stay within the 16K TPM per-model budget.
-    """
-    if DISABLE_AI_EXTRACTION or not GEMINI_API_KEY:
-        return [
-            {
-                **job,
-                "seniority": "Unknown",
-                "summary": "AI extraction disabled",
-                "tech_stack": [],
-                "salary_min": 0,
-                "salary_max": 0,
-                "currency": "USD"
-            }
-            for job in jobs_batch
-        ]
-
-    model_name = GEMMA_MOE_MODEL if batch_idx % 2 == 0 else GEMMA_DENSE_MODEL
-    
-    prompt = """You are a strict job filter. Analyze the following batch of job postings.
-
-CONDITION 1 — EXPERIENCE LEVEL (STRICT):
-Mark a job as matched ONLY if it explicitly targets candidates with 0-3 years of experience.
-Indicators of a match: "0-3 years", "entry level", "junior", "fresher", "new grad", "associate", "intern", "graduate".
-REJECT the job if the title or description mentions: "Senior", "Staff", "Lead", "Principal", "Director", "Manager", "Head of", "VP", "Executive", "5+ years", "7+ years", or any experience requirement above 3 years.
-If no experience level is stated, use the job title to judge — titles without seniority prefixes AND in a technical individual contributor role are acceptable.
-
-CONDITION 2 — LOCATION (STRICT):
-Match ONLY if the job is:
-- Fully remote with no geographic restriction (Global remote), OR
-- Based in India (any city, remote/onsite/hybrid within India), OR
-- Remote open to India applicants.
-REJECT if it is US-only remote, UK-only, Europe-only, or restricted to a specific non-India country.
-
-Only if BOTH conditions are met, mark "is_matched": true and extract:
-- seniority: must be exactly one of: "Junior", "Mid", or "Intern". Never return Senior/Lead/Staff/Executive for a matched job.
-- summary: A short 1-2 sentence description of the role.
-- tech_stack: List of languages, frameworks, or tools mentioned.
-- salary_min: Minimum salary (integer, 0 if not mentioned).
-- salary_max: Maximum salary (integer, 0 if not mentioned).
-- currency: Currency code (e.g. USD, INR, EUR).
-
-For jobs that do not match both conditions, return "is_matched": false.
-"""
-
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt + "\nJobs to evaluate:\n" + json.dumps([{"job_id": j["job_id"], "title": j["title"], "location": j["location"], "description": (j["description_text"] or "")[:DESCRIPTION_FILTER_CHARS]} for j in jobs_batch])}
-                ]
-            }
-        ],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": {
-                "type": "OBJECT",
-                "properties": {
-                    "results": {
-                        "type": "ARRAY",
-                        "items": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "job_id": {"type": "STRING"},
-                                "is_matched": {"type": "BOOLEAN"},
-                                "seniority": {"type": "STRING"},
-                                "summary": {"type": "STRING"},
-                                "tech_stack": {"type": "ARRAY", "items": {"type": "STRING"}},
-                                "salary_min": {"type": "INTEGER"},
-                                "salary_max": {"type": "INTEGER"},
-                                "currency": {"type": "STRING"}
-                            },
-                            "required": ["job_id", "is_matched", "seniority", "summary", "tech_stack"]
-                        }
-                    }
-                },
-                "required": ["results"]
-            }
-        }
-    }
-
-    try:
-        res_data = call_gemma_model(model_name, payload)
-        candidates = res_data.get("candidates", [])
-        if candidates:
-            parts = candidates[0].get("content", {}).get("parts", [])
-            text_content = ""
-            for part in reversed(parts):
-                if not part.get("thought") and part.get("text"):
-                    text_content = part.get("text")
-                    break
-            if not text_content and parts:
-                text_content = parts[-1].get("text", "")
-                
-            if text_content:
-                results = json.loads(text_content).get("results", [])
-                results_map = {r["job_id"]: r for r in results}
-                
-                merged_jobs = []
-                for job in jobs_batch:
-                    ai_res = results_map.get(job["job_id"], {})
-                    if ai_res.get("is_matched", False):
-                        merged_jobs.append({
-                            **job,
-                            "seniority": ai_res.get("seniority", "Unknown"),
-                            "summary": ai_res.get("summary", ""),
-                            "tech_stack": ai_res.get("tech_stack", []),
-                            "salary_min": ai_res.get("salary_min", 0),
-                            "salary_max": ai_res.get("salary_max", 0),
-                            "currency": ai_res.get("currency", "USD")
-                        })
-                print(f"[AI Evaluation] Batch {batch_idx + 1} processed via {model_name}: {len(merged_jobs)}/{len(jobs_batch)} jobs matched criteria.", flush=True)
-                return merged_jobs
-    except Exception as e:
-        print(f"[AI Evaluation Error] Batch {batch_idx + 1} via {model_name} failed: {e}", flush=True)
         
 INDIAN_LOCATIONS = [
     "india", "bengaluru", "bangalore", "hyderabad", "pune", "mumbai", "delhi", "noida",
@@ -756,65 +620,31 @@ def run_orchestration() -> dict:
         save_json(unique_raw_jobs, DATA_DIR / "raw_jobs.json")
         print(f"[Scraper] Saved {len(unique_raw_jobs)} raw scraped jobs to raw_jobs.json", flush=True)
 
-        new_jobs = []
-        cached_matched_jobs = []
-        
-        for job in unique_raw_jobs:
-            url = job["absolute_url"]
-            if url in existing_jobs_cache:
-                cached_job = existing_jobs_cache[url]
-                cached_matched_jobs.append(cached_job)
-            else:
-                new_jobs.append(job)
-
-        batches = [new_jobs[i:i + AI_FILTER_BATCH_SIZE] for i in range(0, len(new_jobs), AI_FILTER_BATCH_SIZE)]
-        processed_new_jobs = []
-        
-        print(f"[AI Phase] Total raw jobs: {len(unique_raw_jobs)}. Uncached new jobs to evaluate: {len(new_jobs)} across {len(batches)} batches.", flush=True)
-
-        with ThreadPoolExecutor(max_workers=2) as ai_executor:
-            ai_futures = []
-            for idx, batch in enumerate(batches):
-                ai_futures.append(
-                    ai_executor.submit(extract_and_filter_batch_with_gemma, batch, idx)
-                )
-            for future in as_completed(ai_futures):
-                processed_new_jobs.extend(future.result())
-
-        print(f"[AI Phase] Completed evaluation pass. Matched new jobs: {len(processed_new_jobs)}", flush=True)
-
-        final_jobs = deduplicate_jobs(cached_matched_jobs + processed_new_jobs)
-        save_json(final_jobs, DATA_DIR / "jobs_flat.json")
-
-        company_jobs = {}
-        for job in final_jobs:
-            comp = job["company"]
-            if comp not in company_jobs:
-                company_jobs[comp] = []
-            company_jobs[comp].append(job)
-
-        for comp, jobs in company_jobs.items():
-            if run_id:
-                ingest_payload = {
-                    "run_id": run_id,
-                    "company": comp,
-                    "jobs": jobs
-                }
-                headers = {
-                    "X-Ingest-Key": INGEST_API_KEY,
-                    "Content-Type": "application/json"
-                }
-                try:
-                    url = f"{BACKEND_API_URL}/scraper/ingest"
-                    requests.post(url, json=ingest_payload, headers=headers, timeout=60)
-                except Exception:
-                    pass
+        if run_id:
+            ingest_headers = {
+                "X-Ingest-Key": INGEST_API_KEY,
+                "Content-Type": "application/json",
+            }
+            ingest_payload = {
+                "run_id": run_id,
+                "jobs": unique_raw_jobs,
+            }
+            try:
+                ingest_url = f"{BACKEND_API_URL}/scraper/ingest-raw"
+                ingest_response = requests.post(ingest_url, json=ingest_payload, headers=ingest_headers, timeout=120)
+                if ingest_response.status_code == 200:
+                    result_data = ingest_response.json()
+                    print(f"[Scraper] Backend ingested {result_data.get('jobs_added', 0)} jobs.", flush=True)
+                else:
+                    print(f"[Scraper] Backend ingest-raw returned {ingest_response.status_code}: {ingest_response.text[:200]}", flush=True)
+            except Exception as ingest_error:
+                print(f"[Scraper] Failed to POST to ingest-raw: {ingest_error}", flush=True)
 
         save_json(manifest, DATA_DIR / "manifest.json")
 
         if run_id:
             finish_run(run_id, "success")
-            
+
         return {"status": "success", "manifest": manifest}
 
     except Exception as e:
