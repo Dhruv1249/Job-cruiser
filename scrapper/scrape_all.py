@@ -198,7 +198,7 @@ def call_gemma_model(model_name: str, payload: dict) -> dict:
         limit_info["last_called"] = time.time()
         
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
-    response = requests.post(url, json=payload, timeout=45)
+    response = requests.post(url, json=payload, timeout=45, verify=False)
     return response.json() if response.status_code == 200 else {}
 
 def extract_and_filter_batch_with_gemma(jobs_batch: list[dict], batch_idx: int) -> list[dict]:
@@ -287,7 +287,15 @@ For jobs that do not match both conditions, return "is_matched": false.
         res_data = call_gemma_model(model_name, payload)
         candidates = res_data.get("candidates", [])
         if candidates:
-            text_content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            parts = candidates[0].get("content", {}).get("parts", [])
+            text_content = ""
+            for part in reversed(parts):
+                if not part.get("thought") and part.get("text"):
+                    text_content = part.get("text")
+                    break
+            if not text_content and parts:
+                text_content = parts[-1].get("text", "")
+                
             if text_content:
                 results = json.loads(text_content).get("results", [])
                 results_map = {r["job_id"]: r for r in results}
@@ -521,6 +529,9 @@ def run_orchestration() -> dict:
             ats_info = extract_ats_slug(job["absolute_url"])
             if ats_info:
                 register_discovered_company(ats_info[0], ats_info[1])
+
+        save_json(unique_raw_jobs, DATA_DIR / "raw_jobs.json")
+        print(f"[Scraper] Saved {len(unique_raw_jobs)} raw scraped jobs to raw_jobs.json", flush=True)
 
         new_jobs = []
         cached_matched_jobs = []
