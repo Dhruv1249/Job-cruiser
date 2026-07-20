@@ -305,9 +305,10 @@ For jobs that do not match both conditions, return "is_matched": false.
                             "salary_max": ai_res.get("salary_max", 0),
                             "currency": ai_res.get("currency", "USD")
                         })
+                print(f"[AI Evaluation] Batch {batch_idx + 1} processed via {model_name}: {len(merged_jobs)}/{len(jobs_batch)} jobs matched criteria.", flush=True)
                 return merged_jobs
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[AI Evaluation Error] Batch {batch_idx + 1} via {model_name} failed: {e}", flush=True)
         
     return []
 
@@ -535,6 +536,8 @@ def run_orchestration() -> dict:
         batches = [new_jobs[i:i + 5] for i in range(0, len(new_jobs), 5)]
         processed_new_jobs = []
         
+        print(f"[AI Phase] Total raw jobs: {len(unique_raw_jobs)}. Uncached new jobs to evaluate: {len(new_jobs)} across {len(batches)} batches.", flush=True)
+
         with ThreadPoolExecutor(max_workers=2) as ai_executor:
             ai_futures = []
             for idx, batch in enumerate(batches):
@@ -543,6 +546,8 @@ def run_orchestration() -> dict:
                 )
             for future in as_completed(ai_futures):
                 processed_new_jobs.extend(future.result())
+
+        print(f"[AI Phase] Completed evaluation pass. Matched new jobs: {len(processed_new_jobs)}", flush=True)
 
         final_jobs = deduplicate_jobs(cached_matched_jobs + processed_new_jobs)
         save_json(final_jobs, DATA_DIR / "jobs_flat.json")
