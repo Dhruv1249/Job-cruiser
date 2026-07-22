@@ -240,6 +240,8 @@ var schemaQueries = []string{
 	// 6. Incremental schema migrations (idempotent ALTER TABLE statements)
 	`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ai_evaluated BOOLEAN DEFAULT false;`,
 	`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ai_evaluated_at TIMESTAMP;`,
+	`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS summary TEXT;`,
+	`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS seniority VARCHAR(50);`,
 
 	`ALTER TABLE user_job_matches ADD COLUMN IF NOT EXISTS match_score INTEGER DEFAULT 0;`,
 	`ALTER TABLE user_job_matches ADD COLUMN IF NOT EXISTS match_reasoning TEXT;`,

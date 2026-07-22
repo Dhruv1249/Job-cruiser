@@ -214,10 +214,10 @@ def finish_run(run_id: str, status: str, error_message: str = None):
 
 def save_json(data, file_path: Path):
     """
-    Save the given data to a JSON file.
+    Save the given data to a JSON file (unindented for fast serialization).
     """
     with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(data, f, ensure_ascii=False)
 
 def ensure_dir(path: Path):
     """
@@ -225,14 +225,18 @@ def ensure_dir(path: Path):
     """
     path.mkdir(parents=True, exist_ok=True)
 
-def sanitize_company_name(name: str) -> str:
+def sanitize_company_name(name) -> str:
     """
     Sanitize and limit the length of a company name for filesystem safety.
     """
-    if not name:
+    if not name or not isinstance(name, (str, bytes)):
         return "Unknown"
     
-    soup = BeautifulSoup(name, "html.parser")
+    name_str = name.strip()
+    if not name_str or name_str.lower() == "nan":
+        return "Unknown"
+    
+    soup = BeautifulSoup(name_str, "html.parser")
     clean_name = soup.get_text()
     
     if "http://" in clean_name or "https://" in clean_name:
@@ -516,6 +520,7 @@ def run_orchestration() -> dict:
         throttle_sensitive_india_sites = [
             Site.LINKEDIN,
             Site.GLASSDOOR,
+            Site.NAUKRI,
         ]
         throttle_sensitive_remote_sites = [
             Site.LINKEDIN,
@@ -524,7 +529,6 @@ def run_orchestration() -> dict:
         high_volume_india_sites = [
             Site.INDEED,
             Site.GOOGLE,
-            Site.NAUKRI,
             Site.AMAZON,
             Site.MICROSOFT,
         ]
@@ -557,7 +561,10 @@ def run_orchestration() -> dict:
         def scrape_board_site_keyword(site: Site, keyword: str, location: str | None, is_remote: bool) -> None:
             """
             Scrape a single board site for one keyword and append results to all_raw_jobs.
+            Enforces a 15-second hard timeout per keyword search without blocking worker shutdown on hanging sockets.
             """
+            sub_exec = ThreadPoolExecutor(max_workers=1)
+            df = None
             try:
                 kwargs = {
                     "site_name": [site],
@@ -569,19 +576,28 @@ def run_orchestration() -> dict:
                     kwargs["location"] = location
                 if is_remote:
                     kwargs["is_remote"] = True
-                df = scrape_jobs(**kwargs)
-                scraped = []
-                for row in df.itertuples():
-                    source = getattr(row, "site", site.value)
-                    normalized = normalize_job_post(row, source)
-                    is_remote_flag = is_remote or getattr(row, "is_remote", False) or "remote" in normalized["location"].lower()
-                    if is_location_in_scope(normalized["location"], is_remote_flag):
-                        scraped.append(normalized)
-                if scraped:
-                    with board_raw_jobs_lock:
-                        all_raw_jobs.extend(scraped)
+
+                future = sub_exec.submit(scrape_jobs, **kwargs)
+                df = future.result(timeout=15)
+                sub_exec.shutdown(wait=False)
             except Exception:
-                pass
+                sub_exec.shutdown(wait=False, cancel_futures=True)
+                return
+
+            if df is None or df.empty:
+                return
+
+            scraped = []
+            for row in df.itertuples():
+                source = getattr(row, "site", site.value)
+                normalized = normalize_job_post(row, source)
+                is_remote_flag = is_remote or getattr(row, "is_remote", False) or "remote" in normalized["location"].lower()
+                if is_location_in_scope(normalized["location"], is_remote_flag):
+                    scraped.append(normalized)
+
+            if scraped:
+                with board_raw_jobs_lock:
+                    all_raw_jobs.extend(scraped)
 
         board_futures = []
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as board_executor:
@@ -620,25 +636,30 @@ def run_orchestration() -> dict:
         save_json(unique_raw_jobs, DATA_DIR / "raw_jobs.json")
         print(f"[Scraper] Saved {len(unique_raw_jobs)} raw scraped jobs to raw_jobs.json", flush=True)
 
+        if not run_id:
+            run_id = start_run()
+
         if run_id:
             ingest_headers = {
                 "X-Ingest-Key": INGEST_API_KEY,
                 "Content-Type": "application/json",
             }
-            ingest_payload = {
-                "run_id": run_id,
-                "jobs": unique_raw_jobs,
-            }
-            try:
-                ingest_url = f"{BACKEND_API_URL}/scraper/ingest-raw"
-                ingest_response = requests.post(ingest_url, json=ingest_payload, headers=ingest_headers, timeout=120)
-                if ingest_response.status_code == 200:
-                    result_data = ingest_response.json()
-                    print(f"[Scraper] Backend ingested {result_data.get('jobs_added', 0)} jobs.", flush=True)
-                else:
-                    print(f"[Scraper] Backend ingest-raw returned {ingest_response.status_code}: {ingest_response.text[:200]}", flush=True)
-            except Exception as ingest_error:
-                print(f"[Scraper] Failed to POST to ingest-raw: {ingest_error}", flush=True)
+            ingest_url = f"{BACKEND_API_URL}/scraper/ingest-raw"
+            chunk_size = 500
+            total_added = 0
+            for i in range(0, len(unique_raw_jobs), chunk_size):
+                chunk = unique_raw_jobs[i:i + chunk_size]
+                try:
+                    res = requests.post(ingest_url, json={"run_id": run_id, "jobs": chunk}, headers=ingest_headers, timeout=120)
+                    if res.status_code == 200:
+                        added = res.json().get("jobs_added", 0)
+                        total_added += added
+                        print(f"[Scraper] Ingested batch {i // chunk_size + 1}/{(len(unique_raw_jobs) + chunk_size - 1) // chunk_size} ({added} jobs)", flush=True)
+                    else:
+                        print(f"[Scraper] Batch {i // chunk_size + 1} returned {res.status_code}: {res.text[:200]}", flush=True)
+                except Exception as ingest_error:
+                    print(f"[Scraper] Failed to POST chunk {i // chunk_size + 1}: {ingest_error}", flush=True)
+            print(f"[Scraper] Backend raw ingestion complete. Total jobs added: {total_added}", flush=True)
 
         save_json(manifest, DATA_DIR / "manifest.json")
 
@@ -653,4 +674,8 @@ def run_orchestration() -> dict:
         raise e
 
 if __name__ == "__main__":
+    import sys
+    if "--test" in sys.argv:
+        KEYWORDS[:] = ["golang developer", "go developer", "backend engineer"]
+        print(f"[Scraper] Running in TEST mode. Keywords reduced to: {KEYWORDS}", flush=True)
     run_orchestration()

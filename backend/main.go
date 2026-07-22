@@ -73,7 +73,7 @@ func main() {
 	mistralMatchService := &services.MistralBatchMatchService{
 		DB:         databasePool,
 		MistralKey: mistralKey,
-		HTTPClient: &http.Client{Timeout: 60 * time.Second},
+		HTTPClient: &http.Client{Timeout: 240 * time.Second},
 	}
 
 	aiMatcherService := &services.AIMatcherService{

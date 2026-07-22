@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,9 +18,10 @@ const (
 	mistralAPIEndpoint       = "https://api.mistral.ai/v1/chat/completions"
 	mistralMatchModel        = "mistral-small-2506"
 	mistralRequestsPerSecond = 5
-	mistralBatchSize         = 15
-	descriptionTruncateChars = 300
+	mistralBatchSize         = 100
+	descriptionTruncateChars = 600
 	matchScoreThreshold      = 50
+	maxConcurrentWorkers     = 5
 )
 
 // MistralBatchMatchService evaluates batches of unevaluated jobs against each
@@ -52,12 +54,12 @@ type JobSnippet struct {
 
 // mistralMatchResult is a single result record returned by the Mistral model.
 type mistralMatchResult struct {
-	JobID         string   `json:"job_id"`
-	IsMatched     bool     `json:"is_matched"`
-	MatchScore    int      `json:"match_score"`
-	Seniority     string   `json:"seniority"`
-	TechStack     []string `json:"tech_stack"`
-	MatchReasoning string  `json:"reasoning"`
+	JobID          string   `json:"job_id"`
+	IsMatched      bool     `json:"is_matched"`
+	MatchScore     int      `json:"match_score"`
+	Seniority      string   `json:"seniority"`
+	TechStack      []string `json:"tech_stack"`
+	MatchReasoning string   `json:"reasoning"`
 }
 
 type mistralBatchResponse struct {
@@ -105,12 +107,14 @@ func (s *MistralBatchMatchService) EvaluatePendingForAllUsers(ctx context.Contex
 		return
 	}
 
-	log.Printf("[MistralMatcher] Starting evaluation: %d jobs × %d users", len(pendingJobs), len(userProfiles))
+	log.Printf("[MistralMatcher] Starting evaluation: %d jobs × %d users (using %d parallel workers)",
+		len(pendingJobs), len(userProfiles), maxConcurrentWorkers)
 
 	evaluatedJobIDs := make(map[string]bool)
+	var mu sync.Mutex
 
 	for _, userProfile := range userProfiles {
-		s.evaluateJobsForUser(ctx, userProfile, pendingJobs, evaluatedJobIDs)
+		s.evaluateJobsForUser(ctx, userProfile, pendingJobs, evaluatedJobIDs, &mu)
 	}
 
 	if err := s.markJobsEvaluated(ctx, evaluatedJobIDs); err != nil {
@@ -125,29 +129,67 @@ func (s *MistralBatchMatchService) evaluateJobsForUser(
 	userProfile UserProfile,
 	pendingJobs []JobSnippet,
 	evaluatedJobIDs map[string]bool,
+	mu *sync.Mutex,
 ) {
 	batches := chunkJobSnippets(pendingJobs, mistralBatchSize)
+	if len(batches) == 0 {
+		return
+	}
+
 	rateLimiter := time.NewTicker(time.Second / time.Duration(mistralRequestsPerSecond))
 	defer rateLimiter.Stop()
 
-	for batchIndex, batch := range batches {
-		<-rateLimiter.C
-
-		results, err := s.callMistralBatch(ctx, userProfile, batch)
-		if err != nil {
-			log.Printf("[MistralMatcher] Batch %d for user %s failed: %v", batchIndex, userProfile.UserID, err)
-			continue
-		}
-
-		if err := s.upsertMatchResults(ctx, userProfile.UserID, results); err != nil {
-			log.Printf("[MistralMatcher] Failed upserting batch %d for user %s: %v", batchIndex, userProfile.UserID, err)
-			continue
-		}
-
-		for _, result := range results {
-			evaluatedJobIDs[result.JobID] = true
-		}
+	type batchWork struct {
+		index int
+		items []JobSnippet
 	}
+
+	workChan := make(chan batchWork, len(batches))
+	for i, b := range batches {
+		workChan <- batchWork{index: i, items: b}
+	}
+	close(workChan)
+
+	numWorkers := maxConcurrentWorkers
+	if len(batches) < numWorkers {
+		numWorkers = len(batches)
+	}
+
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for work := range workChan {
+				select {
+				case <-ctx.Done():
+					return
+				case <-rateLimiter.C:
+				}
+
+				results, err := s.callMistralBatch(ctx, userProfile, work.items)
+				if err != nil {
+					log.Printf("[MistralMatcher] Worker %d: Batch %d for user %s failed: %v", workerID, work.index, userProfile.UserID, err)
+					continue
+				}
+
+				if err := s.upsertMatchResults(ctx, userProfile.UserID, results); err != nil {
+					log.Printf("[MistralMatcher] Worker %d: Failed upserting batch %d for user %s: %v", workerID, work.index, userProfile.UserID, err)
+					continue
+				}
+
+				if mu != nil {
+					mu.Lock()
+					for _, result := range results {
+						evaluatedJobIDs[result.JobID] = true
+					}
+					mu.Unlock()
+				}
+			}
+		}(w)
+	}
+
+	wg.Wait()
 }
 
 func (s *MistralBatchMatchService) callMistralBatch(
@@ -248,6 +290,9 @@ JOBS:
 func (s *MistralBatchMatchService) upsertMatchResults(ctx context.Context, userID string, results []mistralMatchResult) error {
 	for _, result := range results {
 		techStackJSON, _ := json.Marshal(result.TechStack)
+
+		log.Printf("[MistralMatcher] User %s evaluated job %s -> score: %d, matched: %v, reasoning: %s",
+			userID, result.JobID, result.MatchScore, result.IsMatched, result.MatchReasoning)
 
 		query := `
 			INSERT INTO user_job_matches (user_id, job_id, match_score, is_ai_matched, seniority, tech_stack, match_reasoning, ai_model, evaluated_at, match_reasons)
