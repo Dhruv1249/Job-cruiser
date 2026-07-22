@@ -27,6 +27,7 @@ type StartRunResponse struct {
 type IngestJobPayload struct {
 	JobID           interface{} `json:"job_id"`
 	Title           string      `json:"title"`
+	Company         string      `json:"company"`
 	Source          string      `json:"source"`
 	UpdatedAt       string      `json:"updated_at"`
 	AbsoluteURL     string      `json:"absolute_url"`
@@ -110,27 +111,34 @@ func (h *IngestHandler) IngestRaw(c *gin.Context) {
 	defer tx.Rollback(ctx)
 
 	insertedCount := 0
+	companyCache := make(map[string]string)
 
 	for _, job := range req.Jobs {
 		if job.AbsoluteURL == "" {
 			continue
 		}
 
-		cleanCompanyName := strings.TrimSpace(job.Title)
 		companyName := "Unknown"
-		if job.Departments != nil && len(job.Departments) > 0 {
-			companyName = job.Departments[0]
+		if job.Company != "" {
+			companyName = strings.TrimSpace(job.Company)
+		} else if len(job.Departments) > 0 && job.Departments[0] != "" {
+			companyName = strings.TrimSpace(job.Departments[0])
 		}
-		_ = cleanCompanyName
 
 		var companyID string
-		compLookup := `SELECT id FROM companies WHERE LOWER(name) = LOWER($1)`
-		compErr := tx.QueryRow(ctx, compLookup, companyName).Scan(&companyID)
-		if compErr != nil {
-			insertCompQuery := `INSERT INTO companies (name) VALUES ($1) RETURNING id`
-			if scanErr := tx.QueryRow(ctx, insertCompQuery, companyName).Scan(&companyID); scanErr != nil {
-				continue
+		cacheKey := strings.ToLower(companyName)
+		if cachedID, exists := companyCache[cacheKey]; exists {
+			companyID = cachedID
+		} else {
+			compLookup := `SELECT id FROM companies WHERE LOWER(name) = LOWER($1)`
+			compErr := tx.QueryRow(ctx, compLookup, companyName).Scan(&companyID)
+			if compErr != nil {
+				insertCompQuery := `INSERT INTO companies (name) VALUES ($1) RETURNING id`
+				if scanErr := tx.QueryRow(ctx, insertCompQuery, companyName).Scan(&companyID); scanErr != nil {
+					continue
+				}
 			}
+			companyCache[cacheKey] = companyID
 		}
 
 		loc := job.Location
@@ -509,7 +517,7 @@ func containsWord(text, word string) bool {
 		end := start + len(word)
 		
 		startOk := start == 0 || !isAlphanumeric(text[start-1])
-		endOk := end == len(text) || !isAlphanumeric(text[end-1])
+		endOk := end == len(text) || !isAlphanumeric(text[end])
 		
 		if startOk && endOk {
 			return true

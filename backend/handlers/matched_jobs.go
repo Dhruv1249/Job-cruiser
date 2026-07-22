@@ -79,7 +79,7 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 			COALESCE(j.source, ''),
 			j.url,
 			COALESCE(j.posted_date, ''),
-			COALESCE(j.seniority, ''),
+			COALESCE(ujm.seniority, ''),
 			COALESCE(j.summary, ''),
 			ujm.match_score,
 			COALESCE(ujm.match_reasoning, ''),
@@ -99,7 +99,7 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 
 	rows, err := h.DB.Query(context.Background(), query, userID, minScore, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query matched jobs"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query matched jobs: " + err.Error()})
 		return
 	}
 	defer rows.Close()
@@ -127,7 +127,7 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 			&job.SalaryMax,
 			&job.Currency,
 		); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan matched job row"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan matched job row: " + err.Error()})
 			return
 		}
 
