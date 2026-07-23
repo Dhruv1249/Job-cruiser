@@ -39,14 +39,21 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Configure Docker for GCP Artifact Registry
         run: gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
 
-      - name: Build and Push Docker Image
-        run: |
-          IMAGE_URI="asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/jobcruiser/job-cruiser-scraper:latest"
-          docker build -t $IMAGE_URI ./scrapper
-          docker push $IMAGE_URI
+      - name: Build and Push Docker Image with GHA Cache
+        uses: docker/build-push-action@v5
+        with:
+          context: ./scrapper
+          file: ./scrapper/Dockerfile
+          push: true
+          tags: asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/jobcruiser/job-cruiser-scraper:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Update Cloud Run Job
         run: |
