@@ -51,14 +51,14 @@ jobs:
           context: ./scrapper
           file: ./scrapper/Dockerfile
           push: true
-          tags: asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/jobcruiser/job-cruiser-scraper:latest
+          tags: asia-south2-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/jobcruiser/job-cruiser-scraper:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Update Cloud Run Job
         run: |
-          IMAGE_URI="asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/jobcruiser/job-cruiser-scraper:latest"
+          IMAGE_URI="asia-south2-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/jobcruiser/job-cruiser-scraper:latest"
           gcloud run jobs update job-cruiser-scraper \
             --image=$IMAGE_URI \
-            --region=asia-south1 \
+            --region=asia-south2 \
             --task-timeout=3600s
