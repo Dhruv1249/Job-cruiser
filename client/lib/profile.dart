@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_app/services/api_service.dart';
+import 'services/api_service.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'preferences.dart' as preferences_page;
 import 'main.dart' show AppColors;
+import 'auth.dart';
+import 'admin.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -648,6 +651,8 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildSecuritySection() {
+    final bool isMasterAdmin = _userProfile?['is_master_admin'] as bool? ?? false;
+
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surfaceContainerLowest,
@@ -663,16 +668,47 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
       child: Column(
         children: [
+          if (isMasterAdmin)
+            _buildActionTile(
+              icon: Icons.admin_panel_settings,
+              title: 'Master Admin Control Panel',
+              hasBorder: true,
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const MasterAdminScreen(),
+                  ),
+                );
+              },
+            ),
           _buildActionTile(
-            icon: Icons.mail_outline,
-            title: 'Email Preferences',
+            icon: Icons.tune_outlined,
+            title: 'Match Preferences',
             hasBorder: true,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const preferences_page.SetPreferencesScreen(),
+                ),
+              );
+            },
           ),
           _buildActionTile(
             icon: Icons.logout,
             title: 'Sign Out',
             hasBorder: false,
             isDestructive: true,
+            onTap: () async {
+              await _apiService.clearToken();
+              try {
+                await GoogleSignIn().signOut();
+              } catch (_) {}
+              if (!mounted) return;
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => const AuthScreen()),
+                (route) => false,
+              );
+            },
           ),
         ],
       ),
@@ -684,11 +720,12 @@ class _ProfilePageState extends State<ProfilePage> {
     required String title,
     required bool hasBorder,
     bool isDestructive = false,
+    VoidCallback? onTap,
   }) {
     final color = isDestructive ? AppColors.error : AppColors.primary;
 
     return InkWell(
-      onTap: () {},
+      onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(

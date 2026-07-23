@@ -32,11 +32,12 @@ func (h *JobHandler) GetJobs(c *gin.Context) {
 
 	// Updated query: Replaced salary and score with salary_min, salary_max, currency
 	query := `
-		SELECT id, company_id, title, location, salary_min, salary_max, currency, 
-		       experience_required, job_type, is_easy_apply, is_remote, source, 
-		       url, posted_date, tags, scraped_at 
-		FROM jobs 
-		ORDER BY scraped_at DESC 
+		SELECT j.id, j.company_id, COALESCE(comp.name, ''), j.title, j.location, j.salary_min, j.salary_max, j.currency, 
+		       j.experience_required, j.job_type, j.is_easy_apply, j.is_remote, j.source, 
+		       j.url, j.posted_date, j.tags, j.scraped_at 
+		FROM jobs j
+		LEFT JOIN companies comp ON j.company_id = comp.id
+		ORDER BY j.scraped_at DESC 
 		LIMIT $1 OFFSET $2;
 	`
 
@@ -51,9 +52,8 @@ func (h *JobHandler) GetJobs(c *gin.Context) {
 	var jobs []models.Job
 	for rows.Next() {
 		var j models.Job
-		// Scan updated to match the exact order of the SELECT statement
 		err := rows.Scan(
-			&j.ID, &j.CompanyID, &j.Title, &j.Location, &j.SalaryMin, &j.SalaryMax, &j.Currency,
+			&j.ID, &j.CompanyID, &j.Company, &j.Title, &j.Location, &j.SalaryMin, &j.SalaryMax, &j.Currency,
 			&j.ExperienceRequired, &j.JobType, &j.IsEasyApply, &j.IsRemote, &j.Source,
 			&j.URL, &j.PostedDate, &j.Tags, &j.ScrapedAt,
 		)

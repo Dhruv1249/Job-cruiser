@@ -27,8 +27,15 @@ var schemaQueries = []string{
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`,
 
-	`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT;`,
-	`ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(50) DEFAULT 'local';`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_master_admin BOOLEAN DEFAULT false;`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_matching_enabled BOOLEAN DEFAULT true;`,
+
+	`CREATE TABLE IF NOT EXISTS whitelisted_emails (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		email TEXT UNIQUE NOT NULL,
+		notes TEXT,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);`,
 
 	`CREATE TABLE IF NOT EXISTS cv_templates (
 		id SERIAL PRIMARY KEY,
@@ -37,7 +44,6 @@ var schemaQueries = []string{
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`,
 
-	// 2. User Dependencies
 	`CREATE TABLE IF NOT EXISTS user_preferences (
 		user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
 		full_name TEXT,
@@ -45,7 +51,33 @@ var schemaQueries = []string{
 		work_models JSONB DEFAULT '[]'::jsonb,
 		min_salary INTEGER DEFAULT 0,
 		currency VARCHAR(10) DEFAULT 'USD',
+		master_cv_text TEXT,
+		bio_experience_text TEXT,
 		custom_form_answers JSONB DEFAULT '{}'::jsonb,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);`,
+
+	`CREATE TABLE IF NOT EXISTS master_keywords (
+		id SERIAL PRIMARY KEY,
+		keyword VARCHAR(100) UNIQUE NOT NULL,
+		category VARCHAR(50) DEFAULT 'general',
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);`,
+
+	`CREATE TABLE IF NOT EXISTS pending_keyword_suggestions (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		keyword VARCHAR(100) NOT NULL,
+		discovered_from_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+		status VARCHAR(20) DEFAULT 'pending',
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);`,
+
+	`CREATE TABLE IF NOT EXISTS user_overleaf_config (
+		user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+		deployment_url TEXT NOT NULL,
+		github_username TEXT NOT NULL,
+		github_repo_name TEXT NOT NULL,
+		encrypted_access_token TEXT NOT NULL,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`,
 
