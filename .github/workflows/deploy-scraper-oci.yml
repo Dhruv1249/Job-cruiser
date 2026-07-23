@@ -1,0 +1,71 @@
+name: Deploy Scraper to OCI VM
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'scrapper/**'
+      - '.github/workflows/deploy-scraper-oci.yml'
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Test Dependencies
+        run: |
+          cd scrapper
+          pip install pytest beautifulsoup4 requests urllib3 PyYAML python-dotenv
+          pip install git+https://github.com/Dhruv1249/JobSpy.git@main
+
+      - name: Run Scraper Unit Tests
+        run: |
+          cd scrapper
+          PYTHONPATH=. pytest tests/
+
+      - name: Deploy and Schedule Scraper on OCI VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ${{ secrets.OCI_USER }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          script: |
+            cd ~/Job-cruiser/scrapper
+            git pull origin main
+            docker build -t jobcruiser-scraper:latest .
+
+            sudo bash -c 'cat << "EOF" > /etc/systemd/system/jobcruiser-scraper.service
+            [Unit]
+            Description=JobCruiser Scraper Task
+            After=network.target
+
+            [Service]
+            Type=oneshot
+            WorkingDirectory=/home/opc/Job-cruiser/scrapper
+            ExecStart=/usr/bin/docker run --rm --net host --env-file /home/opc/Job-cruiser/.env jobcruiser-scraper:latest
+            EOF
+
+            cat << "EOF" > /etc/systemd/system/jobcruiser-scraper.timer
+            [Unit]
+            Description=Run JobCruiser Scraper twice daily (10:00 AM and 5:00 PM IST)
+
+            [Timer]
+            OnCalendar=*-*-* 10,17:00:00 Asia/Kolkata
+            Persistent=true
+
+            [Install]
+            WantedBy=timers.target
+            EOF
+
+            systemctl daemon-reload
+            systemctl enable jobcruiser-scraper.timer
+            systemctl restart jobcruiser-scraper.timer
+            '
