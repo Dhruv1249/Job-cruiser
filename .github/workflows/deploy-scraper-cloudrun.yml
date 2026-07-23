@@ -1,0 +1,57 @@
+name: Deploy Scraper to GCP Cloud Run Job
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'scrapper/**'
+      - '.github/workflows/deploy-scraper-cloudrun.yml'
+
+jobs:
+  test-build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Test Dependencies
+        run: |
+          cd scrapper
+          pip install pytest beautifulsoup4 requests urllib3 PyYAML python-dotenv
+          pip install git+https://github.com/Dhruv1249/JobSpy.git@main
+
+      - name: Run Scraper Tests
+        run: |
+          cd scrapper
+          PYTHONPATH=. pytest tests/
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCP Artifact Registry
+        run: gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
+
+      - name: Build and Push Docker Image
+        run: |
+          IMAGE_URI="asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/jobcruiser/job-cruiser-scraper:latest"
+          docker build -t $IMAGE_URI ./scrapper
+          docker push $IMAGE_URI
+
+      - name: Update Cloud Run Job
+        run: |
+          IMAGE_URI="asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/jobcruiser/job-cruiser-scraper:latest"
+          gcloud run jobs update job-cruiser-scraper \
+            --image=$IMAGE_URI \
+            --region=asia-south1 \
+            --task-timeout=3600s

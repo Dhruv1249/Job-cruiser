@@ -18,10 +18,11 @@ const (
 	mistralAPIEndpoint       = "https://api.mistral.ai/v1/chat/completions"
 	mistralMatchModel        = "mistral-small-2506"
 	mistralRequestsPerSecond = 5
-	mistralBatchSize         = 100
+	maxEvaluationsPerPrompt  = 80
 	descriptionTruncateChars = 600
 	matchScoreThreshold      = 50
 	maxConcurrentWorkers     = 5
+	maxCandidatesPerPrompt   = 4
 )
 
 // MistralBatchMatchService evaluates batches of unevaluated jobs against each
@@ -35,12 +36,12 @@ type MistralBatchMatchService struct {
 
 // UserProfile holds the CV data needed to build a personalised Mistral prompt.
 type UserProfile struct {
-	UserID           string
-	ParsedExperience string
-	TargetRoles      string
-	WorkModels       string
-	MinSalary        int
-	Currency         string
+	UserID           string `json:"user_id"`
+	ParsedExperience string `json:"parsed_experience"`
+	TargetRoles      string `json:"target_roles"`
+	WorkModels       string `json:"work_models"`
+	MinSalary        int    `json:"min_salary"`
+	Currency         string `json:"currency"`
 }
 
 // JobSnippet is the minimal job data sent to Mistral per batch entry.
@@ -52,7 +53,7 @@ type JobSnippet struct {
 	Description string `json:"description"`
 }
 
-// mistralMatchResult is a single result record returned by the Mistral model.
+// mistralMatchResult is a single result record returned by the Mistral model for a single candidate.
 type mistralMatchResult struct {
 	JobID          string   `json:"job_id"`
 	IsMatched      bool     `json:"is_matched"`
@@ -64,6 +65,24 @@ type mistralMatchResult struct {
 
 type mistralBatchResponse struct {
 	Results []mistralMatchResult `json:"results"`
+}
+
+type candidateMatchResult struct {
+	UserID         string   `json:"user_id"`
+	IsMatched      bool     `json:"is_matched"`
+	MatchScore     int      `json:"match_score"`
+	TechStack      []string `json:"tech_stack"`
+	MatchReasoning string   `json:"reasoning"`
+}
+
+type jobMultiMatchResult struct {
+	JobID     string                 `json:"job_id"`
+	Seniority string                 `json:"seniority"`
+	Matches   []candidateMatchResult `json:"matches"`
+}
+
+type mistralMultiBatchResponse struct {
+	Results []jobMultiMatchResult `json:"results"`
 }
 
 type mistralRequestMessage struct {
@@ -86,9 +105,8 @@ type mistralAPIResponse struct {
 	} `json:"choices"`
 }
 
-// EvaluatePendingForAllUsers fetches all active users, then for each user runs a
-// full evaluation pass over every job where ai_evaluated = false. Designed to run
-// as a goroutine triggered by the scraper finish-run signal.
+// EvaluatePendingForAllUsers fetches all active users, groups them into chunks of up to 4 candidates,
+// and evaluates every job where ai_evaluated = false against all candidates in a single prompt pass.
 func (s *MistralBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context) {
 	userProfiles, err := s.fetchAllUserProfiles(ctx)
 	if err != nil {
@@ -102,19 +120,22 @@ func (s *MistralBatchMatchService) EvaluatePendingForAllUsers(ctx context.Contex
 		return
 	}
 
-	if len(pendingJobs) == 0 {
-		log.Printf("[MistralMatcher] No unevaluated jobs found, skipping evaluation pass.")
+	if len(pendingJobs) == 0 || len(userProfiles) == 0 {
+		log.Printf("[MistralMatcher] No unevaluated jobs or user profiles found, skipping evaluation pass.")
 		return
 	}
 
-	log.Printf("[MistralMatcher] Starting evaluation: %d jobs × %d users (using %d parallel workers)",
-		len(pendingJobs), len(userProfiles), maxConcurrentWorkers)
+	userChunks := chunkUserProfiles(userProfiles, maxCandidatesPerPrompt)
+
+	log.Printf("[MistralMatcher] Starting multi-candidate evaluation: %d jobs × %d users (%d user chunks, %d parallel workers)",
+		len(pendingJobs), len(userProfiles), len(userChunks), maxConcurrentWorkers)
 
 	evaluatedJobIDs := make(map[string]bool)
 	var mu sync.Mutex
 
-	for _, userProfile := range userProfiles {
-		s.evaluateJobsForUser(ctx, userProfile, pendingJobs, evaluatedJobIDs, &mu)
+	for chunkIndex, userChunk := range userChunks {
+		s.evaluateJobsForUserChunk(ctx, userChunk, pendingJobs, evaluatedJobIDs, &mu)
+		log.Printf("[MistralMatcher] Finished evaluation pass for user chunk %d/%d", chunkIndex+1, len(userChunks))
 	}
 
 	if err := s.markJobsEvaluated(ctx, evaluatedJobIDs); err != nil {
@@ -124,14 +145,24 @@ func (s *MistralBatchMatchService) EvaluatePendingForAllUsers(ctx context.Contex
 	log.Printf("[MistralMatcher] Evaluation complete. Marked %d jobs as evaluated.", len(evaluatedJobIDs))
 }
 
-func (s *MistralBatchMatchService) evaluateJobsForUser(
+func (s *MistralBatchMatchService) evaluateJobsForUserChunk(
 	ctx context.Context,
-	userProfile UserProfile,
+	userChunk []UserProfile,
 	pendingJobs []JobSnippet,
 	evaluatedJobIDs map[string]bool,
 	mu *sync.Mutex,
 ) {
-	batches := chunkJobSnippets(pendingJobs, mistralBatchSize)
+	candidateCount := len(userChunk)
+	if candidateCount == 0 {
+		return
+	}
+
+	batchSize := maxEvaluationsPerPrompt / candidateCount
+	if batchSize < 10 {
+		batchSize = 10
+	}
+
+	batches := chunkJobSnippets(pendingJobs, batchSize)
 	if len(batches) == 0 {
 		return
 	}
@@ -167,21 +198,21 @@ func (s *MistralBatchMatchService) evaluateJobsForUser(
 				case <-rateLimiter.C:
 				}
 
-				results, err := s.callMistralBatch(ctx, userProfile, work.items)
+				results, err := s.callMistralMultiBatch(ctx, userChunk, work.items)
 				if err != nil {
-					log.Printf("[MistralMatcher] Worker %d: Batch %d for user %s failed: %v", workerID, work.index, userProfile.UserID, err)
+					log.Printf("[MistralMatcher] Worker %d: Multi-batch %d failed: %v", workerID, work.index, err)
 					continue
 				}
 
-				if err := s.upsertMatchResults(ctx, userProfile.UserID, results); err != nil {
-					log.Printf("[MistralMatcher] Worker %d: Failed upserting batch %d for user %s: %v", workerID, work.index, userProfile.UserID, err)
+				if err := s.upsertMultiMatchResults(ctx, results); err != nil {
+					log.Printf("[MistralMatcher] Worker %d: Failed upserting multi-batch %d: %v", workerID, work.index, err)
 					continue
 				}
 
 				if mu != nil {
 					mu.Lock()
-					for _, result := range results {
-						evaluatedJobIDs[result.JobID] = true
+					for _, jobRes := range results {
+						evaluatedJobIDs[jobRes.JobID] = true
 					}
 					mu.Unlock()
 				}
@@ -192,12 +223,23 @@ func (s *MistralBatchMatchService) evaluateJobsForUser(
 	wg.Wait()
 }
 
-func (s *MistralBatchMatchService) callMistralBatch(
+func (s *MistralBatchMatchService) evaluateJobsForUser(
 	ctx context.Context,
 	userProfile UserProfile,
+	pendingJobs []JobSnippet,
+	evaluatedJobIDs map[string]bool,
+	mu *sync.Mutex,
+) {
+	s.evaluateJobsForUserChunk(ctx, []UserProfile{userProfile}, pendingJobs, evaluatedJobIDs, mu)
+}
+
+func (s *MistralBatchMatchService) callMistralMultiBatch(
+	ctx context.Context,
+	userChunk []UserProfile,
 	batch []JobSnippet,
-) ([]mistralMatchResult, error) {
-	prompt := s.buildMatchPrompt(userProfile, batch)
+) ([]jobMultiMatchResult, error) {
+	prompt := s.buildMultiMatchPrompt(userChunk, batch)
+	start := time.Now()
 
 	requestPayload := mistralRequest{
 		Model: mistralMatchModel,
@@ -244,85 +286,138 @@ func (s *MistralBatchMatchService) callMistralBatch(
 		return nil, fmt.Errorf("Mistral returned no choices")
 	}
 
-	var batchResponse mistralBatchResponse
+	var batchResponse mistralMultiBatchResponse
 	if err := json.Unmarshal([]byte(apiResponse.Choices[0].Message.Content), &batchResponse); err != nil {
-		return nil, fmt.Errorf("failed to parse Mistral batch result JSON: %w", err)
+		return nil, fmt.Errorf("failed to parse Mistral multi-batch result JSON: %w", err)
 	}
 
+	log.Printf("[MistralMatcher] Multi-batch of %d jobs × %d candidates finished in %v", len(batch), len(userChunk), time.Since(start))
 	return batchResponse.Results, nil
 }
 
-func (s *MistralBatchMatchService) buildMatchPrompt(userProfile UserProfile, batch []JobSnippet) string {
+func (s *MistralBatchMatchService) callMistralBatch(
+	ctx context.Context,
+	userProfile UserProfile,
+	batch []JobSnippet,
+) ([]mistralMatchResult, error) {
+	multiResults, err := s.callMistralMultiBatch(ctx, []UserProfile{userProfile}, batch)
+	if err != nil {
+		return nil, err
+	}
+
+	var singleResults []mistralMatchResult
+	for _, jobRes := range multiResults {
+		for _, m := range jobRes.Matches {
+			singleResults = append(singleResults, mistralMatchResult{
+				JobID:          jobRes.JobID,
+				IsMatched:      m.IsMatched,
+				MatchScore:     m.MatchScore,
+				Seniority:      jobRes.Seniority,
+				TechStack:      m.TechStack,
+				MatchReasoning: m.MatchReasoning,
+			})
+		}
+	}
+	return singleResults, nil
+}
+
+func (s *MistralBatchMatchService) buildMultiMatchPrompt(userChunk []UserProfile, batch []JobSnippet) string {
+	candidatesJSON, _ := json.Marshal(userChunk)
 	batchJSON, _ := json.Marshal(batch)
 
-	return fmt.Sprintf(`You are a precise job-fit evaluator. A candidate is looking for early-career roles (0-3 years experience).
+	return fmt.Sprintf(`You are a precise job-fit evaluator. Evaluate the list of jobs against each of the following candidate profiles (up to 4 candidates).
 
-CANDIDATE PROFILE:
+CANDIDATE PROFILES:
 %s
-
-Target roles: %s
-Preferred work models: %s
-Minimum salary: %d %s
 
 EVALUATION RULES:
 - Match ONLY if the role targets 0-3 years experience (Junior, New Grad, Intern, Entry Level, SDE I, Associate).
 - REJECT roles requiring 4+ years, or titled Senior/Staff/Lead/Principal/Director/Manager/VP.
 - REJECT roles restricted to US-only, UK-only, or Europe-only if the candidate is India-based or remote.
-- Score 0-100 based on stack overlap with the candidate's experience.
+- Score 0-100 based on stack overlap with candidate experience.
 - is_matched = true when match_score >= %d.
+- CRITICAL SPEED RULE: For candidate matches where is_matched is false, keep reasoning as "" and tech_stack as []. Provide reasoning ONLY when is_matched is true.
 
-For each job in the list below, return exactly one result object.
+For each job in the list below, return match results for ALL candidates listed in CANDIDATE PROFILES.
 Return ONLY valid JSON in this exact shape:
-{"results": [{"job_id": "...", "is_matched": true|false, "match_score": 0-100, "seniority": "Junior|Mid|Intern|Senior", "tech_stack": ["lang", "framework"], "reasoning": "one sentence"}]}
+{"results": [{"job_id": "...", "seniority": "Junior|Mid|Intern|Senior", "matches": [{"user_id": "...", "is_matched": true|false, "match_score": 0-100, "tech_stack": ["lang"], "reasoning": "sentence if matched, else empty string"}]}]}
 
 JOBS:
 %s`,
-		userProfile.ParsedExperience,
-		userProfile.TargetRoles,
-		userProfile.WorkModels,
-		userProfile.MinSalary,
-		userProfile.Currency,
+		string(candidatesJSON),
 		matchScoreThreshold,
 		string(batchJSON),
 	)
 }
 
-func (s *MistralBatchMatchService) upsertMatchResults(ctx context.Context, userID string, results []mistralMatchResult) error {
-	for _, result := range results {
-		techStackJSON, _ := json.Marshal(result.TechStack)
+func (s *MistralBatchMatchService) buildMatchPrompt(userProfile UserProfile, batch []JobSnippet) string {
+	return s.buildMultiMatchPrompt([]UserProfile{userProfile}, batch)
+}
 
-		log.Printf("[MistralMatcher] User %s evaluated job %s -> score: %d, matched: %v, reasoning: %s",
-			userID, result.JobID, result.MatchScore, result.IsMatched, result.MatchReasoning)
+func (s *MistralBatchMatchService) upsertMultiMatchResults(ctx context.Context, results []jobMultiMatchResult) error {
+	for _, jobResult := range results {
+		for _, match := range jobResult.Matches {
+			if match.UserID == "" || jobResult.JobID == "" {
+				continue
+			}
 
-		query := `
-			INSERT INTO user_job_matches (user_id, job_id, match_score, is_ai_matched, seniority, tech_stack, match_reasoning, ai_model, evaluated_at, match_reasons)
-			VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $9)
-			ON CONFLICT (user_id, job_id) DO UPDATE SET
-				match_score     = EXCLUDED.match_score,
-				is_ai_matched   = EXCLUDED.is_ai_matched,
-				seniority       = EXCLUDED.seniority,
-				tech_stack      = EXCLUDED.tech_stack,
-				match_reasoning = EXCLUDED.match_reasoning,
-				ai_model        = EXCLUDED.ai_model,
-				evaluated_at    = CURRENT_TIMESTAMP;
-		`
-		matchReasons, _ := json.Marshal([]string{result.MatchReasoning})
-		_, err := s.DB.Exec(ctx, query,
-			userID,
-			result.JobID,
-			result.MatchScore,
-			result.IsMatched,
-			result.Seniority,
-			techStackJSON,
-			result.MatchReasoning,
-			mistralMatchModel,
-			matchReasons,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to upsert match for job %s: %w", result.JobID, err)
+			techStackJSON, _ := json.Marshal(match.TechStack)
+
+			if match.IsMatched {
+				log.Printf("[MistralMatcher] User %s evaluated job %s -> score: %d, matched: true, reasoning: %s",
+					match.UserID, jobResult.JobID, match.MatchScore, match.MatchReasoning)
+			}
+
+			query := `
+				INSERT INTO user_job_matches (user_id, job_id, match_score, is_ai_matched, seniority, tech_stack, match_reasoning, ai_model, evaluated_at, match_reasons)
+				VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $9)
+				ON CONFLICT (user_id, job_id) DO UPDATE SET
+					match_score     = EXCLUDED.match_score,
+					is_ai_matched   = EXCLUDED.is_ai_matched,
+					seniority       = EXCLUDED.seniority,
+					tech_stack      = EXCLUDED.tech_stack,
+					match_reasoning = EXCLUDED.match_reasoning,
+					ai_model        = EXCLUDED.ai_model,
+					evaluated_at    = CURRENT_TIMESTAMP;
+			`
+			matchReasons, _ := json.Marshal([]string{match.MatchReasoning})
+			_, err := s.DB.Exec(ctx, query,
+				match.UserID,
+				jobResult.JobID,
+				match.MatchScore,
+				match.IsMatched,
+				jobResult.Seniority,
+				techStackJSON,
+				match.MatchReasoning,
+				mistralMatchModel,
+				matchReasons,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to upsert match for user %s, job %s: %w", match.UserID, jobResult.JobID, err)
+			}
 		}
 	}
 	return nil
+}
+
+func (s *MistralBatchMatchService) upsertMatchResults(ctx context.Context, userID string, results []mistralMatchResult) error {
+	var multiResults []jobMultiMatchResult
+	for _, r := range results {
+		multiResults = append(multiResults, jobMultiMatchResult{
+			JobID:     r.JobID,
+			Seniority: r.Seniority,
+			Matches: []candidateMatchResult{
+				{
+					UserID:         userID,
+					IsMatched:      r.IsMatched,
+					MatchScore:     r.MatchScore,
+					TechStack:      r.TechStack,
+					MatchReasoning: r.MatchReasoning,
+				},
+			},
+		})
+	}
+	return s.upsertMultiMatchResults(ctx, multiResults)
 }
 
 func (s *MistralBatchMatchService) fetchAllUserProfiles(ctx context.Context) ([]UserProfile, error) {
@@ -402,6 +497,18 @@ func (s *MistralBatchMatchService) markJobsEvaluated(ctx context.Context, jobIDs
 	`
 	_, err := s.DB.Exec(ctx, query, ids)
 	return err
+}
+
+func chunkUserProfiles(profiles []UserProfile, size int) [][]UserProfile {
+	var chunks [][]UserProfile
+	for i := 0; i < len(profiles); i += size {
+		end := i + size
+		if end > len(profiles) {
+			end = len(profiles)
+		}
+		chunks = append(chunks, profiles[i:end])
+	}
+	return chunks
 }
 
 func chunkJobSnippets(snippets []JobSnippet, size int) [][]JobSnippet {
