@@ -1,0 +1,46 @@
+name: Deploy Backend to OCI VM
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend-oci.yml'
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: backend/go.sum
+
+      - name: Run Backend Unit Tests
+        run: |
+          cd backend
+          go test -v ./...
+
+      - name: Deploy to OCI VM via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ${{ secrets.OCI_USER }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          script: |
+            cd ~/Job-cruiser/backend
+            git pull origin main
+            docker build -t jobcruiser-backend:latest .
+            docker stop jobcruiser-backend || true
+            docker rm jobcruiser-backend || true
+            docker run -d \
+              --name jobcruiser-backend \
+              --restart unless-stopped \
+              --net host \
+              --env-file .env \
+              jobcruiser-backend:latest

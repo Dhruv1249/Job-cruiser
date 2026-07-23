@@ -1,4 +1,6 @@
 beautifulsoup4
 requests
 urllib3
-
+PyYAML
+python-dotenv
+git+https://github.com/Dhruv1249/JobSpy.git@main
