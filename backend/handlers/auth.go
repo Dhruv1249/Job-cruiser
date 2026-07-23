@@ -24,10 +24,22 @@ type SignupRequest struct {
 	Password string `json:"password" binding:"required,min=6"`
 }
 
+func (h *AuthHandler) isEmailWhitelisted(email string) bool {
+	var count int
+	query := `SELECT COUNT(*) FROM whitelisted_emails WHERE LOWER(email) = LOWER($1);`
+	err := h.DB.QueryRow(context.Background(), query, email).Scan(&count)
+	return err == nil && count > 0
+}
+
 func (h *AuthHandler) Signup(c *gin.Context) {
 	var req SignupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
+		return
+	}
+
+	if !h.isEmailWhitelisted(req.Email) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access restricted. Your email is not whitelisted by Master Admin."})
 		return
 	}
 
@@ -37,14 +49,15 @@ func (h *AuthHandler) Signup(c *gin.Context) {
 		return
 	}
 
+	isMasterAdmin := req.Email == "shama.2013.kangra@gmail.com"
 	var newUserID string
 	query := `
-		INSERT INTO users (primary_email, password_hash) 
-		VALUES ($1, $2) 
+		INSERT INTO users (primary_email, password_hash, is_master_admin) 
+		VALUES ($1, $2, $3) 
 		RETURNING id;
 	`
 
-	err = h.DB.QueryRow(context.Background(), query, req.Email, string(hashedPassword)).Scan(&newUserID)
+	err = h.DB.QueryRow(context.Background(), query, req.Email, string(hashedPassword), isMasterAdmin).Scan(&newUserID)
 	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Email already exists or database error"})
 		return
@@ -57,10 +70,11 @@ func (h *AuthHandler) Signup(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message":     "User created successfully",
-		"token":       tokenString,
-		"user_id":     newUserID,
-		"is_new_user": true, // Standardized routing flag
+		"message":         "User created successfully",
+		"token":           tokenString,
+		"user_id":         newUserID,
+		"is_new_user":     true,
+		"is_master_admin": isMasterAdmin,
 	})
 }
 
@@ -143,45 +157,85 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 
 	// 3. Check if the user already exists
 	var userID string
+	var isMasterAdmin bool
 	isNewUser := false
 
-	err = h.DB.QueryRow(context.Background(), "SELECT id FROM users WHERE primary_email = $1", email).Scan(&userID)
+	err = h.DB.QueryRow(context.Background(), "SELECT id, is_master_admin FROM users WHERE primary_email = $1", email).Scan(&userID, &isMasterAdmin)
 
 	if err == pgx.ErrNoRows {
+		if !h.isEmailWhitelisted(email) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Access restricted. Your email is not whitelisted by Master Admin."})
+			return
+		}
+
 		isNewUser = true
+		isMasterAdmin = email == "shama.2013.kangra@gmail.com"
 		insertQuery := `
-			INSERT INTO users (primary_email, avatar_url, google_id, auth_provider)
-			VALUES ($1, $2, $3, 'google')
+			INSERT INTO users (primary_email, avatar_url, google_id, auth_provider, is_master_admin)
+			VALUES ($1, $2, $3, 'google', $4)
 			RETURNING id;
 		`
-		err = h.DB.QueryRow(context.Background(), insertQuery, email, avatar, googleID).Scan(&userID)
+		err = h.DB.QueryRow(context.Background(), insertQuery, email, avatar, googleID, isMasterAdmin).Scan(&userID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error creating new user"})
 			return
 		}
 	} else if err != nil {
-		// A real database connection error occurred
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error checking user"})
 		return
 	} else {
-		// EXISTING USER: Just update their avatar in case they changed it on Google
 		updateQuery := `UPDATE users SET avatar_url = $1, google_id = $2 WHERE id = $3`
 		h.DB.Exec(context.Background(), updateQuery, avatar, googleID, userID)
 	}
 
-	//  Hand them our custom VIP pass
 	tokenString, err := utils.GenerateToken(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate session token"})
 		return
 	}
 
-	//  Send the payload back to Flutter, including the routing flag
 	c.JSON(http.StatusOK, gin.H{
-		"message":        "Google Login successful",
-		"token":          tokenString,
-		"user_id":        userID,
-		"is_new_user":    isNewUser,
-		"suggested_name": name, // Frontend can use this to pre-fill the name field!
+		"message":         "Google Login successful",
+		"token":           tokenString,
+		"user_id":         userID,
+		"is_new_user":     isNewUser,
+		"is_master_admin": isMasterAdmin,
+		"suggested_name": name,
 	})
 }
+
+/*
+GetMe retrieves the authenticated user's profile details.
+*/
+func (h *AuthHandler) GetMe(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	query := `
+		SELECT u.id, u.primary_email, COALESCE(up.full_name, ''), COALESCE(u.avatar_url, '')
+		FROM users u
+		LEFT JOIN user_preferences up ON u.id = up.user_id
+		WHERE u.id = $1;
+	`
+
+	var idString string
+	var primaryEmailString string
+	var fullNameString string
+	var avatarURLString string
+	err := h.DB.QueryRow(context.Background(), query, userID).Scan(&idString, &primaryEmailString, &fullNameString, &avatarURLString)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user profile"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":            idString,
+		"primary_email": primaryEmailString,
+		"full_name":     fullNameString,
+		"avatar_url":    avatarURLString,
+	})
+}
+

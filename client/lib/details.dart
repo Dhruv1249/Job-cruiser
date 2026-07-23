@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'main.dart' show AppColors;
+import 'models/job.dart';
+import 'services/api_service.dart';
 
 void main() {
   runApp(const CompanyDetailsApp());
@@ -21,68 +23,118 @@ class CompanyDetailsApp extends StatelessWidget {
           surface: AppColors.surface,
           primary: AppColors.primary,
         ),
-        navigationBarTheme: NavigationBarThemeData(
-          backgroundColor: AppColors.surface,
-          indicatorColor: AppColors.secondaryContainer,
-          labelTextStyle: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) {
-              return const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.onSecondaryContainer);
-            }
-            return const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: AppColors.onSurfaceVariant);
-          }),
-          iconTheme: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) {
-              return const IconThemeData(color: AppColors.onSecondaryContainer);
-            }
-            return const IconThemeData(color: AppColors.onSurfaceVariant);
-          }),
-        ),
       ),
       home: const CompanyDetailsPage(),
     );
   }
 }
 
-class CompanyDetailsPage extends StatelessWidget {
-  const CompanyDetailsPage({super.key, this.onBackToInbox});
+class CompanyDetailsPage extends StatefulWidget {
+  const CompanyDetailsPage({super.key, this.onBackToInbox, this.job});
 
   final VoidCallback? onBackToInbox;
+  final MatchedJob? job;
+
+  @override
+  State<CompanyDetailsPage> createState() => _CompanyDetailsPageState();
+}
+
+class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
+  final ApiService _apiService = ApiService();
+  bool _isSaving = false;
+  String _currentStatus = 'bookmarked';
+
+  MatchedJob? get _activeJob => widget.job;
+
+  Future<void> _handleSaveStatus(String status) async {
+    final activeJob = _activeJob;
+    if (activeJob == null) return;
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    final success = await _apiService.createApplication(
+      activeJob.jobId,
+      status,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _isSaving = false;
+      if (success) {
+        _currentStatus = status;
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          success
+              ? 'Application status updated to $status'
+              : 'Failed to update application status.',
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final job = _activeJob;
+
+    if (job == null) {
+      return Scaffold(
+        appBar: _buildAppBar(context),
+        body: const Center(
+          child: Text(
+            'No Job Selected',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: AppColors.onSurfaceVariant,
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: _buildAppBar(context),
-      // Use a Stack to ensure the floating apply button sits above the scrolling content
       body: Stack(
         children: [
           SingleChildScrollView(
             padding: const EdgeInsets.only(
-                left: 20, right: 20, top: 16, bottom: 100), // Padding for FAB
+              left: 20,
+              right: 20,
+              top: 16,
+              bottom: 120,
+            ),
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 600),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildHeroSection(),
+                    _buildHeroSection(job),
                     const SizedBox(height: 24),
                     _buildSectionHeader('Match Analysis'),
                     const SizedBox(height: 16),
-                    _buildMatchAnalysis(),
+                    _buildMatchAnalysis(job),
                     const SizedBox(height: 24),
-                    _buildSectionHeader('Open Roles'),
+                    _buildSectionHeader('Job Description & Requirements'),
                     const SizedBox(height: 16),
-                    _buildOpenRoles(),
+                    _buildJobDescription(job),
                   ],
                 ),
               ),
             ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _buildBottomActionBar(),
           ),
         ],
       ),
@@ -101,16 +153,16 @@ class CompanyDetailsPage extends StatelessWidget {
       leading: IconButton(
         icon: const Icon(Icons.arrow_back, color: AppColors.primary),
         onPressed: () {
-          if (onBackToInbox != null) {
-            onBackToInbox!();
+          if (widget.onBackToInbox != null) {
+            widget.onBackToInbox!();
             return;
           }
           Navigator.maybePop(context);
         },
       ),
-      title: const Text(
-        'Company Profile',
-        style: TextStyle(
+      title: Text(
+        _activeJob?.company ?? 'Job Details',
+        style: const TextStyle(
           color: AppColors.primary,
           fontSize: 20,
           fontWeight: FontWeight.w700,
@@ -125,15 +177,15 @@ class CompanyDetailsPage extends StatelessWidget {
       child: Text(
         title,
         style: const TextStyle(
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
           color: AppColors.primary,
         ),
       ),
     );
   }
 
-  Widget _buildHeroSection() {
+  Widget _buildHeroSection(MatchedJob job) {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -141,455 +193,272 @@ class CompanyDetailsPage extends StatelessWidget {
         border: Border.all(color: AppColors.outlineVariant),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha : 0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 12,
             offset: const Offset(0, 4),
           )
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Cover Image
-          Container(
-            height: 128,
-            width: double.infinity,
-            decoration: const BoxDecoration(
-              color: AppColors.surfaceContainerHigh,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
-              image: DecorationImage(
-                image: NetworkImage(
-                    'https://lh3.googleusercontent.com/aida-public/AB6AXuCGb5ff7Igclt5bQk5OmbDMxxSOJ0zVzWWMSXOCcYZN42tMoSksKlkMZZp_LwYyzkCq_WoqicU1tJD57NCv7fNxVgxthO-FWD4Fp1YXn8BH9UQTJ1xIQH5CndzOrOt6F_1F8_TycxFfNujLg7JKjyLLEy1U7CDw0_O7MD_nR2p6D86W9b_lS2RgumlYsM62WfCNUgys80Tw0U5UeA-MAElp2buEexKkYsT2lkvMJ49c6AgcACRH1QPJX8d4lPQFWPDVKTkUR_4gv4I'),
-                fit: BoxFit.cover,
-              ),
-            ),
-          ),
-          
-          // Bottom half with overlapping logo
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              // Logo
-              Positioned(
-                top: -40,
-                left: 20,
-                child: Container(
-                  width: 80,
-                  height: 80,
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.outlineVariant),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha : 0.05),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      )
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        job.title,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.primary,
+                          letterSpacing: -0.24,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        job.company,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.onSurfaceVariant,
+                        ),
+                      ),
                     ],
                   ),
-                  child: Image.network(
-                    'https://lh3.googleusercontent.com/aida-public/AB6AXuBR6w4ReLuMC18ge1gO6tN-YlXdFYUf3FOrk5RCiQIcWs3BWtWMxtFxgYNDYVfvag9XZ5Mr00zlNLIC23E6YeydP-GObv0mvP1FR7mP3GUpaTM6KTUrogRVa5j9zmVMfH8YIMYVwmY8L2PfniGsChZsbwGIVV1vur0dLamRMhoLNMvL6uMOqoTeEWxEKaOmc1krnKB62VKqkHCrKDBqH1bAP09bXq981-NzAMqAWGhk1TbPQlCJ-wjazBFBpVmsHPPap_Xwix-ostk',
-                    fit: BoxFit.contain,
-                  ),
                 ),
-              ),
-              
-              // Text Content
-              Padding(
-                padding: const EdgeInsets.only(
-                    top: 48, left: 20, right: 20, bottom: 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Acme Systems',
-                                style: TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.primary,
-                                  letterSpacing: -0.24,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  const Icon(Icons.location_on,
-                                      size: 16,
-                                      color: AppColors.onSurfaceVariant),
-                                  const SizedBox(width: 4),
-                                  Expanded(
-                                    child: const Text(
-                                      'San Francisco, CA • Enterprise Software',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: AppColors.onSurfaceVariant,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: AppColors.matchGreen,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.bolt, color: Colors.white, size: 14),
-                              SizedBox(width: 4),
-                              Text(
-                                '92% Match',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Acme Systems builds foundational infrastructure for the next generation of cloud computing. We are looking for senior talent to help scale our core distribution network across global markets.',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: AppColors.onSurface,
-                        height: 1.5,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
                       ),
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
+                      decoration: BoxDecoration(
+                        color: job.matchScore >= 80
+                            ? AppColors.matchGreen
+                            : job.matchScore >= 60
+                                ? AppColors.primaryContainer
+                                : AppColors.surfaceContainerHigh,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.bolt, color: Colors.white, size: 14),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${job.matchScore}% Match',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Status: ${_currentStatus.toUpperCase()}',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.secondary,
+                      ),
                     ),
                   ],
                 ),
-              ),
-            ],
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Divider(color: AppColors.outlineVariant),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 16,
+              runSpacing: 8,
+              children: [
+                _buildInfoBadge(Icons.location_on_outlined, job.location),
+                if (job.isRemote)
+                  _buildInfoBadge(Icons.wifi, 'Remote Position'),
+                if (job.seniority.isNotEmpty)
+                  _buildInfoBadge(Icons.workspace_premium_outlined, job.seniority),
+                if (job.salaryText.isNotEmpty)
+                  _buildInfoBadge(Icons.attach_money, job.salaryText),
+                if (job.source.isNotEmpty)
+                  _buildInfoBadge(Icons.source_outlined, 'Source: ${job.source}'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoBadge(IconData icon, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: AppColors.onSurfaceVariant),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: AppColors.onSurfaceVariant,
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMatchAnalysis(MatchedJob job) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'AI Evaluation Rationale',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: AppColors.primary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            job.matchReasoning.isNotEmpty
+                ? job.matchReasoning
+                : 'High structural overlap with your target role and stack requirements.',
+            style: const TextStyle(
+              fontSize: 14,
+              height: 1.5,
+              color: AppColors.onSurface,
+            ),
+          ),
+          if (job.techStack.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Text(
+              'Required Tech Stack',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: job.techStack
+                  .map(
+                    (tech) => Chip(
+                      label: Text(
+                        tech,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      backgroundColor: AppColors.surfaceContainer,
+                      side: const BorderSide(color: AppColors.outlineVariant),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildMatchAnalysis() {
-    return Column(
-      children: [
-        // Skill Alignment (Full Width)
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.outlineVariant),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha : 0.05),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              )
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'SKILL ALIGNMENT',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      letterSpacing: 0.6,
-                      color: AppColors.onSurfaceVariant,
-                    ),
-                  ),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: AppColors.matchGreen.withValues(alpha : 0.1),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Text(
-                      'High',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.tertiaryFixedDim,
-                      ),
-                    ),
-                  )
-                ],
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _buildSkillChip('React'),
-                  _buildSkillChip('TypeScript'),
-                  _buildHighlightedSkillChip('Node.js'),
-                  _buildSkillChip('AWS'),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        // Experience and Pace (2 Columns)
-        Row(
-          children: [
-            Expanded(child: _buildExperienceCard()),
-            const SizedBox(width: 12),
-            Expanded(child: _buildPaceCard()),
-          ],
-        )
-      ],
-    );
-  }
-
-  Widget _buildSkillChip(String label) {
+  Widget _buildJobDescription(MatchedJob job) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.surfaceContainer,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AppColors.outlineVariant.withValues(alpha : 0.5)),
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.outlineVariant),
       ),
       child: Text(
-        label,
+        job.summary.isNotEmpty
+            ? job.summary
+            : 'Full job description available on original posting site.',
         style: const TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
+          fontSize: 14,
+          height: 1.6,
           color: AppColors.onSurface,
         ),
       ),
     );
   }
 
-  Widget _buildHighlightedSkillChip(String label) {
+  Widget _buildBottomActionBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
-        color: AppColors.matchGreen.withValues(alpha : 0.1),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AppColors.matchGreen.withValues(alpha : 0.2)),
+        color: AppColors.surfaceContainerLowest,
+        border: const Border(
+          top: BorderSide(color: AppColors.outlineVariant, width: 1.0),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 16,
+            offset: const Offset(0, -4),
+          )
+        ],
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.check, size: 12, color: AppColors.tertiaryFixedDim),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.tertiaryFixedDim,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildExperienceCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.outlineVariant),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha : 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          )
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'EXPERIENCE',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              letterSpacing: 0.6,
-              color: AppColors.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            '5+ Yrs',
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w700,
-              color: AppColors.primary,
-            ),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Required: 4 yrs',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 8),
-          LinearProgressIndicator(
-            value: 1.0,
-            backgroundColor: AppColors.primary.withValues(alpha : 0.1),
-            color: AppColors.matchGreen,
-            borderRadius: BorderRadius.circular(2),
-            minHeight: 4,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPaceCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.outlineVariant),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha : 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          )
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'PACE',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              letterSpacing: 0.6,
-              color: AppColors.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Row(
-            children: [
-              Icon(Icons.directions_run, color: AppColors.primary, size: 20),
-              SizedBox(width: 4),
-              Text(
-                'Fast',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.primary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Matches your pref',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOpenRoles() {
-    return Column(
-      children: [
-        _buildRoleTile(
-          title: 'Senior Full Stack Engineer',
-          subtitle: 'Remote • \$160k - \$210k',
-        ),
-        const SizedBox(height: 12),
-        _buildRoleTile(
-          title: 'Lead Frontend Developer',
-          subtitle: 'Hybrid (SF) • \$150k - \$190k',
-        ),
-      ],
-    );
-  }
-
-  Widget _buildRoleTile({required String title, required String subtitle}) {
-    return InkWell(
-      onTap: () {},
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.outlineVariant),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha : 0.05),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            )
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: AppColors.onSurfaceVariant,
-                    ),
-                  ),
-                ],
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _isSaving
+                  ? null
+                  : () => _handleSaveStatus('bookmarked'),
+              icon: const Icon(Icons.bookmark_border, size: 18),
+              label: const Text('Save Job'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                side: const BorderSide(color: AppColors.outlineVariant),
+                padding: const EdgeInsets.symmetric(vertical: 14),
               ),
             ),
-            const Icon(Icons.chevron_right, color: AppColors.onSurfaceVariant),
-          ],
-        ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: _isSaving
+                  ? null
+                  : () => _handleSaveStatus('applied'),
+              icon: const Icon(Icons.send, size: 18),
+              label: const Text('Track as Applied'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
-
 }

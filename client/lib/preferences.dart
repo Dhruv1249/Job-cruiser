@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'main.dart' show AppColors;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'services/api_service.dart';
 
 void main() {
   runApp(const SetPreferencesApp());
@@ -570,15 +571,29 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
-        onPressed: () {
+        onPressed: () async {
           final summary = PreferenceSummary(
-              industries: _selectedIndustries.toList()..sort(),
-              targetRoles: List<String>.from(_currentTargets),
-              baseSalary: _baseSalary,
-              equityExpectation: _equityExpectation,
-            );
+            industries: _selectedIndustries.toList()..sort(),
+            targetRoles: List<String>.from(_currentTargets),
+            baseSalary: _baseSalary,
+            equityExpectation: _equityExpectation,
+          );
 
-          summary.save();
+          await summary.save();
+
+          final apiService = ApiService();
+          final profile = await apiService.fetchProfile();
+          final fullName = profile?['full_name'] ?? 'User';
+
+          await apiService.savePreferences({
+            'full_name': fullName,
+            'target_roles': _currentTargets,
+            'work_models': ['remote', 'hybrid'],
+            'min_salary': _baseSalary.toInt() * 1000,
+            'currency': 'USD',
+          });
+
+          if (!mounted) return;
           Navigator.pop(context, summary);
         },
         style: ElevatedButton.styleFrom(

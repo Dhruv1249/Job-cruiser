@@ -93,6 +93,7 @@ func main() {
 		MistralService: mistralMatchService,
 	}
 	matchedJobsHandler := &handlers.MatchedJobsHandler{DB: databasePool}
+	adminHandler := &handlers.AdminHandler{DB: databasePool}
 	matchHandler := &handlers.MatchHandler{
 		DB:           databasePool,
 		AIService:    aiMatcherService,
@@ -123,15 +124,26 @@ func main() {
 	protected := webRouter.Group("/api")
 	protected.Use(middleware.RequireAuth())
 	{
+		protected.GET("/user/me", authHandler.GetMe)
 		protected.GET("/jobs", jobHandler.GetJobs)
 		protected.GET("/jobs/matched", matchedJobsHandler.GetMatchedJobs)
 		protected.POST("/preferences", prefHandler.UpdatePreferences)
 		protected.GET("/preferences", prefHandler.GetPreferences)
+		protected.POST("/overleaf/config", prefHandler.UpdateOverleafConfig)
+		protected.GET("/overleaf/config", prefHandler.GetOverleafConfig)
 
 		protected.POST("/applications", appHandler.CreateApplication)
 		protected.GET("/applications", appHandler.GetUserApplications)
 		protected.PUT("/applications/:id/status", appHandler.UpdateApplicationStatus)
 		protected.POST("/jobs/match", matchHandler.EvaluateJobMatch)
+
+		// Master Admin Routes
+		protected.GET("/admin/whitelisted-emails", adminHandler.GetWhitelistedEmails)
+		protected.POST("/admin/whitelisted-emails", adminHandler.AddWhitelistedEmail)
+		protected.DELETE("/admin/whitelisted-emails/:id", adminHandler.DeleteWhitelistedEmail)
+		protected.GET("/admin/keywords/pending", adminHandler.GetPendingKeywords)
+		protected.POST("/admin/keywords/approve", adminHandler.ApproveKeyword)
+		protected.PUT("/admin/users/:id/ai-matching", adminHandler.ToggleUserAIMatching)
 	}
 
 	// Check if a specific network port was requested in the .env file.

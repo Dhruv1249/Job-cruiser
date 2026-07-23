@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'main.dart' show AppColors, JobCruiserShell;
-import 'services/api_service.dart'; // Adjust path if necessary
+import 'services/api_service.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'onboarding.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -64,6 +65,10 @@ class _AuthScreenState extends State<AuthScreen> {
   try {
     debugPrint("Starting Google Sign-In");
 
+    try {
+      await _googleSignIn.signOut();
+    } catch (_) {}
+
     final GoogleSignInAccount? account =
         await _googleSignIn.signIn();
 
@@ -87,17 +92,27 @@ class _AuthScreenState extends State<AuthScreen> {
       throw Exception("No ID token received");
     }
 
-    final bool success =
-        await _apiService.googleLogin(idToken);
+    final response = await _apiService.googleLogin(idToken);
 
     if (!mounted) return;
 
-    if (success) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => const JobCruiserShell(),
-        ),
-      );
+    if (response != null) {
+      final isNewUser = response['is_new_user'] as bool? ?? false;
+      final suggestedName = response['suggested_name'] as String?;
+
+      if (isNewUser) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => OnboardingWizardScreen(suggestedName: suggestedName),
+          ),
+        );
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => const JobCruiserShell(),
+          ),
+        );
+      }
     } else {
       setState(() => _isLoading = false);
 

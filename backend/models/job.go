@@ -5,6 +5,7 @@ import "time"
 type Job struct {
 	ID                 string    `json:"id"`
 	CompanyID          string    `json:"company_id"`
+	Company            string    `json:"company"`
 	Title              string    `json:"title"`
 	Location           *string   `json:"location"` // Pointer because it might be null
 	SalaryMin          *int      `json:"salary_min"`
