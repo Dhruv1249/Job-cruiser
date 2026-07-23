@@ -17,11 +17,7 @@ from config import (
     MAX_WORKERS,
     BACKEND_API_URL,
     INGEST_API_KEY,
-    USER_AGENT,
-    GEMINI_API_KEY,
-    GEMMA_MOE_MODEL,
-    GEMMA_DENSE_MODEL,
-    DISABLE_AI_EXTRACTION
+    USER_AGENT
 )
 from job_sources.utils import load_yaml_config
 
