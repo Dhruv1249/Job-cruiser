@@ -290,3 +290,78 @@ func (h *AdminHandler) GetUsers(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"data": usersList})
 }
+
+/*
+ResetAndReevaluateMatches clears all user_job_matches and resets jobs.ai_evaluated to false,
+then triggers a fresh batch evaluation pass across all active users.
+*/
+func (h *AdminHandler) ResetAndReevaluateMatches(c *gin.Context) {
+	if !h.EnsureMasterAdmin(c) {
+		return
+	}
+
+	ctx := context.Background()
+
+	// 1. Clear old matches
+	_, err := h.DB.Exec(ctx, "DELETE FROM user_job_matches;")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear user_job_matches: " + err.Error()})
+		return
+	}
+
+	// 2. Reset ai_evaluated flag on jobs
+	_, err = h.DB.Exec(ctx, "UPDATE jobs SET ai_evaluated = false;")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reset jobs.ai_evaluated: " + err.Error()})
+		return
+	}
+
+	// 3. Trigger fresh evaluation pass in background
+	if h.MistralService != nil {
+		go func() {
+			log.Println("[AdminHandler] Reset completed. Triggering fresh multi-candidate evaluation pass.")
+			h.MistralService.EvaluatePendingForAllUsers(context.Background())
+		}()
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Successfully cleared old matches and reset evaluation flag. Fresh AI evaluation pipeline triggered in background.",
+	})
+}
+
+/*
+ResetUserMatches clears user_job_matches for the calling user and re-evaluates all jobs for them.
+*/
+func (h *AdminHandler) ResetUserMatches(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	uidStr, ok := userID.(string)
+	if !ok || uidStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Delete matches for this specific user
+	_, err := h.DB.Exec(ctx, "DELETE FROM user_job_matches WHERE user_id = $1;", uidStr)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear matches for user: " + err.Error()})
+		return
+	}
+
+	if h.MistralService != nil {
+		go func() {
+			log.Printf("[AdminHandler] Triggering re-evaluation for user %s", uidStr)
+			h.MistralService.EvaluateForSingleUser(context.Background(), uidStr)
+		}()
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "User matches reset successfully. Re-evaluation pass triggered in background.",
+	})
+}

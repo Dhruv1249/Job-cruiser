@@ -13,6 +13,7 @@ class MatchedJob {
     required this.postedDate,
     required this.seniority,
     required this.summary,
+    this.rawDescription = '',
     required this.matchScore,
     required this.matchReasoning,
     required this.techStack,
@@ -32,6 +33,7 @@ class MatchedJob {
   final String postedDate;
   final String seniority;
   final String summary;
+  final String rawDescription;
   final int matchScore;
   final String matchReasoning;
   final List<String> techStack;
@@ -71,6 +73,7 @@ class MatchedJob {
       postedDate: json['posted_date'] as String? ?? '',
       seniority: json['seniority'] as String? ?? '',
       summary: json['summary'] as String? ?? '',
+      rawDescription: json['raw_description'] as String? ?? json['raw_desc'] as String? ?? '',
       matchScore: (json['match_score'] as num?)?.toInt() ?? 0,
       matchReasoning: json['match_reasoning'] as String? ?? '',
       techStack: parsedTechStack,

@@ -8,18 +8,44 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+var yoeRe = regexp.MustCompile(`(?i)\b([3-9]|\d{2,})\s*(\+)?\s*(years?|yrs?)\b|\b([3-9]|\d{2,})\s*-\s*\d+\s*(years?|yrs?)\b`)
+
+func hasExcessiveYOE(text string) bool {
+	return yoeRe.MatchString(text)
+}
+
+func isNonTargetHybridOrOnsite(location string, rawDesc string, isRemote bool, targetLocationsStr string) bool {
+	combined := strings.ToLower(location + " " + rawDesc)
+	hasHybridOrOnsite := strings.Contains(combined, "hybrid") || strings.Contains(combined, "onsite") || strings.Contains(combined, "on-site") || strings.Contains(combined, "in-person") || strings.Contains(combined, "day/week") || strings.Contains(combined, "days/week")
+	
+	if hasHybridOrOnsite {
+		if strings.Contains(targetLocationsStr, "India") {
+			nonIndiaCities := []string{"nyc", "new york", "san francisco", "sf ", "london", "seattle", "austin", "chicago", "boston", "toronto"}
+			for _, city := range nonIndiaCities {
+				if strings.Contains(combined, city) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 const (
 	mistralAPIEndpoint       = "https://api.mistral.ai/v1/chat/completions"
 	mistralMatchModel        = "mistral-small-2506"
 	mistralRequestsPerSecond = 5
-	maxEvaluationsPerPrompt  = 80
-	descriptionTruncateChars = 600
+	maxEvaluationsPerPrompt  = 40
+	descriptionTruncateChars = 6000
+	maxCharBudgetPerBatch    = 64000
 	matchScoreThreshold      = 50
 	maxConcurrentWorkers     = 5
 	maxCandidatesPerPrompt   = 4
@@ -80,6 +106,9 @@ type candidateMatchResult struct {
 type jobMultiMatchResult struct {
 	JobID     string                 `json:"job_id"`
 	Seniority string                 `json:"seniority"`
+	SalaryMin *float64               `json:"salary_min"`
+	SalaryMax *float64               `json:"salary_max"`
+	Currency  string                 `json:"currency"`
 	Matches   []candidateMatchResult `json:"matches"`
 }
 
@@ -358,25 +387,42 @@ func (s *MistralBatchMatchService) buildMultiMatchPrompt(userChunk []UserProfile
 	candidatesJSON, _ := json.Marshal(userChunk)
 	batchJSON, _ := json.Marshal(batch)
 
-	return fmt.Sprintf(`You are a precise job-fit evaluator. Evaluate the list of jobs against each of the following candidate profiles (up to 4 candidates).
+	return fmt.Sprintf(`You are a strict, ultra-precise job-fit evaluator. Evaluate each job against candidate profiles.
 
 CANDIDATE PROFILES:
 %s
 
-EVALUATION RULES:
-- Target Locations (target_locations) must be strictly enforced. E.g., if candidate specifies "India (On-site & Hybrid)", "India (Remote)", or "Global Remote", ONLY match jobs located in India, Remote worldwide, or Global. REJECT jobs restricted locally to US-only, UK-only, or Europe-only unless candidate explicitly included those target_locations.
-- Target Roles (target_roles) and Preferred Industries (target_industries) must be evaluated against the job title, description, and company profile.
-- Match ONLY if the role targets 0-3 years experience (Junior, New Grad, Intern, Entry Level, SDE I, Associate).
-- REJECT roles requiring 4+ years, or titled Senior/Staff/Lead/Principal/Director/Manager/VP.
-- Score 0-100 based on tech stack overlap, role alignment, and location eligibility.
-- is_matched = true when match_score >= %d.
-- CRITICAL SPEED RULE: For candidate matches where is_matched is false, keep reasoning as "" and tech_stack as []. Provide reasoning ONLY when is_matched is true.
+CRITICAL EVALUATION RULES:
 
-For each job in the list below, return match results for ALL candidates listed in CANDIDATE PROFILES.
-Return ONLY valid JSON in this exact shape:
-{"results": [{"job_id": "...", "seniority": "Junior|Mid|Intern|Senior", "matches": [{"user_id": "...", "is_matched": true|false, "match_score": 0-100, "tech_stack": ["lang"], "reasoning": "sentence if matched, else empty string"}]}]}
+1. CANDIDATE LOCATION & REMOTE ELIGIBILITY (STRICT PASS/FAIL):
+- Candidates are physically located in INDIA.
+- A job specified as "US Remote", "UK Remote", "Canada Remote", "EU Remote", or "Remote (US)" requires being physically located or authorized in that specific country. A candidate in India CANNOT work a US-restricted or UK-restricted remote job!
+- REJECT IMMEDIATELY (match_score = 0, is_matched = false) if:
+  * The job is On-site or Hybrid outside India (e.g. NYC, San Francisco, London, Berlin, Austin).
+  * The job is country-restricted Remote outside India (e.g. "US Remote", "Remote - US", "UK Remote", "Remote (US/Canada)").
+- MATCH ONLY IF the location is explicitly:
+  * Located in INDIA (On-site, Hybrid, or India Remote).
+  * Explicitly GLOBAL Remote, Remote Worldwide, Remote (Global), or Remote (APAC) where anyone in the world (including India) can work.
 
-JOBS:
+2. CANDIDATE EXPERIENCE LEVEL (STRICT PASS/FAIL):
+- The candidates are Early-Career / Junior Software Engineers with 1 YEAR OF EXPERIENCE (0-2 YOE target range).
+- REJECT IMMEDIATELY (match_score = 0, is_matched = false) if:
+  * The title contains Senior, Sr, Lead, Staff, Principal, Architect, Director, Manager, VP, Head of.
+  * The job description explicitly requires 3+ years, 4+ years, 5+ years, or 3-5+ years of experience.
+- MATCH ONLY IF the job requires 0-2 years of experience or is explicitly Entry Level, Junior, Associate, New Grad, or Intern.
+
+3. SALARY EXTRACTION:
+- Extract numeric annual salary range from the job description if mentioned (e.g., "$120,000 - $150,000" or "$120k-$150k" -> salary_min: 120000, salary_max: 150000, currency: "USD"). If not mentioned, set salary_min and salary_max to null.
+
+4. MATCH SCORING:
+- Score 0-100 based on tech stack overlap and role fit.
+- If Location, Country Remote eligibility, or Experience Level fails, match_score MUST BE 0 and is_matched MUST BE false.
+- is_matched = true ONLY when match_score >= %d.
+
+Return ONLY valid JSON matching this exact structure:
+{"results": [{"job_id": "...", "seniority": "Junior|Mid|Intern|Senior", "salary_min": 120000, "salary_max": 150000, "currency": "USD", "matches": [{"user_id": "...", "is_matched": true|false, "match_score": 0-100, "tech_stack": ["Python"], "reasoning": "1 short sentence explaining fit or rejection"}]}]}
+
+JOBS TO EVALUATE:
 %s`,
 		string(candidatesJSON),
 		matchScoreThreshold,
@@ -388,18 +434,93 @@ func (s *MistralBatchMatchService) buildMatchPrompt(userProfile UserProfile, bat
 	return s.buildMultiMatchPrompt([]UserProfile{userProfile}, batch)
 }
 
+func isSeniorRoleTitle(title string) bool {
+	t := strings.ToLower(title)
+	keywords := []string{
+		"senior", "sr.", "sr ", "lead", "principal", "staff", "architect",
+		"director", "head of", "vp", "vice president", "manager", "management",
+	}
+	for _, kw := range keywords {
+		if strings.Contains(t, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func isNonTargetOnsite(location string, isRemote bool, targetLocationsStr string) bool {
+	if isRemote {
+		return false
+	}
+	loc := strings.ToLower(location)
+	if loc == "" || strings.Contains(loc, "remote") || strings.Contains(loc, "anywhere") || strings.Contains(loc, "worldwide") || strings.Contains(loc, "global") {
+		return false
+	}
+	// If candidate targets India, reject physical non-India locations (e.g. CA, US, UK, London, NY)
+	if strings.Contains(targetLocationsStr, "India") {
+		if !strings.Contains(loc, "india") && !strings.Contains(loc, ", in") && !strings.Contains(loc, "in,") && loc != "india" {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *MistralBatchMatchService) upsertMultiMatchResults(ctx context.Context, results []jobMultiMatchResult) error {
 	for _, jobResult := range results {
+		var jobTitle, jobLocation, rawDesc string
+		var isRemote bool
+		_ = s.DB.QueryRow(ctx, "SELECT title, COALESCE(location, ''), is_remote, COALESCE(raw_desc, '') FROM jobs WHERE id = $1::uuid;", jobResult.JobID).Scan(&jobTitle, &jobLocation, &isRemote, &rawDesc)
+
+		if jobResult.SalaryMin != nil || jobResult.SalaryMax != nil {
+			var minInt, maxInt *int
+			if jobResult.SalaryMin != nil {
+				v := int(*jobResult.SalaryMin)
+				minInt = &v
+			}
+			if jobResult.SalaryMax != nil {
+				v := int(*jobResult.SalaryMax)
+				maxInt = &v
+			}
+			_, _ = s.DB.Exec(ctx, `
+				UPDATE jobs 
+				SET salary_min = COALESCE($1, salary_min), 
+				    salary_max = COALESCE($2, salary_max), 
+				    currency   = CASE WHEN $3 != '' THEN $3 ELSE currency END 
+				WHERE id = $4::uuid;
+			`, minInt, maxInt, jobResult.Currency, jobResult.JobID)
+		}
+
+		isSenior := isSeniorRoleTitle(jobTitle)
+		isExcessiveExperience := hasExcessiveYOE(jobTitle + " " + rawDesc)
+
 		for _, match := range jobResult.Matches {
 			if match.UserID == "" || jobResult.JobID == "" {
 				continue
 			}
 
+			var targetLocs string
+			_ = s.DB.QueryRow(ctx, "SELECT COALESCE(target_locations::text, '') FROM user_preferences WHERE user_id = $1;", match.UserID).Scan(&targetLocs)
+
+			score := match.MatchScore
+			isMatched := match.IsMatched
+			reasoning := match.MatchReasoning
+
+			if isSenior || isExcessiveExperience || isNonTargetOnsite(jobLocation, isRemote, targetLocs) || isNonTargetHybridOrOnsite(jobLocation, rawDesc, isRemote, targetLocs) {
+				score = 0
+				isMatched = false
+				reasoning = ""
+			}
+
 			techStackJSON, _ := json.Marshal(match.TechStack)
 
-			if match.IsMatched {
-				log.Printf("[MistralMatcher] User %s evaluated job %s -> score: %d, matched: true, reasoning: %s",
-					match.UserID, jobResult.JobID, match.MatchScore, match.MatchReasoning)
+			if isMatched {
+				log.Printf("[MistralMatcher] User %s evaluated job %s (%s, %s) -> score: %d, matched: true, reasoning: %s",
+					match.UserID, jobResult.JobID, jobTitle, jobLocation, score, reasoning)
+			}
+
+			seniorityVal := jobResult.Seniority
+			if len(seniorityVal) > 50 {
+				seniorityVal = seniorityVal[:50]
 			}
 
 			query := `
@@ -414,15 +535,15 @@ func (s *MistralBatchMatchService) upsertMultiMatchResults(ctx context.Context, 
 					ai_model        = EXCLUDED.ai_model,
 					evaluated_at    = CURRENT_TIMESTAMP;
 			`
-			matchReasons, _ := json.Marshal([]string{match.MatchReasoning})
+			matchReasons, _ := json.Marshal([]string{reasoning})
 			_, err := s.DB.Exec(ctx, query,
 				match.UserID,
 				jobResult.JobID,
-				match.MatchScore,
-				match.IsMatched,
-				jobResult.Seniority,
+				score,
+				isMatched,
+				seniorityVal,
 				techStackJSON,
-				match.MatchReasoning,
+				reasoning,
 				mistralMatchModel,
 				matchReasons,
 			)
@@ -615,14 +736,25 @@ func chunkUserProfiles(profiles []UserProfile, size int) [][]UserProfile {
 	return chunks
 }
 
-func chunkJobSnippets(snippets []JobSnippet, size int) [][]JobSnippet {
+func chunkJobSnippets(snippets []JobSnippet, maxBatchCount int) [][]JobSnippet {
 	var batches [][]JobSnippet
-	for i := 0; i < len(snippets); i += size {
-		end := i + size
-		if end > len(snippets) {
-			end = len(snippets)
+	var currentBatch []JobSnippet
+	currentChars := 0
+
+	for _, snippet := range snippets {
+		snippetLen := len(snippet.Description) + len(snippet.Title) + len(snippet.Company)
+		if len(currentBatch) > 0 && (currentChars+snippetLen > maxCharBudgetPerBatch || len(currentBatch) >= maxBatchCount) {
+			batches = append(batches, currentBatch)
+			currentBatch = nil
+			currentChars = 0
 		}
-		batches = append(batches, snippets[i:end])
+		currentBatch = append(currentBatch, snippet)
+		currentChars += snippetLen
 	}
+
+	if len(currentBatch) > 0 {
+		batches = append(batches, currentBatch)
+	}
+
 	return batches
 }

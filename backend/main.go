@@ -138,6 +138,7 @@ func main() {
 		protected.GET("/applications", appHandler.GetUserApplications)
 		protected.PUT("/applications/:id/status", appHandler.UpdateApplicationStatus)
 		protected.POST("/jobs/match", matchHandler.EvaluateJobMatch)
+		protected.POST("/user/reset-matches", adminHandler.ResetUserMatches)
 
 		// Master Admin Routes
 		protected.GET("/admin/users", adminHandler.GetUsers)
@@ -147,6 +148,7 @@ func main() {
 		protected.GET("/admin/keywords/pending", adminHandler.GetPendingKeywords)
 		protected.POST("/admin/keywords/approve", adminHandler.ApproveKeyword)
 		protected.PUT("/admin/users/:id/ai-matching", adminHandler.ToggleUserAIMatching)
+		protected.POST("/admin/reset-all-matches", adminHandler.ResetAndReevaluateMatches)
 	}
 
 	// Check if a specific network port was requested in the .env file.
