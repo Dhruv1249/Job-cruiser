@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Dhruv1249/Job-cruiser/backend/db"
 	"github.com/Dhruv1249/Job-cruiser/backend/services"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
@@ -33,6 +34,10 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer pool.Close()
+
+	if err := db.InitSchema(pool); err != nil {
+		log.Fatalf("Failed to initialize database schema: %v", err)
+	}
 
 	log.Println("Clearing user_job_matches table...")
 	res, err := pool.Exec(ctx, "DELETE FROM user_job_matches;")
