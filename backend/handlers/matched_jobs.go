@@ -93,6 +93,7 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 		LEFT JOIN companies comp ON j.company_id = comp.id
 		WHERE ujm.user_id = $1
 		  AND ujm.match_score >= $2
+		  AND (ujm.match_score > 0 OR ujm.is_ai_matched = true)
 		ORDER BY ujm.match_score DESC
 		LIMIT $3 OFFSET $4;
 	`

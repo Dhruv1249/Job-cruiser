@@ -155,6 +155,21 @@ func main() {
 		serverPort = "8080" // Default to port 8080 if none is specified.
 	}
 
+	if mistralKey != "" {
+		go func() {
+			matcherContext := context.Background()
+			log.Println("[MistralMatcher] Background AI matching goroutine started.")
+			mistralMatchService.EvaluatePendingForAllUsers(matcherContext)
+			ticker := time.NewTicker(30 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				mistralMatchService.EvaluatePendingForAllUsers(matcherContext)
+			}
+		}()
+	} else {
+		log.Println("[MistralMatcher] MISTRAL_API_KEY not set — background AI matching disabled.")
+	}
+
 	fmt.Printf("Starting web server on port %s...\n", serverPort)
 
 	// Turn the server on and lock it in an infinite loop listening for internet traffic.

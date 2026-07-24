@@ -169,6 +169,8 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
         controller: _tabController,
         labelColor: AppColors.primary,
         indicatorColor: AppColors.primary,
+        isScrollable: true,
+        tabAlignment: TabAlignment.start,
         tabs: const [
           Tab(text: 'User AI Search'),
           Tab(text: 'Access Whitelist'),

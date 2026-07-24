@@ -106,11 +106,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Query the database for the user
 	var userID string
 	var passwordHash string
-	query := `
-		SELECT id,password_hash FROM users 
+	var isMasterAdmin bool
+	userQuery := `
+		SELECT id, password_hash, COALESCE(is_master_admin, false) FROM users
 		WHERE primary_email = $1;
 	`
-	err := h.DB.QueryRow(context.Background(), query, req.Email).Scan(&userID, &passwordHash)
+	err := h.DB.QueryRow(context.Background(), userQuery, req.Email).Scan(&userID, &passwordHash, &isMasterAdmin)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
@@ -121,7 +122,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// Generate the JWT VIP pass
 	tokenString, err := utils.GenerateToken(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
@@ -131,7 +131,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	var hasPreferences bool
 	var aiMatchingEnabled bool
 	checkPrefQuery := `
-		SELECT 
+		SELECT
 			COALESCE(u.ai_matching_enabled, false),
 			(up.user_id IS NOT NULL AND jsonb_array_length(COALESCE(up.target_roles, '[]'::jsonb)) > 0)
 		FROM users u
@@ -140,13 +140,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	`
 	_ = h.DB.QueryRow(context.Background(), checkPrefQuery, userID).Scan(&aiMatchingEnabled, &hasPreferences)
 
-	// Send success response back to Flutter
 	c.JSON(http.StatusOK, gin.H{
 		"message":             "Login successful",
 		"token":               tokenString,
 		"user_id":             userID,
 		"has_preferences":     hasPreferences,
 		"ai_matching_enabled": aiMatchingEnabled,
+		"is_master_admin":     isMasterAdmin,
 	})
 }
 
@@ -252,6 +252,7 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 	query := `
 		SELECT u.id, u.primary_email, COALESCE(up.full_name, ''), COALESCE(u.avatar_url, ''),
 		       COALESCE(u.ai_matching_enabled, false),
+		       COALESCE(u.is_master_admin, false),
 		       (up.user_id IS NOT NULL AND jsonb_array_length(COALESCE(up.target_roles, '[]'::jsonb)) > 0) AS has_preferences
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id
@@ -263,8 +264,9 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 	var fullNameString string
 	var avatarURLString string
 	var aiMatchingEnabled bool
+	var isMasterAdmin bool
 	var hasPreferences bool
-	err := h.DB.QueryRow(context.Background(), query, userID).Scan(&idString, &primaryEmailString, &fullNameString, &avatarURLString, &aiMatchingEnabled, &hasPreferences)
+	err := h.DB.QueryRow(context.Background(), query, userID).Scan(&idString, &primaryEmailString, &fullNameString, &avatarURLString, &aiMatchingEnabled, &isMasterAdmin, &hasPreferences)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user profile"})
 		return
@@ -276,6 +278,7 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 		"full_name":           fullNameString,
 		"avatar_url":          avatarURLString,
 		"ai_matching_enabled": aiMatchingEnabled,
+		"is_master_admin":     isMasterAdmin,
 		"has_preferences":     hasPreferences,
 	})
 }
