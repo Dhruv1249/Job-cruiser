@@ -349,8 +349,14 @@ func (s *MistralBatchMatchService) callMistralMultiBatch(
 	}
 
 	var batchResponse mistralMultiBatchResponse
-	if err := json.Unmarshal([]byte(apiResponse.Choices[0].Message.Content), &batchResponse); err != nil {
-		return nil, fmt.Errorf("failed to parse Mistral multi-batch result JSON: %w", err)
+	contentBytes := []byte(apiResponse.Choices[0].Message.Content)
+	if err := json.Unmarshal(contentBytes, &batchResponse); err != nil || len(batchResponse.Results) == 0 {
+		var directList []jobMultiMatchResult
+		if errArray := json.Unmarshal(contentBytes, &directList); errArray == nil {
+			batchResponse.Results = directList
+		} else {
+			return nil, fmt.Errorf("failed to parse Mistral multi-batch result JSON: %w", err)
+		}
 	}
 
 	log.Printf("[MistralMatcher] Multi-batch of %d jobs × %d candidates finished in %v", len(batch), len(userChunk), time.Since(start))
