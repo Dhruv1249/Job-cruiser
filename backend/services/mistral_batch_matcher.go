@@ -500,12 +500,16 @@ func (s *MistralBatchMatchService) upsertMultiMatchResults(ctx context.Context, 
 		isExcessiveExperience := hasExcessiveYOE(jobTitle + " " + rawDesc)
 
 		for _, match := range jobResult.Matches {
-			if match.UserID == "" || jobResult.JobID == "" {
+			userID := strings.TrimSpace(match.UserID)
+			if len(userID) > 36 {
+				userID = userID[:36]
+			}
+			if userID == "" || jobResult.JobID == "" {
 				continue
 			}
 
 			var targetLocs string
-			_ = s.DB.QueryRow(ctx, "SELECT COALESCE(target_locations::text, '') FROM user_preferences WHERE user_id = $1;", match.UserID).Scan(&targetLocs)
+			_ = s.DB.QueryRow(ctx, "SELECT COALESCE(target_locations::text, '') FROM user_preferences WHERE user_id = $1;", userID).Scan(&targetLocs)
 
 			score := match.MatchScore
 			isMatched := match.IsMatched
@@ -521,7 +525,7 @@ func (s *MistralBatchMatchService) upsertMultiMatchResults(ctx context.Context, 
 
 			if isMatched {
 				log.Printf("[MistralMatcher] User %s evaluated job %s (%s, %s) -> score: %d, matched: true, reasoning: %s",
-					match.UserID, jobResult.JobID, jobTitle, jobLocation, score, reasoning)
+					userID, jobResult.JobID, jobTitle, jobLocation, score, reasoning)
 			}
 
 			seniorityVal := jobResult.Seniority
@@ -543,7 +547,7 @@ func (s *MistralBatchMatchService) upsertMultiMatchResults(ctx context.Context, 
 			`
 			matchReasons, _ := json.Marshal([]string{reasoning})
 			_, err := s.DB.Exec(ctx, query,
-				match.UserID,
+				userID,
 				jobResult.JobID,
 				score,
 				isMatched,
