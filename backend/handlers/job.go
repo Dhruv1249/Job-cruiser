@@ -34,7 +34,7 @@ func (h *JobHandler) GetJobs(c *gin.Context) {
 	query := `
 		SELECT j.id, j.company_id, COALESCE(comp.name, ''), j.title, j.location, j.salary_min, j.salary_max, j.currency, 
 		       j.experience_required, j.job_type, j.is_easy_apply, j.is_remote, j.source, 
-		       j.url, j.posted_date, j.tags, j.scraped_at 
+		       j.url, j.posted_date, j.tags, COALESCE(j.summary, ''), COALESCE(j.raw_desc, ''), j.scraped_at 
 		FROM jobs j
 		LEFT JOIN companies comp ON j.company_id = comp.id
 		ORDER BY j.scraped_at DESC 
@@ -55,7 +55,7 @@ func (h *JobHandler) GetJobs(c *gin.Context) {
 		err := rows.Scan(
 			&j.ID, &j.CompanyID, &j.Company, &j.Title, &j.Location, &j.SalaryMin, &j.SalaryMax, &j.Currency,
 			&j.ExperienceRequired, &j.JobType, &j.IsEasyApply, &j.IsRemote, &j.Source,
-			&j.URL, &j.PostedDate, &j.Tags, &j.ScrapedAt,
+			&j.URL, &j.PostedDate, &j.Tags, &j.Summary, &j.RawDescription, &j.ScrapedAt,
 		)
 		if err != nil {
 			log.Printf("Row scan error: %v", err) // Helpful for debugging struct mismatches

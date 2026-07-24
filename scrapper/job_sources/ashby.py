@@ -50,7 +50,19 @@ class AshbyClient:
 
         jobs = []
         for job_data in data.get("jobs", []):
+            job_id = job_data.get("id")
             description_html = job_data.get("descriptionHtml", "")
+            
+            if not description_html and job_id:
+                try:
+                    detail_url = f"{self.base_url}/{company}/posting/{job_id}"
+                    detail_resp = self.session.get(detail_url, timeout=10)
+                    if detail_resp.status_code == 200:
+                        detail_json = detail_resp.json()
+                        description_html = detail_json.get("descriptionHtml", "")
+                except Exception:
+                    pass
+
             description_text = ""
             if description_html:
                 soup = BeautifulSoup(description_html, "html.parser")
@@ -71,7 +83,7 @@ class AshbyClient:
                 offices.append(location)
 
             jobs.append({
-                "job_id": job_data.get("id"),
+                "job_id": job_id,
                 "title": job_data.get("title"),
                 "updated_at": job_data.get("publishedAt"),
                 "absolute_url": job_data.get("jobUrl"),

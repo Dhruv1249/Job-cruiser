@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/Dhruv1249/Job-cruiser/backend/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -32,6 +33,7 @@ type MatchedJobResponse struct {
 	PostedDate     string   `json:"posted_date"`
 	Seniority      string   `json:"seniority"`
 	Summary        string   `json:"summary"`
+	RawDescription string   `json:"raw_description"`
 	MatchScore     int      `json:"match_score"`
 	MatchReasoning string   `json:"match_reasoning"`
 	TechStack      []string `json:"tech_stack"`
@@ -81,6 +83,7 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 			COALESCE(j.posted_date, ''),
 			COALESCE(ujm.seniority, ''),
 			COALESCE(j.summary, ''),
+			COALESCE(j.raw_desc, ''),
 			ujm.match_score,
 			COALESCE(ujm.match_reasoning, ''),
 			COALESCE(ujm.tech_stack::text, '[]'),
@@ -120,6 +123,7 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 			&job.PostedDate,
 			&job.Seniority,
 			&job.Summary,
+			&job.RawDescription,
 			&job.MatchScore,
 			&job.MatchReasoning,
 			&techStackRaw,
@@ -134,6 +138,14 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 
 		if err := unmarshalStringJSON(techStackRaw, &job.TechStack); err != nil {
 			job.TechStack = []string{}
+		}
+
+		if job.SalaryMin == nil && job.SalaryMax == nil {
+			salMin, salMax := utils.ExtractSalaryFromText(job.RawDescription)
+			if salMin != nil && salMax != nil {
+				job.SalaryMin = salMin
+				job.SalaryMax = salMax
+			}
 		}
 
 		matchedJobs = append(matchedJobs, job)

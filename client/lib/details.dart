@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'main.dart' show AppColors;
 import 'models/job.dart';
 import 'services/api_service.dart';
@@ -116,13 +117,13 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
               children: [
                 _buildHeroSection(job),
                 const SizedBox(height: 24),
-                _buildSectionHeader('Match Analysis'),
-                const SizedBox(height: 16),
-                _buildMatchAnalysis(job),
-                const SizedBox(height: 24),
                 _buildSectionHeader('Job Description & Requirements'),
                 const SizedBox(height: 16),
                 _buildJobDescription(job),
+                const SizedBox(height: 24),
+                _buildSectionHeader('Match Analysis'),
+                const SizedBox(height: 16),
+                _buildMatchAnalysis(job),
               ],
             ),
           ),
@@ -176,6 +177,28 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _openJobUrl(String urlString) async {
+    final cleanUrl = urlString.trim();
+    if (cleanUrl.isEmpty) return;
+    final Uri? uri = Uri.tryParse(cleanUrl);
+    if (uri == null) return;
+
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open URL: $cleanUrl')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open URL: $cleanUrl')),
+        );
+      }
+    }
   }
 
   Widget _buildHeroSection(MatchedJob job) {
@@ -289,6 +312,22 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
                   _buildInfoBadge(Icons.source_outlined, 'Source: ${job.source}'),
               ],
             ),
+            if (job.url.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: () => _openJobUrl(job.url),
+                icon: const Icon(Icons.open_in_new, size: 16),
+                label: Text(
+                  'View Original Listing (${job.source.isNotEmpty ? job.source : "Web"})',
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  side: const BorderSide(color: AppColors.outlineVariant),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -298,15 +337,20 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
   Widget _buildInfoBadge(IconData icon, String text) {
     return Row(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Icon(icon, size: 16, color: AppColors.onSurfaceVariant),
         const SizedBox(width: 4),
-        Text(
-          text,
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-            color: AppColors.onSurfaceVariant,
+        Flexible(
+          child: Text(
+            text,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: AppColors.onSurfaceVariant,
+            ),
           ),
         ),
       ],
@@ -381,7 +425,58 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
     );
   }
 
+  Widget _buildFormattedDescriptionText(String text) {
+    final RegExp mdLinkRegex = RegExp(r'\[([^\]]+)\]\((https?://[^\)]+)\)|(https?://[^\s\)]+)');
+    final List<InlineSpan> spans = [];
+
+    int lastIndex = 0;
+    for (final Match match in mdLinkRegex.allMatches(text)) {
+      if (match.start > lastIndex) {
+        spans.add(TextSpan(text: text.substring(lastIndex, match.start)));
+      }
+      final String label = match.group(1) ?? match.group(2) ?? match.group(3) ?? '';
+      final String url = match.group(2) ?? match.group(3) ?? '';
+
+      spans.add(
+        WidgetSpan(
+          alignment: PlaceholderAlignment.baseline,
+          baseline: TextBaseline.alphabetic,
+          child: InkWell(
+            onTap: () => _openJobUrl(url),
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: AppColors.secondary,
+                fontWeight: FontWeight.w600,
+                decoration: TextDecoration.underline,
+              ),
+            ),
+          ),
+        ),
+      );
+      lastIndex = match.end;
+    }
+
+    if (lastIndex < text.length) {
+      spans.add(TextSpan(text: text.substring(lastIndex)));
+    }
+
+    return SelectableText.rich(
+      TextSpan(
+        children: spans,
+        style: const TextStyle(
+          fontSize: 14,
+          height: 1.6,
+          color: AppColors.onSurface,
+        ),
+      ),
+    );
+  }
+
   Widget _buildJobDescription(MatchedJob job) {
+    final hasRawDesc = job.rawDescription.trim().isNotEmpty;
+    final hasSummary = job.summary.trim().isNotEmpty;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -390,15 +485,68 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.outlineVariant),
       ),
-      child: Text(
-        job.summary.isNotEmpty
-            ? job.summary
-            : 'Full job description available on original posting site.',
-        style: const TextStyle(
-          fontSize: 14,
-          height: 1.6,
-          color: AppColors.onSurface,
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (hasSummary) ...[
+            const Text(
+              'Summary',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              job.summary,
+              style: const TextStyle(
+                fontSize: 14,
+                height: 1.5,
+                color: AppColors.onSurface,
+              ),
+            ),
+            if (hasRawDesc) const Divider(height: 24, color: AppColors.outlineVariant),
+          ],
+          if (hasRawDesc) ...[
+            if (hasSummary)
+              const Text(
+                'Full Description',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                ),
+              ),
+            if (hasSummary) const SizedBox(height: 6),
+            _buildFormattedDescriptionText(job.rawDescription),
+          ],
+          if (!hasRawDesc && !hasSummary) ...[
+            const Text(
+              'Full job description was not extracted cleanly.',
+              style: TextStyle(
+                fontSize: 14,
+                height: 1.6,
+                color: AppColors.onSurfaceVariant,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+            if (job.url.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              InkWell(
+                onTap: () => _openJobUrl(job.url),
+                child: Text(
+                  job.url,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppColors.secondary,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ],
       ),
     );
   }

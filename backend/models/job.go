@@ -19,6 +19,8 @@ type Job struct {
 	URL                string    `json:"url"`
 	PostedDate         *string   `json:"posted_date"`
 	Tags               any       `json:"tags"` // or json.RawMessage
+	Summary            string    `json:"summary"`
+	RawDescription     string    `json:"raw_description"`
 	ScrapedAt          time.Time `json:"scraped_at"`
 }
 
