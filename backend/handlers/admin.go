@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -257,8 +258,9 @@ func (h *AdminHandler) GetUsers(c *gin.Context) {
 
 	var usersList []gin.H
 	for rows.Next() {
-		var id, email, fullName, createdAt string
+		var id, email, fullName string
 		var aiMatchingEnabled, isMasterAdmin bool
+		var createdAt time.Time
 		if err := rows.Scan(&id, &email, &fullName, &aiMatchingEnabled, &isMasterAdmin, &createdAt); err != nil {
 			continue
 		}
@@ -268,7 +270,7 @@ func (h *AdminHandler) GetUsers(c *gin.Context) {
 			"full_name":           fullName,
 			"ai_matching_enabled": aiMatchingEnabled,
 			"is_master_admin":     isMasterAdmin,
-			"created_at":          createdAt,
+			"created_at":          createdAt.Format(time.RFC3339),
 		})
 	}
 
