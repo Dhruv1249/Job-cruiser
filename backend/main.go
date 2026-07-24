@@ -108,6 +108,7 @@ func main() {
 		public.POST("/signup", authHandler.Signup)
 		public.POST("/login", authHandler.Login)
 		public.POST("/auth/google", authHandler.GoogleLogin)
+		public.GET("/keywords", jobHandler.GetMasterKeywords)
 	}
 	
 	// Serverless Ingest & Scrapper Telemetry Routes
@@ -129,6 +130,7 @@ func main() {
 		protected.GET("/jobs/matched", matchedJobsHandler.GetMatchedJobs)
 		protected.POST("/preferences", prefHandler.UpdatePreferences)
 		protected.GET("/preferences", prefHandler.GetPreferences)
+		protected.POST("/user/parse-cv", prefHandler.ParseCV)
 		protected.POST("/overleaf/config", prefHandler.UpdateOverleafConfig)
 		protected.GET("/overleaf/config", prefHandler.GetOverleafConfig)
 
@@ -138,6 +140,7 @@ func main() {
 		protected.POST("/jobs/match", matchHandler.EvaluateJobMatch)
 
 		// Master Admin Routes
+		protected.GET("/admin/users", adminHandler.GetUsers)
 		protected.GET("/admin/whitelisted-emails", adminHandler.GetWhitelistedEmails)
 		protected.POST("/admin/whitelisted-emails", adminHandler.AddWhitelistedEmail)
 		protected.DELETE("/admin/whitelisted-emails/:id", adminHandler.DeleteWhitelistedEmail)

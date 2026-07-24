@@ -101,42 +101,35 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
 
     return Scaffold(
       appBar: _buildAppBar(context),
-      body: Stack(
-        children: [
-          SingleChildScrollView(
-            padding: const EdgeInsets.only(
-              left: 20,
-              right: 20,
-              top: 16,
-              bottom: 120,
-            ),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 600),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildHeroSection(job),
-                    const SizedBox(height: 24),
-                    _buildSectionHeader('Match Analysis'),
-                    const SizedBox(height: 16),
-                    _buildMatchAnalysis(job),
-                    const SizedBox(height: 24),
-                    _buildSectionHeader('Job Description & Requirements'),
-                    const SizedBox(height: 16),
-                    _buildJobDescription(job),
-                  ],
-                ),
-              ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.only(
+          left: 20,
+          right: 20,
+          top: 16,
+          bottom: 24,
+        ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildHeroSection(job),
+                const SizedBox(height: 24),
+                _buildSectionHeader('Match Analysis'),
+                const SizedBox(height: 16),
+                _buildMatchAnalysis(job),
+                const SizedBox(height: 24),
+                _buildSectionHeader('Job Description & Requirements'),
+                const SizedBox(height: 16),
+                _buildJobDescription(job),
+              ],
             ),
           ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: _buildBottomActionBar(),
-          ),
-        ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        child: _buildBottomActionBar(),
       ),
     );
   }

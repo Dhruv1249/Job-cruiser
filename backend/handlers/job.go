@@ -74,3 +74,29 @@ func (h *JobHandler) GetJobs(c *gin.Context) {
 		"limit": limit,
 	})
 }
+
+/*
+GetMasterKeywords returns all approved master keywords for scraping and search matching.
+*/
+func (h *JobHandler) GetMasterKeywords(c *gin.Context) {
+	query := `SELECT keyword FROM master_keywords ORDER BY keyword ASC;`
+	rows, err := h.DB.Query(c.Request.Context(), query)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch master keywords"})
+		return
+	}
+	defer rows.Close()
+
+	var keywords []string
+	for rows.Next() {
+		var kw string
+		if err := rows.Scan(&kw); err == nil {
+			keywords = append(keywords, kw)
+		}
+	}
+	if keywords == nil {
+		keywords = []string{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": keywords})
+}

@@ -20,25 +20,28 @@ func (s *BasicMatcherService) ComputeBasicMatch(userID string, jobID string) (*M
 	defer cancel()
 
 	// 1. Fetch Candidate constraints
-	var targetRolesRaw, workModelsRaw string
+	var targetRolesRaw, targetIndustriesRaw, targetLocationsRaw, workModelsRaw string
 	var minSalary int
 	userQuery := `
 		SELECT COALESCE(p.target_roles::text, '[]'), 
+		       COALESCE(p.target_industries::text, '[]'), 
+		       COALESCE(p.target_locations::text, '["India (On-site & Hybrid)", "India (Remote)", "Global Remote"]'), 
 		       COALESCE(p.work_models::text, '[]'), 
 		       COALESCE(p.min_salary, 0)
 		FROM user_preferences p
 		WHERE p.user_id = $1;
 	`
-	err := s.DB.QueryRow(ctx, userQuery, userID).Scan(&targetRolesRaw, &workModelsRaw, &minSalary)
+	err := s.DB.QueryRow(ctx, userQuery, userID).Scan(&targetRolesRaw, &targetIndustriesRaw, &targetLocationsRaw, &workModelsRaw, &minSalary)
 	if err != nil {
 		return nil, fmt.Errorf("failed fetching basic user preferences: %v", err)
 	}
 
 	// 2. Fetch Job requirements
-	var title, rawDesc, tagsRaw, jobType string
+	var title, jobLoc, rawDesc, tagsRaw, jobType string
 	var salaryMax int
 	jobQuery := `
 		SELECT COALESCE(title, ''), 
+		       COALESCE(location, ''), 
 		       COALESCE(raw_desc, ''), 
 		       COALESCE(tags::text, '[]'), 
 		       COALESCE(job_type, ''), 
@@ -46,14 +49,16 @@ func (s *BasicMatcherService) ComputeBasicMatch(userID string, jobID string) (*M
 		FROM jobs
 		WHERE id = $1;
 	`
-	err = s.DB.QueryRow(ctx, jobQuery, jobID).Scan(&title, &rawDesc, &tagsRaw, &jobType, &salaryMax)
+	err = s.DB.QueryRow(ctx, jobQuery, jobID).Scan(&title, &jobLoc, &rawDesc, &tagsRaw, &jobType, &salaryMax)
 	if err != nil {
 		return nil, fmt.Errorf("failed fetching basic job metrics: %v", err)
 	}
 
 	// 3. Parse JSON arrays
-	var targetRoles, workModels, jobTags []string
+	var targetRoles, targetIndustries, targetLocations, workModels, jobTags []string
 	json.Unmarshal([]byte(targetRolesRaw), &targetRoles)
+	json.Unmarshal([]byte(targetIndustriesRaw), &targetIndustries)
+	json.Unmarshal([]byte(targetLocationsRaw), &targetLocations)
 	json.Unmarshal([]byte(workModelsRaw), &workModels)
 	json.Unmarshal([]byte(tagsRaw), &jobTags)
 

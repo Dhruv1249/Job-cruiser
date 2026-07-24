@@ -25,7 +25,7 @@ from jobspy import scrape_jobs
 from jobspy.model import Site
 
 THROTTLE_SENSITIVE_KEYWORD = "software engineer"
-KEYWORDS = [
+DEFAULT_KEYWORDS = [
     "backend engineer",
     "backend developer",
     "software engineer backend",
@@ -144,6 +144,19 @@ KEYWORDS = [
     "software engineer infrastructure",
     "software engineer",
 ]
+
+def fetch_master_keywords():
+    try:
+        resp = requests.get(f"{BACKEND_API_URL}/api/keywords", timeout=5)
+        if resp.status_code == 200:
+            data = resp.json().get("data", [])
+            if data:
+                return data
+    except Exception as e:
+        pass
+    return DEFAULT_KEYWORDS
+
+KEYWORDS = fetch_master_keywords()
 JOBSPY_SITES = [
     Site.LINKEDIN,
     Site.INDEED,

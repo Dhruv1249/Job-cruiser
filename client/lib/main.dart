@@ -3,6 +3,7 @@ import 'details.dart' as details_page;
 import 'profile.dart';
 import 'preferences.dart' as preferences_page;
 import 'auth.dart';
+import 'onboarding.dart';
 import 'tracker.dart';
 import 'models/job.dart';
 import 'services/api_service.dart';
@@ -91,8 +92,66 @@ class MyApp extends StatelessWidget {
           }),
         ),
       ),
-      home: const AuthScreen(),
+      home: const AppInitializer(),
     );
+  }
+}
+
+class AppInitializer extends StatefulWidget {
+  const AppInitializer({super.key});
+
+  @override
+  State<AppInitializer> createState() => _AppInitializerState();
+}
+
+class _AppInitializerState extends State<AppInitializer> {
+  final ApiService _apiService = ApiService();
+  bool _isLoading = true;
+  Widget _homeScreen = const AuthScreen();
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAuthAndPreferences();
+  }
+
+  Future<void> _checkAuthAndPreferences() async {
+    final token = await _apiService.getToken();
+    if (token == null || token.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _homeScreen = const AuthScreen();
+          _isLoading = false;
+        });
+      }
+      return;
+    }
+
+    final profile = await _apiService.fetchProfile();
+    if (!mounted) return;
+
+    if (profile == null) {
+      setState(() {
+        _homeScreen = const AuthScreen();
+        _isLoading = false;
+      });
+    } else {
+      final bool hasPreferences = profile['has_preferences'] as bool? ?? false;
+      setState(() {
+        _homeScreen = hasPreferences ? const JobCruiserShell() : const OnboardingWizardScreen();
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    return _homeScreen;
   }
 }
 

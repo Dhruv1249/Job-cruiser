@@ -69,14 +69,31 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _loadSavedPreferences() async {
-    final savedPreferences = await preferences_page.PreferenceSummary.load();
-    if (!mounted || savedPreferences == null) {
-      return;
-    }
+    final apiPref = await _apiService.fetchPreferences();
+    if (!mounted) return;
 
-    setState(() {
-      _preferenceSummary = savedPreferences;
-    });
+    if (apiPref != null && (apiPref['target_roles'] as List? ?? []).isNotEmpty) {
+      final industries = List<String>.from(apiPref['target_industries'] as List? ?? ['Tech']);
+      final targetRoles = List<String>.from(apiPref['target_roles'] as List? ?? []);
+      final double minSalary = ((apiPref['min_salary'] as num? ?? 0).toDouble() / 1000);
+      final bool aiMatchingEnabled = apiPref['ai_matching_enabled'] as bool? ?? false;
+
+      setState(() {
+        _preferenceSummary = preferences_page.PreferenceSummary(
+          industries: industries,
+          targetRoles: targetRoles,
+          baseSalary: minSalary,
+          equityExpectation: aiMatchingEnabled ? 'AI Matching: Enabled (Managed by Admin)' : 'AI Matching: Disabled (Managed by Admin)',
+        );
+      });
+    } else {
+      final savedPreferences = await preferences_page.PreferenceSummary.load();
+      if (mounted && savedPreferences != null) {
+        setState(() {
+          _preferenceSummary = savedPreferences;
+        });
+      }
+    }
   }
 
   @override
@@ -93,13 +110,9 @@ class _ProfilePageState extends State<ProfilePage> {
               children: [
                 _buildProfileBento(context),
                 const SizedBox(height: 24),
-                _buildSectionTitle('CORPORATE CV'),
+                _buildSectionTitle('JOB PREFERENCES & TARGETS'),
                 const SizedBox(height: 8),
-                _buildCVSection(),
-                const SizedBox(height: 24),
-                _buildSectionTitle('MATCH PREFERENCES'),
-                const SizedBox(height: 8),
-                _buildMatchPreferences(context),
+                _buildPreferencesSection(context),
                 const SizedBox(height: 24),
                 _buildSectionTitle('ACCOUNT & SECURITY'),
                 const SizedBox(height: 8),
@@ -167,9 +180,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final String primaryEmail =
         _userProfile?['primary_email'] ?? 'No email provided';
 
-    final bool isMobile = MediaQuery.of(context).size.width < 768;
-
-    Widget personalInfoCard = Container(
+    return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surfaceContainerLowest,
@@ -219,7 +230,7 @@ class _ProfilePageState extends State<ProfilePage> {
               children: [
                 Text(
                   fullName,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w600,
                     color: AppColors.primary,
@@ -228,7 +239,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 const SizedBox(height: 4),
                 Text(
                   primaryEmail,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 14,
                     color: AppColors.onSurfaceVariant,
                   ),
@@ -270,251 +281,22 @@ class _ProfilePageState extends State<ProfilePage> {
         ],
       ),
     );
-
-    Widget strengthCard = Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.primary,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: .05),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -40,
-            right: -40,
-            child: Container(
-              width: 128,
-              height: 128,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Row(
-                children: [
-                  Icon(
-                    Icons.trending_up,
-                    color: AppColors.tertiaryFixed,
-                    size: 20,
-                  ),
-                  SizedBox(width: 8),
-                  Text(
-                    'PROFILE STRENGTH',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      letterSpacing: 0.6,
-                      color: AppColors.surfaceDim,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              const Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  Text(
-                    '92',
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                  SizedBox(width: 4),
-                  Text(
-                    '/ 100',
-                    style: TextStyle(fontSize: 14, color: AppColors.outline),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              LinearProgressIndicator(
-                value: 0.92,
-                backgroundColor: AppColors.surfaceTint.withValues(alpha: 0.3),
-                color: AppColors.tertiaryFixed,
-                minHeight: 4,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-
-    if (isMobile) {
-      return Column(
-        children: [personalInfoCard, const SizedBox(height: 12), strengthCard],
-      );
-    } else {
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(flex: 2, child: personalInfoCard),
-          const SizedBox(width: 12),
-          Expanded(flex: 1, child: strengthCard),
-        ],
-      );
-    }
   }
 
-  Widget _buildCVSection() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.outlineVariant),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceContainer,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(Icons.description, color: AppColors.secondary),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Alex_Mercer_CV_2024.pdf',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.primary,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                const Text(
-                  'Updated 2 days ago • 1.2 MB',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppColors.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          OutlinedButton(
-            onPressed: () {},
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.primary,
-              backgroundColor: AppColors.surfaceContainer,
-              side: const BorderSide(color: AppColors.outlineVariant),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-            ),
-            child: const Text('Upload', style: TextStyle(fontSize: 12)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMatchPreferences(BuildContext context) {
-    if (_preferenceSummary == null) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceContainerLowest,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.outlineVariant),
-        ),
-        child: Column(
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: const BoxDecoration(
-                color: AppColors.secondaryContainer,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.tune,
-                size: 32,
-                color: AppColors.onSecondaryContainer,
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Define Your Career Path',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w600,
-                color: AppColors.primary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Tell us your professional details so we can match you with the best opportunities.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: AppColors.onSurfaceVariant,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () => _openPreferences(context),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: AppColors.surfaceContainerLowest,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
-                elevation: 1,
-                textStyle: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              child: const Text('Set Preferences'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final summary = _preferenceSummary!;
-    final preferenceRows = _buildPreferenceRows(summary);
+  Widget _buildPreferencesSection(BuildContext context) {
+    final summary = _preferenceSummary;
+    final String rolesText = summary != null && summary.targetRoles.isNotEmpty
+        ? summary.targetRoles.join(', ')
+        : 'Any Role';
+    final String industriesText = summary != null && summary.industries.isNotEmpty
+        ? summary.industries.join(', ')
+        : 'Any Industry';
+    final String salaryText = summary != null && summary.baseSalary > 0
+        ? (summary.baseSalary <= 100 ? '₹${summary.baseSalary.toInt()} LPA+' : '\$${summary.baseSalary.toInt()}k+')
+        : 'Any Salary Target';
 
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: AppColors.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(12),
@@ -534,121 +316,79 @@ class _ProfilePageState extends State<ProfilePage> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                'Your Preferences',
+                'Matching Setup',
                 style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
                   color: AppColors.primary,
                 ),
               ),
-              TextButton.icon(
+              OutlinedButton.icon(
                 onPressed: () => _openPreferences(context),
                 icon: const Icon(Icons.edit, size: 16),
                 label: const Text('Edit Preferences'),
-                style: TextButton.styleFrom(foregroundColor: AppColors.primary),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  side: const BorderSide(color: AppColors.outlineVariant),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          ...preferenceRows,
+          const SizedBox(height: 16),
+          _buildPrefRowItem('Target Roles', rolesText),
+          const Divider(height: 24, color: AppColors.outlineVariant),
+          _buildPrefRowItem('Preferred Industries', industriesText),
+          const Divider(height: 24, color: AppColors.outlineVariant),
+          _buildPrefRowItem('Base Salary Target', salaryText),
         ],
       ),
+    );
+  }
+
+  Widget _buildPrefRowItem(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 140,
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontSize: 14,
+              color: AppColors.onSurfaceVariant,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              fontSize: 14,
+              color: AppColors.primary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
   Future<void> _openPreferences(BuildContext context) async {
-    final result = await Navigator.of(context)
-        .push<preferences_page.PreferenceSummary>(
-          MaterialPageRoute(
-            builder: (_) => preferences_page.SetPreferencesScreen(
-              initialPreferences: _preferenceSummary,
-            ),
-          ),
-        );
-
-    if (!mounted || result == null) {
-      return;
-    }
-
-    setState(() {
-      _preferenceSummary = result;
-    });
-  }
-
-  Widget _buildPreferenceRow({
-    required String label,
-    required String value,
-    bool isLast = false,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: isLast
-              ? BorderSide.none
-              : BorderSide(
-                  color: AppColors.outlineVariant.withValues(alpha: 0.5),
-                ),
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => preferences_page.SetPreferencesScreen(
+          initialPreferences: _preferenceSummary,
         ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: AppColors.onSurfaceVariant,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            flex: 2,
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: AppColors.primary,
-              ),
-            ),
-          ),
-        ],
       ),
     );
+
+    if (!mounted) return;
+    await _loadSavedPreferences();
+    await _loadUserProfile();
   }
 
-  List<Widget> _buildPreferenceRows(
-    preferences_page.PreferenceSummary summary,
-  ) {
-    final entries = <MapEntry<String, String>>[];
 
-    if (summary.industries.isNotEmpty) {
-      entries.add(MapEntry('Target Industries', summary.industries.join(', ')));
-    }
-    if (summary.targetRoles.isNotEmpty) {
-      entries.add(MapEntry('Target Roles', summary.targetRoles.join(', ')));
-    }
-    if (summary.salaryLabel.trim().isNotEmpty) {
-      entries.add(MapEntry('Base Salary', summary.salaryLabel));
-    }
-    if (summary.equityExpectation.trim().isNotEmpty) {
-      entries.add(MapEntry('Equity Expectation', summary.equityExpectation));
-    }
-
-    return [
-      for (var i = 0; i < entries.length; i++)
-        _buildPreferenceRow(
-          label: entries[i].key,
-          value: entries[i].value,
-          isLast: i == entries.length - 1,
-        ),
-    ];
-  }
 
   Widget _buildSecuritySection() {
     final bool isMasterAdmin = _userProfile?['is_master_admin'] as bool? ?? false;
