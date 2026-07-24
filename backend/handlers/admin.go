@@ -232,3 +232,49 @@ func (h *AdminHandler) ToggleUserAIMatching(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "User AI matching state updated"})
 }
+
+/*
+GetUsers lists registered users with their AI matching status for Master Admin control.
+*/
+func (h *AdminHandler) GetUsers(c *gin.Context) {
+	if !h.EnsureMasterAdmin(c) {
+		return
+	}
+
+	query := `
+		SELECT u.id, u.primary_email, COALESCE(up.full_name, ''), COALESCE(u.ai_matching_enabled, false), COALESCE(u.is_master_admin, false), u.created_at
+		FROM users u
+		LEFT JOIN user_preferences up ON u.id = up.user_id
+		ORDER BY u.created_at DESC;
+	`
+
+	rows, err := h.DB.Query(context.Background(), query)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch users"})
+		return
+	}
+	defer rows.Close()
+
+	var usersList []gin.H
+	for rows.Next() {
+		var id, email, fullName, createdAt string
+		var aiMatchingEnabled, isMasterAdmin bool
+		if err := rows.Scan(&id, &email, &fullName, &aiMatchingEnabled, &isMasterAdmin, &createdAt); err != nil {
+			continue
+		}
+		usersList = append(usersList, gin.H{
+			"id":                  id,
+			"primary_email":       email,
+			"full_name":           fullName,
+			"ai_matching_enabled": aiMatchingEnabled,
+			"is_master_admin":     isMasterAdmin,
+			"created_at":          createdAt,
+		})
+	}
+
+	if usersList == nil {
+		usersList = []gin.H{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": usersList})
+}

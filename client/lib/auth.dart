@@ -37,20 +37,27 @@ class _AuthScreenState extends State<AuthScreen> {
       _isLoading = true;
     });
 
-    final bool success = await _apiService.login(
+    final response = await _apiService.login(
       _emailController.text,
       _passwordController.text,
     );
 
     if (!mounted) return;
 
-    if (success) {
-      // Navigate to the main app on success
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const JobCruiserShell()),
-      );
+    if (response != null) {
+      final hasPreferences = response['has_preferences'] as bool? ?? false;
+      if (!hasPreferences) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => const OnboardingWizardScreen(),
+          ),
+        );
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const JobCruiserShell()),
+        );
+      }
     } else {
-      // Stop loading and show error on failure
       setState(() {
         _isLoading = false;
       });
@@ -59,84 +66,70 @@ class _AuthScreenState extends State<AuthScreen> {
       );
     }
   }
- Future<void> _handleGoogleLogin() async {
-  setState(() => _isLoading = true);
 
-  try {
-    debugPrint("Starting Google Sign-In");
+  Future<void> _handleGoogleLogin() async {
+    setState(() => _isLoading = true);
 
     try {
-      await _googleSignIn.signOut();
-    } catch (_) {}
+      try {
+        await _googleSignIn.signOut();
+      } catch (_) {}
 
-    final GoogleSignInAccount? account =
-        await _googleSignIn.signIn();
+      final GoogleSignInAccount? account = await _googleSignIn.signIn();
 
-    if (account == null) {
-      // User cancelled
+      if (account == null) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final GoogleSignInAuthentication auth = await account.authentication;
+      final String? idToken = auth.idToken;
+
+      if (idToken == null) {
+        throw Exception("No ID token received");
+      }
+
+      final response = await _apiService.googleLogin(idToken);
+
       if (!mounted) return;
-      setState(() => _isLoading = false);
-      return;
-    }
 
-    debugPrint("Account: ${account.email}");
+      if (response != null) {
+        final isNewUser = response['is_new_user'] as bool? ?? false;
+        final hasPreferences = response['has_preferences'] as bool? ?? false;
+        final suggestedName = response['suggested_name'] as String?;
 
-    final GoogleSignInAuthentication auth =
-        await account.authentication;
-
-    final String? idToken = auth.idToken;
-
-    debugPrint("Token received: ${idToken != null}");
-
-    if (idToken == null) {
-      throw Exception("No ID token received");
-    }
-
-    final response = await _apiService.googleLogin(idToken);
-
-    if (!mounted) return;
-
-    if (response != null) {
-      final isNewUser = response['is_new_user'] as bool? ?? false;
-      final suggestedName = response['suggested_name'] as String?;
-
-      if (isNewUser) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => OnboardingWizardScreen(suggestedName: suggestedName),
-          ),
-        );
+        if (isNewUser || !hasPreferences) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => OnboardingWizardScreen(suggestedName: suggestedName),
+            ),
+          );
+        } else {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => const JobCruiserShell(),
+            ),
+          );
+        }
       } else {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => const JobCruiserShell(),
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Server rejected login"),
           ),
         );
       }
-    } else {
+    } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
-
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Server rejected login"),
+        SnackBar(
+          content: Text("Google Sign-In failed: $e"),
         ),
       );
     }
-  } catch (e, s) {
-    debugPrint("GOOGLE ERROR: $e");
-    debugPrint(s.toString());
-
-    if (!mounted) return;
-
-    setState(() => _isLoading = false);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("Google Sign-In failed: $e"),
-      ),
-    );
   }
-}
   Future<void> _handleGuestLogin() async {
     // Completely bypass the API and jump straight into the app
     Navigator.of(context).pushReplacement(

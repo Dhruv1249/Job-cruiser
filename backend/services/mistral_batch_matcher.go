@@ -39,6 +39,8 @@ type UserProfile struct {
 	UserID           string `json:"user_id"`
 	ParsedExperience string `json:"parsed_experience"`
 	TargetRoles      string `json:"target_roles"`
+	TargetIndustries string `json:"target_industries"`
+	TargetLocations  string `json:"target_locations"`
 	WorkModels       string `json:"work_models"`
 	MinSalary        int    `json:"min_salary"`
 	Currency         string `json:"currency"`
@@ -331,10 +333,11 @@ CANDIDATE PROFILES:
 %s
 
 EVALUATION RULES:
+- Target Locations (target_locations) must be strictly enforced. E.g., if candidate specifies "India (On-site & Hybrid)", "India (Remote)", or "Global Remote", ONLY match jobs located in India, Remote worldwide, or Global. REJECT jobs restricted locally to US-only, UK-only, or Europe-only unless candidate explicitly included those target_locations.
+- Target Roles (target_roles) and Preferred Industries (target_industries) must be evaluated against the job title, description, and company profile.
 - Match ONLY if the role targets 0-3 years experience (Junior, New Grad, Intern, Entry Level, SDE I, Associate).
 - REJECT roles requiring 4+ years, or titled Senior/Staff/Lead/Principal/Director/Manager/VP.
-- REJECT roles restricted to US-only, UK-only, or Europe-only if the candidate is India-based or remote.
-- Score 0-100 based on stack overlap with candidate experience.
+- Score 0-100 based on tech stack overlap, role alignment, and location eligibility.
 - is_matched = true when match_score >= %d.
 - CRITICAL SPEED RULE: For candidate matches where is_matched is false, keep reasoning as "" and tech_stack as []. Provide reasoning ONLY when is_matched is true.
 
@@ -425,11 +428,14 @@ func (s *MistralBatchMatchService) fetchAllUserProfiles(ctx context.Context) ([]
 		SELECT u.id,
 		       COALESCE(u.parsed_experience::text, ''),
 		       COALESCE(p.target_roles::text, '[]'),
+		       COALESCE(p.target_industries::text, '[]'),
+		       COALESCE(p.target_locations::text, '["India (On-site & Hybrid)", "India (Remote)", "Global Remote"]'),
 		       COALESCE(p.work_models::text, '[]'),
 		       COALESCE(p.min_salary, 0),
 		       COALESCE(p.currency, 'USD')
 		FROM users u
-		LEFT JOIN user_preferences p ON u.id = p.user_id;
+		LEFT JOIN user_preferences p ON u.id = p.user_id
+		WHERE u.ai_matching_enabled = true;
 	`
 	rows, err := s.DB.Query(ctx, query)
 	if err != nil {
@@ -444,6 +450,8 @@ func (s *MistralBatchMatchService) fetchAllUserProfiles(ctx context.Context) ([]
 			&profile.UserID,
 			&profile.ParsedExperience,
 			&profile.TargetRoles,
+			&profile.TargetIndustries,
+			&profile.TargetLocations,
 			&profile.WorkModels,
 			&profile.MinSalary,
 			&profile.Currency,

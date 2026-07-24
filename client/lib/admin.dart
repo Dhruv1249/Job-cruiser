@@ -20,12 +20,13 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
 
   List<Map<String, dynamic>> _whitelistedEmails = [];
   List<Map<String, dynamic>> _pendingKeywords = [];
+  List<Map<String, dynamic>> _registeredUsers = [];
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _loadAdminData();
   }
 
@@ -44,14 +45,39 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
 
     final emails = await _apiService.fetchWhitelistedEmails();
     final keywords = await _apiService.fetchPendingKeywords();
+    final users = await _apiService.fetchUsersForAdmin();
 
     if (!mounted) return;
 
     setState(() {
       _whitelistedEmails = emails;
       _pendingKeywords = keywords;
+      _registeredUsers = users;
       _isLoading = false;
     });
+  }
+
+  Future<void> _toggleUserAIMatching(String userId, bool enabled) async {
+    final success = await _apiService.toggleUserAIMatching(userId, enabled);
+
+    if (!mounted) return;
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            enabled
+                ? 'AI Job Matching enabled for user'
+                : 'AI Job Matching disabled for user',
+          ),
+        ),
+      );
+      _loadAdminData();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to update user AI matching state')),
+      );
+    }
   }
 
   Future<void> _addWhitelistedEmail() async {
@@ -118,6 +144,7 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
           : TabBarView(
               controller: _tabController,
               children: [
+                _buildUsersTab(),
                 _buildWhitelistTab(),
                 _buildKeywordQueueTab(),
               ],
@@ -143,8 +170,9 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
         labelColor: AppColors.primary,
         indicatorColor: AppColors.primary,
         tabs: const [
+          Tab(text: 'User AI Search'),
           Tab(text: 'Access Whitelist'),
-          Tab(text: 'Keyword Review Queue'),
+          Tab(text: 'Keywords Queue'),
         ],
       ),
     );
@@ -318,6 +346,88 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
                               ),
                             ),
                           ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUsersTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'User AI Job Matching Controls',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: AppColors.primary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Only Master Admin can enable or disable background AI job matching per user account.',
+            style: TextStyle(
+              fontSize: 13,
+              color: AppColors.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _registeredUsers.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Center(
+                    child: Text('No registered users found in system.'),
+                  ),
+                )
+              : ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _registeredUsers.length,
+                  itemBuilder: (context, index) {
+                    final u = _registeredUsers[index];
+                    final String userId = u['id'] as String;
+                    final String email = u['primary_email'] as String? ?? 'No email';
+                    final String name = u['full_name'] as String? ?? '';
+                    final bool aiEnabled = u['ai_matching_enabled'] as bool? ?? false;
+                    final bool isAdmin = u['is_master_admin'] as bool? ?? false;
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: const BorderSide(color: AppColors.outlineVariant),
+                      ),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: isAdmin
+                              ? AppColors.primaryContainer
+                              : AppColors.surfaceContainerHigh,
+                          child: Icon(
+                            isAdmin ? Icons.admin_panel_settings : Icons.person,
+                            color: isAdmin ? Colors.white : AppColors.outline,
+                          ),
+                        ),
+                        title: Text(
+                          name.isNotEmpty ? '$name ($email)' : email,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(
+                          isAdmin
+                              ? 'Role: Master Admin'
+                              : 'AI Matching: ${aiEnabled ? "ENABLED" : "DISABLED"}',
+                        ),
+                        trailing: Switch(
+                          value: aiEnabled,
+                          onChanged: (val) {
+                            _toggleUserAIMatching(userId, val);
+                          },
                         ),
                       ),
                     );

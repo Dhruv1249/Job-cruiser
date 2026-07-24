@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -14,7 +15,9 @@ import (
 	"github.com/Dhruv1249/Job-cruiser/backend/utils"
 )
 
-// AuthHandler holds the database connection pool so our functions can use it
+/*
+AuthHandler holds the database connection pool so our functions can use it
+*/
 type AuthHandler struct {
 	DB *pgxpool.Pool
 }
@@ -22,6 +25,14 @@ type AuthHandler struct {
 type SignupRequest struct {
 	Email    string `json:"primary_email" binding:"required,email"`
 	Password string `json:"password" binding:"required,min=6"`
+}
+
+func isMasterAdminEmail(email string) bool {
+	configuredAdminEmail := os.Getenv("MASTER_ADMIN_EMAIL")
+	if configuredAdminEmail == "" {
+		configuredAdminEmail = "dhr1249.lm@gmail.com"
+	}
+	return strings.EqualFold(email, configuredAdminEmail)
 }
 
 func (h *AuthHandler) isEmailWhitelisted(email string) bool {
@@ -49,7 +60,7 @@ func (h *AuthHandler) Signup(c *gin.Context) {
 		return
 	}
 
-	isMasterAdmin := req.Email == "shama.2013.kangra@gmail.com"
+	isMasterAdmin := isMasterAdminEmail(req.Email)
 	var newUserID string
 	query := `
 		INSERT INTO users (primary_email, password_hash, is_master_admin) 
@@ -117,11 +128,25 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	var hasPreferences bool
+	var aiMatchingEnabled bool
+	checkPrefQuery := `
+		SELECT 
+			COALESCE(u.ai_matching_enabled, false),
+			(up.user_id IS NOT NULL AND jsonb_array_length(COALESCE(up.target_roles, '[]'::jsonb)) > 0)
+		FROM users u
+		LEFT JOIN user_preferences up ON u.id = up.user_id
+		WHERE u.id = $1;
+	`
+	_ = h.DB.QueryRow(context.Background(), checkPrefQuery, userID).Scan(&aiMatchingEnabled, &hasPreferences)
+
 	// Send success response back to Flutter
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Login successful",
-		"token":   tokenString,
-		"user_id": userID,
+		"message":             "Login successful",
+		"token":               tokenString,
+		"user_id":             userID,
+		"has_preferences":     hasPreferences,
+		"ai_matching_enabled": aiMatchingEnabled,
 	})
 }
 
@@ -136,7 +161,6 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 		return
 	}
 
-	// 1. Ask Google if the token is real
 	clientID := os.Getenv("GOOGLE_CLIENT_ID")
 	payload, err := idtoken.Validate(context.Background(), req.IDToken, clientID)
 	if err != nil {
@@ -144,18 +168,15 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 		return
 	}
 
-	// 2. Extract the safe data
 	email := payload.Claims["email"].(string)
 	name := payload.Claims["name"].(string)
-	googleID := payload.Claims["sub"].(string) // Extract Google's unique account ID
+	googleID := payload.Claims["sub"].(string)
 
-	// Sometimes users don't have a picture set, handle gracefully
 	var avatar string
 	if val, ok := payload.Claims["picture"]; ok {
 		avatar = val.(string)
 	}
 
-	// 3. Check if the user already exists
 	var userID string
 	var isMasterAdmin bool
 	isNewUser := false
@@ -169,10 +190,10 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 		}
 
 		isNewUser = true
-		isMasterAdmin = email == "shama.2013.kangra@gmail.com"
+		isMasterAdmin = isMasterAdminEmail(email)
 		insertQuery := `
-			INSERT INTO users (primary_email, avatar_url, google_id, auth_provider, is_master_admin)
-			VALUES ($1, $2, $3, 'google', $4)
+			INSERT INTO users (primary_email, avatar_url, google_id, auth_provider, is_master_admin, ai_matching_enabled)
+			VALUES ($1, $2, $3, 'google', $4, false)
 			RETURNING id;
 		`
 		err = h.DB.QueryRow(context.Background(), insertQuery, email, avatar, googleID, isMasterAdmin).Scan(&userID)
@@ -194,13 +215,27 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 		return
 	}
 
+	var hasPreferences bool
+	var aiMatchingEnabled bool
+	checkPrefQuery := `
+		SELECT 
+			COALESCE(u.ai_matching_enabled, false),
+			(up.user_id IS NOT NULL AND jsonb_array_length(COALESCE(up.target_roles, '[]'::jsonb)) > 0)
+		FROM users u
+		LEFT JOIN user_preferences up ON u.id = up.user_id
+		WHERE u.id = $1;
+	`
+	_ = h.DB.QueryRow(context.Background(), checkPrefQuery, userID).Scan(&aiMatchingEnabled, &hasPreferences)
+
 	c.JSON(http.StatusOK, gin.H{
-		"message":         "Google Login successful",
-		"token":           tokenString,
-		"user_id":         userID,
-		"is_new_user":     isNewUser,
-		"is_master_admin": isMasterAdmin,
-		"suggested_name": name,
+		"message":             "Google Login successful",
+		"token":               tokenString,
+		"user_id":             userID,
+		"is_new_user":         isNewUser,
+		"is_master_admin":     isMasterAdmin,
+		"suggested_name":      name,
+		"has_preferences":     hasPreferences,
+		"ai_matching_enabled": aiMatchingEnabled,
 	})
 }
 
@@ -215,7 +250,9 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 	}
 
 	query := `
-		SELECT u.id, u.primary_email, COALESCE(up.full_name, ''), COALESCE(u.avatar_url, '')
+		SELECT u.id, u.primary_email, COALESCE(up.full_name, ''), COALESCE(u.avatar_url, ''),
+		       COALESCE(u.ai_matching_enabled, false),
+		       (up.user_id IS NOT NULL AND jsonb_array_length(COALESCE(up.target_roles, '[]'::jsonb)) > 0) AS has_preferences
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id
 		WHERE u.id = $1;
@@ -225,17 +262,21 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 	var primaryEmailString string
 	var fullNameString string
 	var avatarURLString string
-	err := h.DB.QueryRow(context.Background(), query, userID).Scan(&idString, &primaryEmailString, &fullNameString, &avatarURLString)
+	var aiMatchingEnabled bool
+	var hasPreferences bool
+	err := h.DB.QueryRow(context.Background(), query, userID).Scan(&idString, &primaryEmailString, &fullNameString, &avatarURLString, &aiMatchingEnabled, &hasPreferences)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user profile"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":            idString,
-		"primary_email": primaryEmailString,
-		"full_name":     fullNameString,
-		"avatar_url":    avatarURLString,
+		"id":                  idString,
+		"primary_email":       primaryEmailString,
+		"full_name":           fullNameString,
+		"avatar_url":          avatarURLString,
+		"ai_matching_enabled": aiMatchingEnabled,
+		"has_preferences":     hasPreferences,
 	})
 }
 

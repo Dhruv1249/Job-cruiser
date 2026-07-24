@@ -73,24 +73,24 @@ class ApiService {
   }
 
   /// Authenticates user with email and password.
-  Future<bool> login(String email, String password) async {
+  Future<Map<String, dynamic>?> login(String email, String password) async {
     try {
       final response = await _dio.post('/login', data: {
         'primary_email': email,
         'password': password,
       });
       final data = response.data;
-      if (data['token'] != null) {
+      if (data != null && data['token'] != null) {
         await saveToken(data['token'] as String);
-        return true;
+        return data as Map<String, dynamic>;
       }
-      return false;
+      return null;
     } on DioException catch (e) {
       _logger.e(e.response?.data);
-      return false;
+      return null;
     } catch (e) {
       _logger.e(e);
-      return false;
+      return null;
     }
   }
 
@@ -263,7 +263,9 @@ class ApiService {
       final response = await _dio.get('/preferences');
       final data = response.data;
       if (data != null && data['data'] != null) {
-        return data['data'] as Map<String, dynamic>;
+        final Map<String, dynamic> res = Map<String, dynamic>.from(data['data'] as Map);
+        res['has_preferences'] = data['has_preferences'] ?? false;
+        return res;
       }
       return null;
     } on DioException catch (e) {
@@ -286,6 +288,26 @@ class ApiService {
     } catch (e) {
       _logger.e(e);
       return false;
+    }
+  }
+
+  /// Parses raw CV text using Gemini AI via backend endpoint.
+  Future<Map<String, dynamic>?> parseCVWithGemini(String rawCVText) async {
+    try {
+      final response = await _dio.post('/user/parse-cv', data: {
+        'raw_cv_text': rawCVText,
+      });
+      final data = response.data;
+      if (data != null && data['data'] != null) {
+        return Map<String, dynamic>.from(data['data'] as Map);
+      }
+      return null;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return null;
+    } catch (e) {
+      _logger.e(e);
+      return null;
     }
   }
 
@@ -371,6 +393,34 @@ class ApiService {
         'github_username': githubUsername,
         'github_repo_name': githubRepoName,
         'access_token': accessToken,
+      });
+      return response.statusCode == 200;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
+
+  /// Fetches registered users for Master Admin management.
+  Future<List<Map<String, dynamic>>> fetchUsersForAdmin() async {
+    try {
+      final response = await _dio.get('/admin/users');
+      final data = response.data;
+      if (data != null && data['data'] is List) {
+        return List<Map<String, dynamic>>.from(data['data'] as List);
+      }
+      return [];
+    } catch (e) {
+      _logger.e(e);
+      return [];
+    }
+  }
+
+  /// Toggles AI matching enabled setting for a specific user (Master Admin only).
+  Future<bool> toggleUserAIMatching(String userId, bool enabled) async {
+    try {
+      final response = await _dio.put('/admin/users/$userId/ai-matching', data: {
+        'enabled': enabled,
       });
       return response.statusCode == 200;
     } catch (e) {

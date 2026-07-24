@@ -27,7 +27,7 @@ func (s *AIMatcherService) ComputePremiumMatch(userID string, jobID string) (*Ma
 	defer cancel()
 
 	// 1. Fetch absolutely all candidate preference and history context
-	var primaryEmail, userLoc, parsedExp, latexCV, targetRoles, workModels, currencyPref, customAnswers string
+	var primaryEmail, userLoc, parsedExp, latexCV, targetRoles, targetIndustries, targetLocations, workModels, currencyPref, customAnswers string
 	var minSalary int
 	userQuery := `
 		SELECT u.primary_email, 
@@ -35,6 +35,8 @@ func (s *AIMatcherService) ComputePremiumMatch(userID string, jobID string) (*Ma
 		       COALESCE(u.parsed_experience::text, '[]'), 
 		       COALESCE(u.latex_cv, ''),
 		       COALESCE(p.target_roles::text, '[]'), 
+		       COALESCE(p.target_industries::text, '[]'), 
+		       COALESCE(p.target_locations::text, '["India (On-site & Hybrid)", "India (Remote)", "Global Remote"]'), 
 		       COALESCE(p.work_models::text, '[]'), 
 		       COALESCE(p.min_salary, 0), 
 		       COALESCE(p.currency, 'USD'), 
@@ -44,7 +46,7 @@ func (s *AIMatcherService) ComputePremiumMatch(userID string, jobID string) (*Ma
 		WHERE u.id = $1;
 	`
 	err := s.DB.QueryRow(ctx, userQuery, userID).Scan(
-		&primaryEmail, &userLoc, &parsedExp, &latexCV, &targetRoles, &workModels, &minSalary, &currencyPref, &customAnswers,
+		&primaryEmail, &userLoc, &parsedExp, &latexCV, &targetRoles, &targetIndustries, &targetLocations, &workModels, &minSalary, &currencyPref, &customAnswers,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed fetching comprehensive user context: %v", err)
@@ -84,7 +86,9 @@ func (s *AIMatcherService) ComputePremiumMatch(userID string, jobID string) (*Ma
 [CANDIDATE METRICS]:
 - Email: %s
 - Target Roles: %s
-- Target Location & Allowed Models: %s (Current Candidate Base: %s)
+- Preferred Industries: %s
+- Target Location Preferences: %s (Candidate Base Location: %s)
+- Work Models Allowed: %s
 - Compensation Floor: %d %s
 - Core Structured Experience Context: %s
 - Raw LaTeX Resume Reference: %s
@@ -100,12 +104,12 @@ func (s *AIMatcherService) ComputePremiumMatch(userID string, jobID string) (*Ma
 - Source Provider Origin: %s (URL: %s, Posted: %s)
 - Complete Raw Markdown/Text Body Description: %s
 
-Execute a rigorous verification. Determine if the requirements fit the candidate experience bracket, stack constraints, and salary boundaries. Output a clean JSON object structure with zero trailing formatting or Markdown wrappers:
+Execute a rigorous verification. Determine if the requirements fit the candidate experience bracket, stack constraints, target location preferences (e.g. India / Remote / Global Remote), and salary boundaries. Output a clean JSON object structure with zero trailing formatting or Markdown wrappers:
 {
   "match_score": integer (0 to 100),
   "match_reasons": ["highly detailed explicit contextual point 1", "highly detailed explicit contextual point 2"],
   "suggested_action": "string (must be either 'apply', 'cold_email', 'skip', or 'review')"
-}`, primaryEmail, targetRoles, workModels, userLoc, minSalary, currencyPref, parsedExp, latexCV, customAnswers,
+}`, primaryEmail, targetRoles, targetIndustries, targetLocations, userLoc, workModels, minSalary, currencyPref, parsedExp, latexCV, customAnswers,
 		title, jobLoc, salaryMin, salaryMax, jobCurrency, isRemote, isEasyApply, jobType, expReq, tags, source, url, postedDate, rawDesc)
 
 	// 4. Delegate to the SDK handler

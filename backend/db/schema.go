@@ -28,7 +28,7 @@ var schemaQueries = []string{
 	);`,
 
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_master_admin BOOLEAN DEFAULT false;`,
-	`ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_matching_enabled BOOLEAN DEFAULT true;`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_matching_enabled BOOLEAN DEFAULT false;`,
 
 	`CREATE TABLE IF NOT EXISTS whitelisted_emails (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -282,6 +282,9 @@ var schemaQueries = []string{
 	`ALTER TABLE user_job_matches ADD COLUMN IF NOT EXISTS ai_model VARCHAR(100) DEFAULT 'mistral-small-2506';`,
 	`ALTER TABLE user_job_matches ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;`,
 
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS target_industries JSONB DEFAULT '[]'::jsonb;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS target_locations JSONB DEFAULT '["India (On-site & Hybrid)", "India (Remote)", "Global Remote"]'::jsonb;`,
+
 	`CREATE INDEX IF NOT EXISTS idx_jobs_ai_evaluated ON jobs(ai_evaluated) WHERE ai_evaluated = false;`,
 	`CREATE INDEX IF NOT EXISTS idx_jobs_source ON jobs(source);`,
 	`CREATE INDEX IF NOT EXISTS idx_jobs_scraped_at ON jobs(scraped_at DESC);`,
@@ -299,5 +302,46 @@ func InitSchema(databasePool *pgxpool.Pool) error {
 			return fmt.Errorf("failed on query index %d: %v\nQuery: %s", i, err, query)
 		}
 	}
+
+	scraperKeywords := []string{
+		"backend engineer", "backend developer", "software engineer backend", "backend intern",
+		"junior backend engineer", "node.js developer", "express.js developer", "api developer",
+		"rest api developer", "microservices engineer", "distributed systems engineer",
+		"cloud backend engineer", "server-side developer", "platform backend engineer",
+		"full stack engineer", "full stack developer", "fullstack developer", "mern stack developer",
+		"next.js developer", "react developer", "frontend engineer", "javascript developer",
+		"typescript developer", "software developer", "web developer", "cloud engineer",
+		"cloud developer", "cloud infrastructure engineer", "cloud software engineer",
+		"aws engineer", "aws developer", "gcp engineer", "google cloud engineer",
+		"cloud platform engineer", "devops engineer", "devops intern", "junior devops engineer",
+		"platform engineer", "infrastructure engineer", "site reliability engineer", "sre intern",
+		"build engineer", "release engineer", "ci/cd engineer", "kubernetes engineer",
+		"docker engineer", "container platform engineer", "cloud native engineer",
+		"kubernetes developer", "systems engineer", "systems programmer", "systems software engineer",
+		"kernel engineer", "kernel developer", "operating systems engineer", "embedded systems engineer",
+		"low level software engineer", "firmware engineer", "rust developer", "rust systems engineer",
+		"rust backend engineer", "rust systems developer", "c developer", "c systems programmer",
+		"systems research engineer", "ai infrastructure engineer", "ai platform engineer",
+		"ml infrastructure engineer", "mlops engineer", "ml platform engineer", "ai backend engineer",
+		"ai systems engineer", "genai infrastructure engineer", "python developer",
+		"python backend engineer", "fastapi developer", "python software engineer",
+		"observability engineer", "monitoring engineer", "reliability engineer", "automation engineer",
+		"infrastructure automation engineer", "devops automation engineer", "forward deployed engineer",
+		"forward deployed software engineer", "founding engineer", "founding software engineer",
+		"founding backend engineer", "founding full stack engineer", "early stage engineer",
+		"startup software engineer", "startup backend engineer", "software engineer i",
+		"graduate software engineer", "new grad software engineer", "software engineer intern",
+		"software development engineer", "sde i", "graduate backend engineer", "graduate cloud engineer",
+		"graduate devops engineer", "entry level software engineer", "infrastructure software engineer",
+		"platform software engineer", "cloud platform developer", "infrastructure developer",
+		"reliability platform engineer", "backend engineer new grad", "cloud engineer entry level",
+		"devops engineer graduate", "platform engineer new grad", "sre new grad",
+		"kubernetes engineer junior", "aws backend engineer", "software engineer cloud",
+		"software engineer infrastructure", "software engineer",
+	}
+	for _, kw := range scraperKeywords {
+		_, _ = databasePool.Exec(ctx, "INSERT INTO master_keywords (keyword, category) VALUES ($1, 'scraper') ON CONFLICT (keyword) DO NOTHING;", kw)
+	}
+
 	return nil
 }
