@@ -53,19 +53,6 @@ func main() {
 	}
 	log.Printf("Reset %d jobs to unevaluated.", res.RowsAffected())
 
-	if mistralKey != "" {
-		log.Println("Starting fresh evaluation pass using updated hard-location filter prompt...")
-		matcher := &services.MistralBatchMatchService{
-			DB:         pool,
-			MistralKey: mistralKey,
-			HTTPClient: &http.Client{Timeout: 600 * time.Second},
-		}
-
-		matcher.EvaluatePendingForAllUsers(ctx)
-		log.Println("Fresh evaluation pass completed successfully!")
-	} else {
-		log.Println("Skipping evaluation pass as MISTRAL_API_KEY is empty.")
-	}
-
+	log.Println("Match reset complete! The running backend server will automatically pick up and evaluate all unevaluated jobs.")
 	fmt.Println("Done!")
 }
