@@ -147,6 +147,37 @@ func (s *MistralBatchMatchService) EvaluatePendingForAllUsers(ctx context.Contex
 	log.Printf("[MistralMatcher] Evaluation complete. Marked %d jobs as evaluated.", len(evaluatedJobIDs))
 }
 
+// EvaluateForSingleUser scores all jobs that have not yet been matched against the given user.
+// Called when a user enables AI matching for the first time — at that point all previously
+// ingested and ai_evaluated jobs still have no user_job_matches row for this user.
+func (s *MistralBatchMatchService) EvaluateForSingleUser(ctx context.Context, userID string) {
+	profile, err := s.fetchSingleUserProfile(ctx, userID)
+	if err != nil {
+		log.Printf("[MistralMatcher] Failed to fetch profile for user %s: %v", userID, err)
+		return
+	}
+
+	jobs, err := s.fetchJobsUnmatchedForUser(ctx, userID)
+	if err != nil {
+		log.Printf("[MistralMatcher] Failed to fetch unmatched jobs for user %s: %v", userID, err)
+		return
+	}
+
+	if len(jobs) == 0 {
+		log.Printf("[MistralMatcher] No unmatched jobs found for user %s, nothing to evaluate.", userID)
+		return
+	}
+
+	log.Printf("[MistralMatcher] Evaluating %d jobs for newly enabled user %s", len(jobs), userID)
+
+	evaluatedJobIDs := make(map[string]bool)
+	var mu sync.Mutex
+	s.evaluateJobsForUserChunk(ctx, []UserProfile{*profile}, jobs, evaluatedJobIDs, &mu)
+
+	log.Printf("[MistralMatcher] Single-user evaluation complete for %s: %d jobs scored.", userID, len(evaluatedJobIDs))
+}
+
+
 func (s *MistralBatchMatchService) evaluateJobsForUserChunk(
 	ctx context.Context,
 	userChunk []UserProfile,
@@ -462,6 +493,71 @@ func (s *MistralBatchMatchService) fetchAllUserProfiles(ctx context.Context) ([]
 	}
 	return profiles, nil
 }
+
+// fetchSingleUserProfile retrieves the CV and preference data for one specific user.
+func (s *MistralBatchMatchService) fetchSingleUserProfile(ctx context.Context, userID string) (*UserProfile, error) {
+	query := `
+		SELECT u.id,
+		       COALESCE(u.parsed_experience::text, ''),
+		       COALESCE(p.target_roles::text, '[]'),
+		       COALESCE(p.target_industries::text, '[]'),
+		       COALESCE(p.target_locations::text, '["India (On-site & Hybrid)", "India (Remote)", "Global Remote"]'),
+		       COALESCE(p.work_models::text, '[]'),
+		       COALESCE(p.min_salary, 0),
+		       COALESCE(p.currency, 'USD')
+		FROM users u
+		LEFT JOIN user_preferences p ON u.id = p.user_id
+		WHERE u.id = $1;
+	`
+	var profile UserProfile
+	err := s.DB.QueryRow(ctx, query, userID).Scan(
+		&profile.UserID,
+		&profile.ParsedExperience,
+		&profile.TargetRoles,
+		&profile.TargetIndustries,
+		&profile.TargetLocations,
+		&profile.WorkModels,
+		&profile.MinSalary,
+		&profile.Currency,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch single user profile: %w", err)
+	}
+	return &profile, nil
+}
+
+// fetchJobsUnmatchedForUser retrieves all jobs that have no user_job_matches row for the given user.
+// This covers both newly ingested jobs and jobs ingested before the user enabled AI matching.
+func (s *MistralBatchMatchService) fetchJobsUnmatchedForUser(ctx context.Context, userID string) ([]JobSnippet, error) {
+	query := `
+		SELECT j.id, j.title, COALESCE(c.name, ''), j.location,
+		       LEFT(COALESCE(j.raw_desc, ''), $1)
+		FROM jobs j
+		LEFT JOIN companies c ON j.company_id = c.id
+		WHERE NOT EXISTS (
+			SELECT 1 FROM user_job_matches ujm
+			WHERE ujm.job_id = j.id AND ujm.user_id = $2
+		)
+		ORDER BY j.scraped_at DESC;
+	`
+	rows, err := s.DB.Query(ctx, query, descriptionTruncateChars, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query unmatched jobs for user: %w", err)
+	}
+	defer rows.Close()
+
+	var snippets []JobSnippet
+	for rows.Next() {
+		var snippet JobSnippet
+		if err := rows.Scan(&snippet.JobID, &snippet.Title, &snippet.Company, &snippet.Location, &snippet.Description); err != nil {
+			return nil, fmt.Errorf("failed to scan job snippet row: %w", err)
+		}
+		snippets = append(snippets, snippet)
+	}
+	return snippets, nil
+}
+
+
 
 func (s *MistralBatchMatchService) fetchUnevaluatedJobs(ctx context.Context) ([]JobSnippet, error) {
 	query := `

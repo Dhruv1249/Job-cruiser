@@ -93,7 +93,7 @@ func main() {
 		MistralService: mistralMatchService,
 	}
 	matchedJobsHandler := &handlers.MatchedJobsHandler{DB: databasePool}
-	adminHandler := &handlers.AdminHandler{DB: databasePool}
+	adminHandler := &handlers.AdminHandler{DB: databasePool, MistralService: mistralMatchService}
 	matchHandler := &handlers.MatchHandler{
 		DB:           databasePool,
 		AIService:    aiMatcherService,
@@ -157,14 +157,8 @@ func main() {
 
 	if mistralKey != "" {
 		go func() {
-			matcherContext := context.Background()
-			log.Println("[MistralMatcher] Background AI matching goroutine started.")
-			mistralMatchService.EvaluatePendingForAllUsers(matcherContext)
-			ticker := time.NewTicker(30 * time.Minute)
-			defer ticker.Stop()
-			for range ticker.C {
-				mistralMatchService.EvaluatePendingForAllUsers(matcherContext)
-			}
+			log.Println("[MistralMatcher] Startup pass: evaluating any unscored jobs for AI-enabled users.")
+			mistralMatchService.EvaluatePendingForAllUsers(context.Background())
 		}()
 	} else {
 		log.Println("[MistralMatcher] MISTRAL_API_KEY not set — background AI matching disabled.")

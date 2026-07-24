@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"time"
 
+	"github.com/Dhruv1249/Job-cruiser/backend/services"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -13,7 +15,8 @@ import (
 AdminHandler provides handlers for Master Admin control.
 */
 type AdminHandler struct {
-	DB *pgxpool.Pool
+	DB             *pgxpool.Pool
+	MistralService *services.MistralBatchMatchService
 }
 
 /*
@@ -229,6 +232,13 @@ func (h *AdminHandler) ToggleUserAIMatching(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update AI matching state"})
 		return
+	}
+
+	if req.Enabled && h.MistralService != nil {
+		go func() {
+			log.Printf("[AdminHandler] AI matching enabled for user %s — triggering single-user evaluation.", targetUserID)
+			h.MistralService.EvaluateForSingleUser(context.Background(), targetUserID)
+		}()
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "User AI matching state updated"})
