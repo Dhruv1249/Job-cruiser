@@ -15,8 +15,8 @@ import (
 AdminHandler provides handlers for Master Admin control.
 */
 type AdminHandler struct {
-	DB             *pgxpool.Pool
-	MistralService *services.MistralBatchMatchService
+	DB           *pgxpool.Pool
+	MatchService services.BatchMatchEvaluator
 }
 
 /*
@@ -234,10 +234,10 @@ func (h *AdminHandler) ToggleUserAIMatching(c *gin.Context) {
 		return
 	}
 
-	if req.Enabled && h.MistralService != nil {
+	if req.Enabled && h.MatchService != nil {
 		go func() {
 			log.Printf("[AdminHandler] AI matching enabled for user %s — triggering single-user evaluation.", targetUserID)
-			h.MistralService.EvaluateForSingleUser(context.Background(), targetUserID)
+			h.MatchService.EvaluateForSingleUser(context.Background(), targetUserID)
 		}()
 	}
 
@@ -317,10 +317,10 @@ func (h *AdminHandler) ResetAndReevaluateMatches(c *gin.Context) {
 	}
 
 	// 3. Trigger fresh evaluation pass in background
-	if h.MistralService != nil {
+	if h.MatchService != nil {
 		go func() {
 			log.Println("[AdminHandler] Reset completed. Triggering fresh multi-candidate evaluation pass.")
-			h.MistralService.EvaluatePendingForAllUsers(context.Background())
+			h.MatchService.EvaluatePendingForAllUsers(context.Background())
 		}()
 	}
 
@@ -354,10 +354,10 @@ func (h *AdminHandler) ResetUserMatches(c *gin.Context) {
 		return
 	}
 
-	if h.MistralService != nil {
+	if h.MatchService != nil {
 		go func() {
 			log.Printf("[AdminHandler] Triggering re-evaluation for user %s", uidStr)
-			h.MistralService.EvaluateForSingleUser(context.Background(), uidStr)
+			h.MatchService.EvaluateForSingleUser(context.Background(), uidStr)
 		}()
 	}
 

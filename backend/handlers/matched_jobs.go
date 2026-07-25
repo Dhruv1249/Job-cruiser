@@ -71,6 +71,11 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 		offset = 0
 	}
 
+	whereClause := "WHERE ujm.user_id = $1 AND (ujm.match_score > 0 OR ujm.is_ai_matched = true)"
+	if minScore > 0 {
+		whereClause = "WHERE ujm.user_id = $1 AND ujm.match_score >= $2"
+	}
+
 	query := `
 		SELECT
 			j.id,
@@ -94,9 +99,7 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 		FROM user_job_matches ujm
 		JOIN jobs j ON ujm.job_id = j.id
 		LEFT JOIN companies comp ON j.company_id = comp.id
-		WHERE ujm.user_id = $1
-		  AND ujm.match_score >= $2
-		  AND (ujm.match_score > 0 OR ujm.is_ai_matched = true)
+		` + whereClause + `
 		ORDER BY ujm.match_score DESC
 		LIMIT $3 OFFSET $4;
 	`

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"time"
 
@@ -65,16 +64,22 @@ func main() {
 		log.Println("WARNING: GEMINI_API_KEY missing. Premium AI features will fail.")
 	}
 
-	mistralKey := os.Getenv("MISTRAL_API_KEY")
-	if mistralKey == "" {
-		log.Println("WARNING: MISTRAL_API_KEY missing. Batch AI job matching will be disabled.")
+	mistralKeysStr := os.Getenv("MISTRAL_API_KEYS")
+	if mistralKeysStr == "" {
+		mistralKeysStr = os.Getenv("MISTRAL_API_KEY")
+	}
+	mistralMatchService := services.NewMistralBatchMatchService(databasePool, mistralKeysStr)
+
+	geminiKeysStr := os.Getenv("GEMINI_API_KEYS")
+	if geminiKeysStr == "" {
+		geminiKeysStr = apiKey
 	}
 
-	mistralMatchService := &services.MistralBatchMatchService{
-		DB:         databasePool,
-		MistralKey: mistralKey,
-		HTTPClient: &http.Client{Timeout: 600 * time.Second},
-	}
+	geminiBatchService := services.NewGeminiBatchMatchService(databasePool, geminiKeysStr)
+	hybridMatchService := services.NewHybridBatchMatchService(mistralMatchService, geminiBatchService)
+
+	// Start 5-minute background ticker scheduler to check for pending jobs & active AI users
+	hybridMatchService.StartBackgroundScheduler(context.Background())
 
 	aiMatcherService := &services.AIMatcherService{
 		DB:     databasePool,
@@ -86,14 +91,14 @@ func main() {
 
 	authHandler := &handlers.AuthHandler{DB: databasePool}
 	jobHandler := &handlers.JobHandler{DB: databasePool}
-	prefHandler := &handlers.PreferencesHandler{DB: databasePool}
+	prefHandler := &handlers.PreferencesHandler{DB: databasePool, MatchService: hybridMatchService}
 	appHandler := &handlers.ApplicationHandler{DB: databasePool}
 	ingestHandler := &handlers.IngestHandler{
-		DB:             databasePool,
-		MistralService: mistralMatchService,
+		DB:           databasePool,
+		MatchService: hybridMatchService,
 	}
 	matchedJobsHandler := &handlers.MatchedJobsHandler{DB: databasePool}
-	adminHandler := &handlers.AdminHandler{DB: databasePool, MistralService: mistralMatchService}
+	adminHandler := &handlers.AdminHandler{DB: databasePool, MatchService: hybridMatchService}
 	matchHandler := &handlers.MatchHandler{
 		DB:           databasePool,
 		AIService:    aiMatcherService,
@@ -157,14 +162,10 @@ func main() {
 		serverPort = "8080" // Default to port 8080 if none is specified.
 	}
 
-	if mistralKey != "" {
-		go func() {
-			log.Println("[MistralMatcher] Startup pass: evaluating any unscored jobs for AI-enabled users.")
-			mistralMatchService.EvaluatePendingForAllUsers(context.Background())
-		}()
-	} else {
-		log.Println("[MistralMatcher] MISTRAL_API_KEY not set — background AI matching disabled.")
-	}
+	go func() {
+		log.Println("[BackgroundMatcher] Startup pass: evaluating unscored jobs for active users.")
+		hybridMatchService.EvaluatePendingForAllUsers(context.Background())
+	}()
 
 	fmt.Printf("Starting web server on port %s...\n", serverPort)
 
