@@ -1,4 +1,4 @@
-package handlers
+package handlers_test
 
 import (
 	"bytes"
@@ -7,12 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Dhruv1249/Job-cruiser/backend/handlers"
 	"github.com/gin-gonic/gin"
 )
 
-/*
-TestPreferencesRequestBinding validates that preferences request payloads bind correct JSON fields including AI matching state.
-*/
 func TestPreferencesRequestBinding(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -72,7 +70,7 @@ func TestPreferencesRequestBinding(t *testing.T) {
 
 			router := gin.New()
 			router.POST("/preferences", func(c *gin.Context) {
-				var req PreferencesRequest
+				var req handlers.PreferencesRequest
 				if bindErr := c.ShouldBindJSON(&req); bindErr != nil {
 					c.JSON(http.StatusBadRequest, gin.H{"error": bindErr.Error()})
 					return
@@ -96,9 +94,6 @@ func TestPreferencesRequestBinding(t *testing.T) {
 	}
 }
 
-/*
-TestParseCVRequestBinding tests parsing request payload binding for CV raw text parsing.
-*/
 func TestParseCVRequestBinding(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -128,7 +123,7 @@ func TestParseCVRequestBinding(t *testing.T) {
 
 			router := gin.New()
 			router.POST("/user/parse-cv", func(c *gin.Context) {
-				var req ParseCVRequest
+				var req handlers.ParseCVRequest
 				if bindErr := c.ShouldBindJSON(&req); bindErr != nil {
 					c.JSON(http.StatusBadRequest, gin.H{"error": bindErr.Error()})
 					return

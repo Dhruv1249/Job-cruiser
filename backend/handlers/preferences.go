@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Dhruv1249/Job-cruiser/backend/services"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/genai"
@@ -17,8 +18,9 @@ import (
 PreferencesHandler manages user settings, bio text, master CV, and overleaf configuration.
 */
 type PreferencesHandler struct {
-	DB     *pgxpool.Pool
-	APIKey string
+	DB           *pgxpool.Pool
+	APIKey       string
+	MatchService services.BatchMatchEvaluator
 }
 
 type PreferencesRequest struct {
@@ -119,6 +121,10 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save preferences: " + err.Error()})
 		return
+	}
+
+	if h.MatchService != nil && req.AIMatchingEnabled {
+		go h.MatchService.EvaluateForSingleUser(context.Background(), fmt.Sprintf("%v", userID))
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Preferences saved successfully"})

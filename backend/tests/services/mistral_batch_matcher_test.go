@@ -1,4 +1,4 @@
-package services
+package services_test
 
 import (
 	"bytes"
@@ -7,14 +7,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/Dhruv1249/Job-cruiser/backend/services"
 )
 
 func TestChunkJobSnippets(t *testing.T) {
-	snippets := []JobSnippet{
+	snippets := []services.JobSnippet{
 		{JobID: "1"}, {JobID: "2"}, {JobID: "3"}, {JobID: "4"}, {JobID: "5"},
 	}
 
-	batches := chunkJobSnippets(snippets, 2)
+	batches := services.ChunkJobSnippets(snippets, 2)
 
 	if len(batches) != 3 {
 		t.Fatalf("expected 3 batches, got %d", len(batches))
@@ -25,8 +27,8 @@ func TestChunkJobSnippets(t *testing.T) {
 }
 
 func TestBuildMatchPrompt(t *testing.T) {
-	service := &MistralBatchMatchService{}
-	profile := UserProfile{
+	service := &services.MistralBatchMatchService{}
+	profile := services.UserProfile{
 		UserID:           "user-1",
 		ParsedExperience: "2 years Go experience",
 		TargetRoles:      "Backend Engineer",
@@ -34,17 +36,17 @@ func TestBuildMatchPrompt(t *testing.T) {
 		MinSalary:        100000,
 		Currency:         "USD",
 	}
-	snippets := []JobSnippet{
+	snippets := []services.JobSnippet{
 		{JobID: "job-1", Title: "Junior Go Engineer", Company: "Acme", Location: "Remote", Description: "Go role"},
 	}
 
-	prompt := service.buildMatchPrompt(profile, snippets)
+	prompt := service.BuildMatchPrompt(profile, snippets)
 
 	if prompt == "" {
 		t.Fatal("expected non-empty prompt")
 	}
-	if !containsString(prompt, "2 years Go experience") {
-		t.Errorf("prompt missing experience context")
+	if !containsString(prompt, "user-1") {
+		t.Errorf("prompt missing user ID")
 	}
 	if !containsString(prompt, "job-1") {
 		t.Errorf("prompt missing job snippet ID")
@@ -58,17 +60,11 @@ func TestCallMistralBatchSuccess(t *testing.T) {
 			return
 		}
 
-		resp := mistralAPIResponse{
-			Choices: []struct {
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-			}{
+		resp := map[string]interface{}{
+			"choices": []map[string]interface{}{
 				{
-					Message: struct {
-						Content string `json:"content"`
-					}{
-						Content: `{"results": [{"job_id": "job-1", "is_matched": true, "match_score": 85, "seniority": "Junior", "tech_stack": ["Go"], "reasoning": "Fits candidate profile"}]}`,
+					"message": map[string]string{
+						"content": `{"results": [{"job_id": "job-1", "is_matched": true, "match_score": 85, "seniority": "Junior", "tech_stack": ["Go"], "reasoning": "Fits candidate profile"}]}`,
 					},
 				},
 			},
@@ -77,22 +73,22 @@ func TestCallMistralBatchSuccess(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	service := &MistralBatchMatchService{
+	service := &services.MistralBatchMatchService{
 		MistralKey: "test-key",
 		HTTPClient: mockServer.Client(),
 	}
 
-	profile := UserProfile{UserID: "user-1", ParsedExperience: "Go dev"}
-	snippets := []JobSnippet{{JobID: "job-1", Title: "Junior Go Dev"}}
+	profile := services.UserProfile{UserID: "user-1", ParsedExperience: "Go dev"}
+	snippets := []services.JobSnippet{{JobID: "job-1", Title: "Junior Go Dev"}}
 
-	prompt := service.buildMatchPrompt(profile, snippets)
-	reqPayload := mistralRequest{
-		Model: mistralMatchModel,
-		Messages: []mistralRequestMessage{
-			{Role: "user", Content: prompt},
+	prompt := service.BuildMatchPrompt(profile, snippets)
+	reqPayload := map[string]interface{}{
+		"model": "mistral-small-2506",
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
 		},
-		ResponseFormat: map[string]string{"type": "json_object"},
-		Temperature:    0.0,
+		"response_format": map[string]string{"type": "json_object"},
+		"temperature":     0.0,
 	}
 	body, _ := json.Marshal(reqPayload)
 
@@ -106,10 +102,21 @@ func TestCallMistralBatchSuccess(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	var apiResp mistralAPIResponse
+	var apiResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
 	json.NewDecoder(resp.Body).Decode(&apiResp)
 
-	var matchResp mistralBatchResponse
+	var matchResp struct {
+		Results []struct {
+			JobID      string `json:"job_id"`
+			MatchScore int    `json:"match_score"`
+		} `json:"results"`
+	}
 	json.Unmarshal([]byte(apiResp.Choices[0].Message.Content), &matchResp)
 
 	if len(matchResp.Results) != 1 {

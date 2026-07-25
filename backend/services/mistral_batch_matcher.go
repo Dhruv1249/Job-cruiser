@@ -55,9 +55,34 @@ const (
 // user's parsed CV using the Mistral mistral-small-2506 API. Results are written
 // to user_job_matches with a 0-100 match_score and is_matched flag.
 type MistralBatchMatchService struct {
-	DB         *pgxpool.Pool
-	MistralKey string
-	HTTPClient *http.Client
+	DB            *pgxpool.Pool
+	MistralKey    string
+	WorkerKeys    []string
+	ExhaustedKeys sync.Map
+	HTTPClient    *http.Client
+}
+
+func NewMistralBatchMatchService(db *pgxpool.Pool, rawKeysStr string) *MistralBatchMatchService {
+	var keys []string
+	if rawKeysStr != "" {
+		for _, k := range strings.Split(rawKeysStr, ",") {
+			k = strings.TrimSpace(k)
+			if k != "" {
+				keys = append(keys, k)
+			}
+		}
+	}
+	firstKey := ""
+	if len(keys) > 0 {
+		firstKey = keys[0]
+	}
+	log.Printf("[MistralMatcher] Initialized with %d API keys.", len(keys))
+	return &MistralBatchMatchService{
+		DB:         db,
+		MistralKey: firstKey,
+		WorkerKeys: keys,
+		HTTPClient: &http.Client{Timeout: 180 * time.Second},
+	}
 }
 
 // UserProfile holds the CV data needed to build a personalised Mistral prompt.
@@ -193,19 +218,35 @@ func (s *MistralBatchMatchService) EvaluateForSingleUser(ctx context.Context, us
 	}
 
 	if len(jobs) == 0 {
-		log.Printf("[MistralMatcher] No unmatched jobs found for user %s, nothing to evaluate.", userID)
+		log.Printf("[MistralMatcher] No unmatched jobs found for user %s, skipping single-user evaluation.", userID)
 		return
 	}
 
-	log.Printf("[MistralMatcher] Evaluating %d jobs for newly enabled user %s", len(jobs), userID)
-
+	log.Printf("[MistralMatcher] Starting single-user evaluation for user %s (%d jobs)", userID, len(jobs))
 	evaluatedJobIDs := make(map[string]bool)
 	var mu sync.Mutex
-	s.evaluateJobsForUserChunk(ctx, []UserProfile{*profile}, jobs, evaluatedJobIDs, &mu)
 
+	s.evaluateJobsForUserChunk(ctx, []UserProfile{*profile}, jobs, evaluatedJobIDs, &mu)
 	log.Printf("[MistralMatcher] Single-user evaluation complete for %s: %d jobs scored.", userID, len(evaluatedJobIDs))
 }
 
+func (s *MistralBatchMatchService) StartBackgroundScheduler(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	log.Println("[MistralMatcher] Starting 5-minute background AI matcher scheduler...")
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				ticker.Stop()
+				return
+			case <-ticker.C:
+				log.Println("[MistralMatcher] 5-minute ticker tick: Triggering background AI evaluation check...")
+				s.EvaluatePendingForAllUsers(ctx)
+			}
+		}
+	}()
+}
 
 func (s *MistralBatchMatchService) evaluateJobsForUserChunk(
 	ctx context.Context,
@@ -224,7 +265,7 @@ func (s *MistralBatchMatchService) evaluateJobsForUserChunk(
 		batchSize = 10
 	}
 
-	batches := chunkJobSnippets(pendingJobs, batchSize)
+	batches := ChunkJobSnippets(pendingJobs, batchSize)
 	if len(batches) == 0 {
 		return
 	}
@@ -243,7 +284,10 @@ func (s *MistralBatchMatchService) evaluateJobsForUserChunk(
 	}
 	close(workChan)
 
-	numWorkers := maxConcurrentWorkers
+	numWorkers := len(s.WorkerKeys)
+	if numWorkers == 0 {
+		numWorkers = maxConcurrentWorkers
+	}
 	if len(batches) < numWorkers {
 		numWorkers = len(batches)
 	}
@@ -251,23 +295,38 @@ func (s *MistralBatchMatchService) evaluateJobsForUserChunk(
 	var wg sync.WaitGroup
 	for w := 0; w < numWorkers; w++ {
 		wg.Add(1)
-		go func(workerID int) {
+		apiKey := s.MistralKey
+		if len(s.WorkerKeys) > 0 {
+			apiKey = s.WorkerKeys[w%len(s.WorkerKeys)]
+		}
+
+		go func(workerID int, key string) {
 			defer wg.Done()
+			keyPrefix := key
+			if len(keyPrefix) > 8 {
+				keyPrefix = keyPrefix[:8]
+			}
+
 			for work := range workChan {
+				if _, exhausted := s.ExhaustedKeys.Load(key); exhausted {
+					log.Printf("[MistralMatcher] Worker %d (%s...): Key monthly exhausted; stopping worker loop.", workerID, keyPrefix)
+					return
+				}
+
 				select {
 				case <-ctx.Done():
 					return
 				case <-rateLimiter.C:
 				}
 
-				results, err := s.callMistralMultiBatch(ctx, userChunk, work.items)
+				results, err := s.callMistralMultiBatchWithKey(ctx, key, userChunk, work.items)
 				if err != nil {
-					log.Printf("[MistralMatcher] Worker %d: Multi-batch %d failed: %v", workerID, work.index, err)
+					log.Printf("[MistralMatcher] Worker %d (%s...): Multi-batch %d failed: %v", workerID, keyPrefix, work.index, err)
 					continue
 				}
 
-				if err := s.upsertMultiMatchResults(ctx, results); err != nil {
-					log.Printf("[MistralMatcher] Worker %d: Failed upserting multi-batch %d: %v", workerID, work.index, err)
+				if err := s.upsertMultiMatchResults(ctx, userChunk, results); err != nil {
+					log.Printf("[MistralMatcher] Worker %d (%s...): Failed upserting multi-batch %d: %v", workerID, keyPrefix, work.index, err)
 					continue
 				}
 
@@ -279,7 +338,7 @@ func (s *MistralBatchMatchService) evaluateJobsForUserChunk(
 					mu.Unlock()
 				}
 			}
-		}(w)
+		}(w, apiKey)
 	}
 
 	wg.Wait()
@@ -300,6 +359,18 @@ func (s *MistralBatchMatchService) callMistralMultiBatch(
 	userChunk []UserProfile,
 	batch []JobSnippet,
 ) ([]jobMultiMatchResult, error) {
+	return s.callMistralMultiBatchWithKey(ctx, s.MistralKey, userChunk, batch)
+}
+
+func (s *MistralBatchMatchService) callMistralMultiBatchWithKey(
+	ctx context.Context,
+	apiKey string,
+	userChunk []UserProfile,
+	batch []JobSnippet,
+) ([]jobMultiMatchResult, error) {
+	if apiKey == "" {
+		apiKey = s.MistralKey
+	}
 	prompt := s.buildMultiMatchPrompt(userChunk, batch)
 	start := time.Now()
 
@@ -321,7 +392,7 @@ func (s *MistralBatchMatchService) callMistralMultiBatch(
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Mistral HTTP request: %w", err)
 	}
-	httpRequest.Header.Set("Authorization", "Bearer "+s.MistralKey)
+	httpRequest.Header.Set("Authorization", "Bearer "+apiKey)
 	httpRequest.Header.Set("Content-Type", "application/json")
 
 	httpResponse, err := s.HTTPClient.Do(httpRequest)
@@ -336,6 +407,14 @@ func (s *MistralBatchMatchService) callMistralMultiBatch(
 	}
 
 	if httpResponse.StatusCode != http.StatusOK {
+		if httpResponse.StatusCode == http.StatusTooManyRequests || httpResponse.StatusCode == http.StatusUnauthorized || httpResponse.StatusCode == http.StatusForbidden {
+			keyPrefix := apiKey
+			if len(keyPrefix) > 8 {
+				keyPrefix = keyPrefix[:8]
+			}
+			s.ExhaustedKeys.Store(apiKey, true)
+			log.Printf("[MistralMatcher] API Key %s... hit monthly quota limit (%d). Circuit-breaker triggered; key disabled for month.", keyPrefix, httpResponse.StatusCode)
+		}
 		return nil, fmt.Errorf("Mistral API returned status %d: %s", httpResponse.StatusCode, string(responseBody))
 	}
 
@@ -401,14 +480,14 @@ CANDIDATE PROFILES:
 CRITICAL EVALUATION RULES:
 
 1. CANDIDATE LOCATION & REMOTE ELIGIBILITY (STRICT PASS/FAIL):
-- Candidates are physically located in INDIA.
-- A job specified as "US Remote", "UK Remote", "Canada Remote", "EU Remote", or "Remote (US)" requires being physically located or authorized in that specific country. A candidate in India CANNOT work a US-restricted or UK-restricted remote job!
+- Candidates are physically located in INDIA and ONLY have work authorization for India or Global Remote roles.
+- Any job specifying "Remote, US", "US Remote", "Remote (US)", "UK Remote", "Canada Remote", "EU Remote", "LATAM Remote", "North America Remote", "Remote (North America)" is RESTRICTED to residents of that specific country/region. A candidate in India CANNOT work a US-restricted, UK-restricted, or North-America-restricted remote job!
 - REJECT IMMEDIATELY (match_score = 0, is_matched = false) if:
-  * The job is On-site or Hybrid outside India (e.g. NYC, San Francisco, London, Berlin, Austin).
-  * The job is country-restricted Remote outside India (e.g. "US Remote", "Remote - US", "UK Remote", "Remote (US/Canada)").
+  * The job location specifies US, United States, UK, London, Canada, Europe, LATAM, North America, or non-India cities/states.
+  * The job is country-restricted remote outside India (e.g. "US Remote", "Remote - US", "UK Remote", "Remote (North America)").
 - MATCH ONLY IF the location is explicitly:
   * Located in INDIA (On-site, Hybrid, or India Remote).
-  * Explicitly GLOBAL Remote, Remote Worldwide, Remote (Global), or Remote (APAC) where anyone in the world (including India) can work.
+  * Explicitly GLOBAL Remote, Remote Worldwide, Remote (Global), or Remote (APAC) where candidates anywhere in the world (including India) can work.
 
 2. CANDIDATE EXPERIENCE LEVEL (STRICT PASS/FAIL):
 - The candidates are Early-Career / Junior Software Engineers with 1 YEAR OF EXPERIENCE (0-2 YOE target range).
@@ -436,11 +515,11 @@ JOBS TO EVALUATE:
 	)
 }
 
-func (s *MistralBatchMatchService) buildMatchPrompt(userProfile UserProfile, batch []JobSnippet) string {
+func (s *MistralBatchMatchService) BuildMatchPrompt(userProfile UserProfile, batch []JobSnippet) string {
 	return s.buildMultiMatchPrompt([]UserProfile{userProfile}, batch)
 }
 
-func isSeniorRoleTitle(title string) bool {
+func IsSeniorRoleTitle(title string) bool {
 	t := strings.ToLower(title)
 	keywords := []string{
 		"senior", "sr.", "sr ", "lead", "principal", "staff", "architect",
@@ -454,7 +533,7 @@ func isSeniorRoleTitle(title string) bool {
 	return false
 }
 
-func isNonTargetOnsite(location string, isRemote bool, targetLocationsStr string) bool {
+func IsNonTargetOnsite(location string, isRemote bool, targetLocationsStr string) bool {
 	if isRemote {
 		return false
 	}
@@ -471,7 +550,12 @@ func isNonTargetOnsite(location string, isRemote bool, targetLocationsStr string
 	return false
 }
 
-func (s *MistralBatchMatchService) upsertMultiMatchResults(ctx context.Context, results []jobMultiMatchResult) error {
+func (s *MistralBatchMatchService) upsertMultiMatchResults(ctx context.Context, userChunk []UserProfile, results []jobMultiMatchResult) error {
+	validUsers := make(map[string]string)
+	for _, u := range userChunk {
+		validUsers[u.UserID] = u.UserID
+	}
+
 	for _, jobResult := range results {
 		var jobTitle, jobLocation, rawDesc string
 		var isRemote bool
@@ -496,17 +580,27 @@ func (s *MistralBatchMatchService) upsertMultiMatchResults(ctx context.Context, 
 			`, minInt, maxInt, jobResult.Currency, jobResult.JobID)
 		}
 
-		isSenior := isSeniorRoleTitle(jobTitle)
+		isSenior := IsSeniorRoleTitle(jobTitle)
 		isExcessiveExperience := hasExcessiveYOE(jobTitle + " " + rawDesc)
 
-		for _, match := range jobResult.Matches {
-			userID := strings.TrimSpace(match.UserID)
-			if len(userID) > 36 {
-				userID = userID[:36]
+		for idx, match := range jobResult.Matches {
+			targetUserID := ""
+			rawID := strings.TrimSpace(match.UserID)
+
+			if len(userChunk) == 1 {
+				targetUserID = userChunk[0].UserID
+			} else if actualID, ok := validUsers[rawID]; ok {
+				targetUserID = actualID
+			} else if idx < len(userChunk) {
+				targetUserID = userChunk[idx].UserID
+			} else if len(userChunk) > 0 {
+				targetUserID = userChunk[0].UserID
 			}
-			if userID == "" || jobResult.JobID == "" {
+
+			if targetUserID == "" || jobResult.JobID == "" {
 				continue
 			}
+			userID := targetUserID
 
 			var targetLocs string
 			_ = s.DB.QueryRow(ctx, "SELECT COALESCE(target_locations::text, '') FROM user_preferences WHERE user_id = $1;", userID).Scan(&targetLocs)
@@ -515,7 +609,7 @@ func (s *MistralBatchMatchService) upsertMultiMatchResults(ctx context.Context, 
 			isMatched := match.IsMatched
 			reasoning := match.MatchReasoning
 
-			if isSenior || isExcessiveExperience || isNonTargetOnsite(jobLocation, isRemote, targetLocs) || isNonTargetHybridOrOnsite(jobLocation, rawDesc, isRemote, targetLocs) {
+			if isSenior || isExcessiveExperience || IsNonTargetOnsite(jobLocation, isRemote, targetLocs) || isNonTargetHybridOrOnsite(jobLocation, rawDesc, isRemote, targetLocs) {
 				score = 0
 				isMatched = false
 				reasoning = ""
@@ -582,7 +676,7 @@ func (s *MistralBatchMatchService) upsertMatchResults(ctx context.Context, userI
 			},
 		})
 	}
-	return s.upsertMultiMatchResults(ctx, multiResults)
+	return s.upsertMultiMatchResults(ctx, []UserProfile{{UserID: userID}}, multiResults)
 }
 
 func (s *MistralBatchMatchService) fetchAllUserProfiles(ctx context.Context) ([]UserProfile, error) {
@@ -746,7 +840,7 @@ func chunkUserProfiles(profiles []UserProfile, size int) [][]UserProfile {
 	return chunks
 }
 
-func chunkJobSnippets(snippets []JobSnippet, maxBatchCount int) [][]JobSnippet {
+func ChunkJobSnippets(snippets []JobSnippet, maxBatchCount int) [][]JobSnippet {
 	var batches [][]JobSnippet
 	var currentBatch []JobSnippet
 	currentChars := 0

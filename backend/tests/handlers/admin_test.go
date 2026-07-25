@@ -1,4 +1,4 @@
-package handlers
+package handlers_test
 
 import (
 	"bytes"
@@ -7,12 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Dhruv1249/Job-cruiser/backend/handlers"
 	"github.com/gin-gonic/gin"
 )
 
-/*
-TestToggleAIMatchingRequestBinding verifies that admin toggle requests parse the boolean enabled payload correctly.
-*/
 func TestToggleAIMatchingRequestBinding(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -45,7 +43,7 @@ func TestToggleAIMatchingRequestBinding(t *testing.T) {
 
 			router := gin.New()
 			router.PUT("/admin/users/:id/ai-matching", func(c *gin.Context) {
-				var req ToggleAIMatchingRequest
+				var req handlers.ToggleAIMatchingRequest
 				if bindErr := c.ShouldBindJSON(&req); bindErr != nil {
 					c.JSON(http.StatusBadRequest, gin.H{"error": bindErr.Error()})
 					return

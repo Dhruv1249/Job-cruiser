@@ -16,8 +16,8 @@ import (
 )
 
 type IngestHandler struct {
-	DB             *pgxpool.Pool
-	MistralService *services.MistralBatchMatchService
+	DB           *pgxpool.Pool
+	MatchService services.BatchMatchEvaluator
 }
 
 type StartRunResponse struct {
@@ -324,7 +324,7 @@ func (h *IngestHandler) IngestJobs(c *gin.Context) {
 				}
 			}
 		} else {
-			techTags := extractTechTags(job.Title, job.DescriptionText)
+			techTags := ExtractTechTags(job.Title, job.DescriptionText)
 			tags = append(tags, techTags...)
 		}
 		
@@ -341,7 +341,7 @@ func (h *IngestHandler) IngestJobs(c *gin.Context) {
 			jobType = "Part-time"
 		}
 
-		expRequired := extractExperience(job.Title, job.DescriptionText)
+		expRequired := ExtractExperience(job.Title, job.DescriptionText)
 		var expParam *string
 		if expRequired != "" {
 			expParam = &expRequired
@@ -471,10 +471,10 @@ func (h *IngestHandler) FinishRun(c *gin.Context) {
 		return
 	}
 
-	if statusClean == "success" && h.MistralService != nil {
+	if statusClean == "success" && h.MatchService != nil {
 		go func() {
-			log.Printf("[IngestHandler] Triggering Mistral AI evaluation goroutine.")
-			h.MistralService.EvaluatePendingForAllUsers(context.Background())
+			log.Printf("[IngestHandler] Triggering AI evaluation pass.")
+			h.MatchService.EvaluatePendingForAllUsers(context.Background())
 		}()
 	}
 
@@ -494,19 +494,19 @@ var knownTechKeywords = []string{
 	"flask", "spring", "spark", "hadoop",
 }
 
-func extractTechTags(title, description string) []string {
+func ExtractTechTags(title, description string) []string {
 	text := strings.ToLower(title + " " + description)
 	var tags []string
 	
 	for _, kw := range knownTechKeywords {
-		if containsWord(text, kw) {
+		if ContainsWord(text, kw) {
 			tags = append(tags, kw)
 		}
 	}
 	return tags
 }
 
-func containsWord(text, word string) bool {
+func ContainsWord(text, word string) bool {
 	index := 0
 	for {
 		i := strings.Index(text[index:], word)
@@ -516,8 +516,8 @@ func containsWord(text, word string) bool {
 		start := index + i
 		end := start + len(word)
 		
-		startOk := start == 0 || !isAlphanumeric(text[start-1])
-		endOk := end == len(text) || !isAlphanumeric(text[end])
+		startOk := start == 0 || !IsAlphanumeric(text[start-1])
+		endOk := end == len(text) || !IsAlphanumeric(text[end])
 		
 		if startOk && endOk {
 			return true
@@ -530,7 +530,7 @@ func containsWord(text, word string) bool {
 	return false
 }
 
-func isAlphanumeric(c byte) bool {
+func IsAlphanumeric(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '#' || c == '/' || c == '-'
 }
 
@@ -543,7 +543,7 @@ var plusRegex = regexp.MustCompile(`\b(\d+)\s*\+\s*(?:years?|yrs?)\b`)
 var minRegex = regexp.MustCompile(`(?i)\b(?:at\s+least|minimum\s+of|requires?|with)\s+(\d+)\s*(?:years?|yrs?)\b`)
 var simpleRegex = regexp.MustCompile(`(?i)\b(\d+)\s*(?:years?|yrs?)(?:\s+of)?\s+experience\b`)
 
-func extractExperience(title, description string) string {
+func ExtractExperience(title, description string) string {
 	text := strings.ToLower(title + " " + description)
 
 	// 1. Try ranges first (e.g. "3-5 years")

@@ -4,12 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
-	"time"
 
 	"github.com/Dhruv1249/Job-cruiser/backend/db"
-	"github.com/Dhruv1249/Job-cruiser/backend/services"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
