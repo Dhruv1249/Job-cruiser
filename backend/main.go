@@ -59,31 +59,18 @@ func main() {
 		log.Fatalf("CRITICAL ERROR: Failed to initialize database schema. Details: %v", schemaError)
 	}
 	println("Database schema initialized.")
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey == "" {
-		log.Println("WARNING: GEMINI_API_KEY missing. Premium AI features will fail.")
+	nvidiaApiKey := os.Getenv("NVIDIA_API_KEY")
+	if nvidiaApiKey == "" {
+		log.Println("WARNING: NVIDIA_API_KEY missing. NVIDIA NIM GLM-5.2 features will fail.")
 	}
+	nvidiaNimService := services.NewNvidiaNimService(databasePool, nvidiaApiKey)
+	hybridMatchService := services.NewHybridBatchMatchService(nvidiaNimService)
 
-	mistralKeysStr := os.Getenv("MISTRAL_API_KEYS")
-	if mistralKeysStr == "" {
-		mistralKeysStr = os.Getenv("MISTRAL_API_KEY")
-	}
-	mistralMatchService := services.NewMistralBatchMatchService(databasePool, mistralKeysStr)
-
-	geminiKeysStr := os.Getenv("GEMINI_API_KEYS")
-	if geminiKeysStr == "" {
-		geminiKeysStr = apiKey
-	}
-
-	geminiBatchService := services.NewGeminiBatchMatchService(databasePool, geminiKeysStr)
-	hybridMatchService := services.NewHybridBatchMatchService(mistralMatchService, geminiBatchService)
-
-	// Start 5-minute background ticker scheduler to check for pending jobs & active AI users
 	hybridMatchService.StartBackgroundScheduler(context.Background())
 
 	aiMatcherService := &services.AIMatcherService{
 		DB:     databasePool,
-		APIKey: apiKey,
+		APIKey: nvidiaApiKey,
 	}
 	basicMatcherService := &services.BasicMatcherService{
 		DB: databasePool,
@@ -91,7 +78,11 @@ func main() {
 
 	authHandler := &handlers.AuthHandler{DB: databasePool}
 	jobHandler := &handlers.JobHandler{DB: databasePool}
-	prefHandler := &handlers.PreferencesHandler{DB: databasePool, MatchService: hybridMatchService}
+	prefHandler := &handlers.PreferencesHandler{
+		DB:           databasePool,
+		MatchService: hybridMatchService,
+		NimService:   nvidiaNimService,
+	}
 	appHandler := &handlers.ApplicationHandler{DB: databasePool}
 	ingestHandler := &handlers.IngestHandler{
 		DB:           databasePool,
