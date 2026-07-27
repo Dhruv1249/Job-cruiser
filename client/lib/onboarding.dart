@@ -33,9 +33,9 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
   bool _anyRole = true;
   bool _anyIndustry = true;
   bool _anySalary = true;
-  bool _anyWorkModel = true;
   bool _anyLocation = false;
   bool _isParsingCV = false;
+  String _rawCvText = '';
 
   final Set<String> _selectedLocations = {'India (On-site & Hybrid)', 'India (Remote)', 'Global Remote'};
   final List<String> _availableLocations = [
@@ -160,6 +160,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
 
       setState(() {
         _isParsingCV = true;
+        _rawCvText = extractedText.trim();
       });
 
       final parsed = await _apiService.parseCVWithGemini(extractedText.trim());
@@ -271,6 +272,20 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
     final workModels = _anyWorkModel ? ['any'] : _selectedWorkModels.toList();
     final minSalaryVal = _anySalary ? 0 : (_minSalary.toInt() * 1000);
 
+    Map<String, dynamic> fullCvPayload = {
+      'raw_cv': _rawCvText,
+      'experiences': _experiences,
+      'projects': _projects,
+      'education': _education,
+      'skills': _skills,
+      'achievements': _achievements,
+      'certifications': _certifications,
+    };
+    String masterCvString = jsonEncode(fullCvPayload);
+    if (_rawCvText.isNotEmpty) {
+      masterCvString = "$_rawCvText\n\n--- STRUCTURED RESUME DETAILS ---\n$masterCvString";
+    }
+
     final prefSuccess = await _apiService.savePreferences({
       'full_name': _nameController.text.trim().isNotEmpty
           ? _nameController.text.trim()
@@ -282,6 +297,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
       'min_salary': minSalaryVal,
       'currency': 'USD',
       'bio_experience_text': _bioTextController.text.trim(),
+      'master_cv_text': masterCvString,
     });
 
     if (_overleafUrlController.text.trim().isNotEmpty) {

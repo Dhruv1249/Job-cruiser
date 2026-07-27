@@ -136,3 +136,16 @@ func TestNvidiaNimCountTokensAPI(t *testing.T) {
 		t.Errorf("expected exact token count 42, got %d", tokenCount)
 	}
 }
+
+// TestIsValidUUIDValidation verifies that valid 36-char UUIDs pass and malformed LLM UUIDs are rejected.
+func TestIsValidUUIDValidation(t *testing.T) {
+	validUUID := "96b83816-1389-4399-0ff5-cf5f135249b0"
+	invalidShortUUID := "96b83816-1389-4399-ff5-cf5f135249b0"
+
+	if !services.IsValidUUIDStringForTest(validUUID) {
+		t.Errorf("expected valid UUID %s to pass validation", validUUID)
+	}
+	if services.IsValidUUIDStringForTest(invalidShortUUID) {
+		t.Errorf("expected truncated UUID %s to fail validation", invalidShortUUID)
+	}
+}
