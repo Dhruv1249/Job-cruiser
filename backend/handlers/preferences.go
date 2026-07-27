@@ -21,6 +21,7 @@ type PreferencesHandler struct {
 	DB           *pgxpool.Pool
 	APIKey       string
 	MatchService services.BatchMatchEvaluator
+	NimService   *services.NvidiaNimService
 }
 
 type PreferencesRequest struct {
@@ -352,21 +353,6 @@ func (h *PreferencesHandler) ParseCV(c *gin.Context) {
 				masterList = append(masterList, kw)
 			}
 		}
-		rows.Close()
-	}
-
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		Backend: genai.BackendGeminiAPI,
-		APIKey:  apiKey,
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize Gemini AI client: " + err.Error()})
-		return
-	}
-
-	modelName := os.Getenv("GEMINI_MODEL")
-	if modelName == "" {
-		modelName = "gemini-2.5-flash"
 	}
 
 	prompt := fmt.Sprintf(`You are an expert technical resume parser. Extract structured education, experience, projects, skills, achievements, certifications, location, a FIRST-PERSON bio summary, and technical domain keywords from the provided raw CV text.
@@ -424,18 +410,42 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
   "discovered_keywords": ["Golang", "Postgres", "Flutter", "Kubernetes"]
 }`, strings.Join(masterList, ", "), req.RawCVText)
 
-	config := &genai.GenerateContentConfig{
-		ResponseMIMEType: "application/json",
-		Temperature:      genai.Ptr[float32](0.0),
+	var rawJSON string
+	if h.NimService != nil {
+		completionContent, errNim := h.NimService.GenerateCompletion(ctx, prompt, "")
+		if errNim != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "NVIDIA NIM CV parsing failed: " + errNim.Error()})
+			return
+		}
+		rawJSON = completionContent
+	} else {
+		client, errClient := genai.NewClient(ctx, &genai.ClientConfig{
+			Backend: genai.BackendGeminiAPI,
+			APIKey:  apiKey,
+		})
+		if errClient != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize Gemini AI client: " + errClient.Error()})
+			return
+		}
+
+		modelName := os.Getenv("GEMINI_MODEL")
+		if modelName == "" {
+			modelName = "gemini-2.5-flash"
+		}
+
+		config := &genai.GenerateContentConfig{
+			ResponseMIMEType: "application/json",
+			Temperature:      genai.Ptr[float32](0.0),
+		}
+
+		result, errGen := client.Models.GenerateContent(ctx, modelName, genai.Text(prompt), config)
+		if errGen != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gemini AI CV parsing failed: " + errGen.Error()})
+			return
+		}
+		rawJSON = result.Text()
 	}
 
-	result, err := client.Models.GenerateContent(ctx, modelName, genai.Text(prompt), config)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gemini AI CV parsing failed: " + err.Error()})
-		return
-	}
-
-	rawJSON := result.Text()
 	var flexRes flexCVResponse
 	if err := json.Unmarshal([]byte(rawJSON), &flexRes); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse structured JSON from AI output: " + err.Error()})
