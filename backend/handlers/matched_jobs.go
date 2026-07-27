@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -23,29 +24,35 @@ type MatchedJobsHandler struct {
 
 // MatchedJobResponse is the response shape for a single matched job.
 type MatchedJobResponse struct {
-	JobID          string   `json:"job_id"`
-	Title          string   `json:"title"`
-	Company        string   `json:"company"`
-	Location       string   `json:"location"`
-	IsRemote       bool     `json:"is_remote"`
-	Source         string   `json:"source"`
-	URL            string   `json:"url"`
-	PostedDate     string   `json:"posted_date"`
-	Seniority      string   `json:"seniority"`
-	Summary        string   `json:"summary"`
-	RawDescription string   `json:"raw_description"`
-	MatchScore     int      `json:"match_score"`
-	MatchReasoning string   `json:"match_reasoning"`
-	TechStack      []string `json:"tech_stack"`
-	IsMatched      bool     `json:"is_matched"`
-	SalaryMin      *int     `json:"salary_min"`
-	SalaryMax      *int     `json:"salary_max"`
-	Currency       string   `json:"currency"`
+	JobID             string   `json:"job_id"`
+	Title             string   `json:"title"`
+	Company           string   `json:"company"`
+	Location          string   `json:"location"`
+	IsRemote          bool     `json:"is_remote"`
+	Source            string   `json:"source"`
+	URL               string   `json:"url"`
+	PostedDate        string   `json:"posted_date"`
+	Seniority         string   `json:"seniority"`
+	Summary           string   `json:"summary"`
+	RawDescription    string   `json:"raw_description"`
+	MatchScore        int      `json:"match_score"`
+	MatchReasoning    string   `json:"match_reasoning"`
+	TechStack         []string `json:"tech_stack"`
+	IsMatched         bool     `json:"is_matched"`
+	SalaryMin         *int     `json:"salary_min"`
+	SalaryMax         *int     `json:"salary_max"`
+	Currency          string   `json:"currency"`
+	IsViewed          bool     `json:"is_viewed"`
+	ApplicationStatus string   `json:"application_status"`
+	ViewedAt          *string  `json:"viewed_at"`
+	IsNew             bool     `json:"is_new"`
 }
 
-// GetMatchedJobs returns jobs evaluated for the authenticated user, sorted by
-// match_score descending. Accepts optional query param min_score (default 0)
-// to filter to only jobs above a confidence threshold.
+/*
+GetMatchedJobs returns jobs evaluated for the authenticated user.
+When viewed_only=true, orders strictly by ujv.viewed_at DESC (latest viewed first).
+Otherwise, orders by match_score DESC, unviewed first, and scraped date DESC.
+*/
 func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -59,6 +66,9 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 		minScore = 0
 	}
 
+	viewedOnly := c.DefaultQuery("viewed_only", "false") == "true"
+	unviewedOnly := c.DefaultQuery("unviewed_only", "false") == "true"
+
 	limitParam := c.DefaultQuery("limit", "50")
 	limit, err := strconv.Atoi(limitParam)
 	if err != nil || limit <= 0 || limit > 200 {
@@ -71,9 +81,44 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 		offset = 0
 	}
 
-	whereClause := "WHERE ujm.user_id = $1 AND (ujm.match_score > 0 OR ujm.is_ai_matched = true)"
+	var conditions []string
+	var args []interface{}
+	args = append(args, userID)
+
+	if unviewedOnly {
+		conditions = append(conditions, "ujv.viewed_at IS NULL")
+	} else if viewedOnly {
+		conditions = append(conditions, "ujv.viewed_at IS NOT NULL")
+	}
+
 	if minScore > 0 {
-		whereClause = "WHERE ujm.user_id = $1 AND ujm.match_score >= $2"
+		args = append(args, minScore)
+		conditions = append(conditions, fmt.Sprintf("COALESCE(ujm.match_score, 0) >= $%d", len(args)))
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + conditions[0]
+		for i := 1; i < len(conditions); i++ {
+			whereClause += " AND " + conditions[i]
+		}
+	}
+
+	args = append(args, limit)
+	limitParamIndex := fmt.Sprintf("$%d", len(args))
+	args = append(args, offset)
+	offsetParamIndex := fmt.Sprintf("$%d", len(args))
+
+	orderByClause := `
+		ORDER BY
+			COALESCE(ujm.match_score, 0) DESC,
+			CASE WHEN ujv.viewed_at IS NULL THEN 0 ELSE 1 END ASC,
+			j.scraped_at DESC`
+
+	if viewedOnly {
+		orderByClause = `
+		ORDER BY
+			ujv.viewed_at DESC`
 	}
 
 	query := `
@@ -89,22 +134,27 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 			COALESCE(ujm.seniority, ''),
 			COALESCE(j.summary, ''),
 			COALESCE(j.raw_desc, ''),
-			ujm.match_score,
+			COALESCE(ujm.match_score, 0) AS match_score,
 			COALESCE(ujm.match_reasoning, ''),
 			COALESCE(ujm.tech_stack::text, '[]'),
-			ujm.is_ai_matched,
+			COALESCE(ujm.is_ai_matched, false) AS is_matched,
 			j.salary_min,
 			j.salary_max,
-			COALESCE(j.currency, 'USD')
-		FROM user_job_matches ujm
-		JOIN jobs j ON ujm.job_id = j.id
+			COALESCE(j.currency, 'USD'),
+			(ujv.viewed_at IS NOT NULL) AS is_viewed,
+			COALESCE(app.status, 'unapplied') AS application_status,
+			ujv.viewed_at::text AS viewed_at,
+			(j.scraped_at >= NOW() - INTERVAL '24 hours' AND ujv.viewed_at IS NULL) AS is_new
+		FROM jobs j
+		LEFT JOIN user_job_matches ujm ON ujm.job_id = j.id AND ujm.user_id = $1
 		LEFT JOIN companies comp ON j.company_id = comp.id
-		` + whereClause + `
-		ORDER BY ujm.match_score DESC
-		LIMIT $3 OFFSET $4;
+		LEFT JOIN user_job_views ujv ON ujv.user_id = $1 AND ujv.job_id = j.id
+		LEFT JOIN applications app ON app.user_id = $1 AND app.job_id = j.id
+		` + whereClause + orderByClause + `
+		LIMIT ` + limitParamIndex + ` OFFSET ` + offsetParamIndex + `;
 	`
 
-	rows, err := h.DB.Query(context.Background(), query, userID, minScore, limit, offset)
+	rows, err := h.DB.Query(context.Background(), query, args...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query matched jobs: " + err.Error()})
 		return
@@ -134,6 +184,10 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 			&job.SalaryMin,
 			&job.SalaryMax,
 			&job.Currency,
+			&job.IsViewed,
+			&job.ApplicationStatus,
+			&job.ViewedAt,
+			&job.IsNew,
 		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan matched job row: " + err.Error()})
 			return

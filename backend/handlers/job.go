@@ -100,3 +100,34 @@ func (h *JobHandler) GetMasterKeywords(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"data": keywords})
 }
+
+/*
+MarkJobViewed records that the authenticated user viewed a specific job detail page.
+*/
+func (h *JobHandler) MarkJobViewed(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	jobID := c.Param("id")
+	if jobID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Job ID required"})
+		return
+	}
+
+	query := `
+		INSERT INTO user_job_views (user_id, job_id, viewed_at)
+		VALUES ($1, $2, CURRENT_TIMESTAMP)
+		ON CONFLICT (user_id, job_id) DO NOTHING;
+	`
+	_, err := h.DB.Exec(context.Background(), query, userID, jobID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to record job view"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Job marked as viewed", "job_id": jobID})
+}
+

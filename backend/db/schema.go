@@ -285,6 +285,15 @@ var schemaQueries = []string{
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS target_industries JSONB DEFAULT '[]'::jsonb;`,
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS target_locations JSONB DEFAULT '["India (On-site & Hybrid)", "India (Remote)", "Global Remote"]'::jsonb;`,
 
+	`CREATE TABLE IF NOT EXISTS user_job_views (
+		user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+		job_id UUID REFERENCES jobs(id) ON DELETE CASCADE,
+		viewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (user_id, job_id)
+	);`,
+
+	`CREATE INDEX IF NOT EXISTS idx_user_job_views_lookup ON user_job_views(user_id, job_id);`,
+
 	`CREATE INDEX IF NOT EXISTS idx_jobs_ai_evaluated ON jobs(ai_evaluated) WHERE ai_evaluated = false;`,
 	`CREATE INDEX IF NOT EXISTS idx_jobs_source ON jobs(source);`,
 	`CREATE INDEX IF NOT EXISTS idx_jobs_scraped_at ON jobs(scraped_at DESC);`,

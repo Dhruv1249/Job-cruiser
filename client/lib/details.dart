@@ -3,6 +3,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'main.dart' show AppColors;
 import 'models/job.dart';
 import 'services/api_service.dart';
+import 'widgets/job_description_renderer.dart';
+import 'widgets/company_logo_avatar.dart';
 
 void main() {
   runApp(const CompanyDetailsApp());
@@ -43,9 +45,19 @@ class CompanyDetailsPage extends StatefulWidget {
 class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
   final ApiService _apiService = ApiService();
   bool _isSaving = false;
-  String _currentStatus = 'bookmarked';
+  late String _currentStatus;
 
   MatchedJob? get _activeJob => widget.job;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentStatus = widget.job?.applicationStatus ?? 'unapplied';
+    final job = widget.job;
+    if (job != null && job.jobId.isNotEmpty) {
+      _apiService.markJobAsViewed(job.jobId);
+    }
+  }
 
   Future<void> _handleSaveStatus(String status) async {
     final activeJob = _activeJob;
@@ -237,14 +249,28 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
                           letterSpacing: -0.24,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        job.company,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.onSurfaceVariant,
-                        ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          CompanyLogoAvatar(
+                            companyName: job.company,
+                            jobUrl: job.url,
+                            size: 24,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              job.company,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.onSurfaceVariant,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -283,7 +309,7 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Status: ${_currentStatus.toUpperCase()}',
+                      'Status: ${_currentStatus == 'unapplied' ? 'NOT APPLIED' : _currentStatus.replaceAll('_', ' ').toUpperCase()}',
                       style: const TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
@@ -425,54 +451,6 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
     );
   }
 
-  Widget _buildFormattedDescriptionText(String text) {
-    final RegExp mdLinkRegex = RegExp(r'\[([^\]]+)\]\((https?://[^\)]+)\)|(https?://[^\s\)]+)');
-    final List<InlineSpan> spans = [];
-
-    int lastIndex = 0;
-    for (final Match match in mdLinkRegex.allMatches(text)) {
-      if (match.start > lastIndex) {
-        spans.add(TextSpan(text: text.substring(lastIndex, match.start)));
-      }
-      final String label = match.group(1) ?? match.group(2) ?? match.group(3) ?? '';
-      final String url = match.group(2) ?? match.group(3) ?? '';
-
-      spans.add(
-        WidgetSpan(
-          alignment: PlaceholderAlignment.baseline,
-          baseline: TextBaseline.alphabetic,
-          child: InkWell(
-            onTap: () => _openJobUrl(url),
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: AppColors.secondary,
-                fontWeight: FontWeight.w600,
-                decoration: TextDecoration.underline,
-              ),
-            ),
-          ),
-        ),
-      );
-      lastIndex = match.end;
-    }
-
-    if (lastIndex < text.length) {
-      spans.add(TextSpan(text: text.substring(lastIndex)));
-    }
-
-    return SelectableText.rich(
-      TextSpan(
-        children: spans,
-        style: const TextStyle(
-          fontSize: 14,
-          height: 1.6,
-          color: AppColors.onSurface,
-        ),
-      ),
-    );
-  }
-
   Widget _buildJobDescription(MatchedJob job) {
     final hasRawDesc = job.rawDescription.trim().isNotEmpty;
     final hasSummary = job.summary.trim().isNotEmpty;
@@ -509,17 +487,11 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
             if (hasRawDesc) const Divider(height: 24, color: AppColors.outlineVariant),
           ],
           if (hasRawDesc) ...[
-            if (hasSummary)
-              const Text(
-                'Full Description',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.primary,
-                ),
-              ),
             if (hasSummary) const SizedBox(height: 6),
-            _buildFormattedDescriptionText(job.rawDescription),
+            JobDescriptionRenderer(
+              content: job.rawDescription,
+              onLinkTap: _openJobUrl,
+            ),
           ],
           if (!hasRawDesc && !hasSummary) ...[
             const Text(
