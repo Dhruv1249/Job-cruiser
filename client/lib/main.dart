@@ -7,6 +7,7 @@ import 'onboarding.dart';
 import 'tracker.dart';
 import 'models/job.dart';
 import 'services/api_service.dart';
+import 'widgets/company_logo_avatar.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 Future<void> main() async {
@@ -165,12 +166,13 @@ class JobCruiserShell extends StatefulWidget {
 class _JobCruiserShellState extends State<JobCruiserShell> {
   int _currentIndex = 0;
 
-  void _openJobDetails(MatchedJob job) {
-    Navigator.of(context).push(
+  void _openJobDetails(MatchedJob job) async {
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => details_page.CompanyDetailsPage(job: job),
       ),
     );
+    setState(() {});
   }
 
   @override
@@ -250,6 +252,7 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _isFetchingMore = false;
   bool _hasMore = true;
   int _minScoreFilter = 0;
+  String _viewFilterMode = 'all'; // 'all', 'unviewed', 'viewed'
   String _searchQuery = '';
 
   @override
@@ -289,6 +292,8 @@ class _MyHomePageState extends State<MyHomePage> {
 
     final jobs = await _apiService.fetchMatchedJobs(
       minScore: _minScoreFilter,
+      viewedOnly: _viewFilterMode == 'viewed',
+      unviewedOnly: _viewFilterMode == 'unviewed',
       offset: 0,
       limit: 50,
     );
@@ -311,6 +316,8 @@ class _MyHomePageState extends State<MyHomePage> {
     final nextOffset = _matchedJobs.length;
     final moreJobs = await _apiService.fetchMatchedJobs(
       minScore: _minScoreFilter,
+      viewedOnly: _viewFilterMode == 'viewed',
+      unviewedOnly: _viewFilterMode == 'unviewed',
       offset: nextOffset,
       limit: 50,
     );
@@ -328,18 +335,44 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   List<MatchedJob> get _filteredJobs {
-    if (_searchQuery.isEmpty) {
-      return _matchedJobs;
+    List<MatchedJob> list = List.from(_matchedJobs);
+
+    if (_viewFilterMode == 'unviewed') {
+      list = list.where((job) => !job.isViewed).toList();
+    } else if (_viewFilterMode == 'viewed') {
+      list = list.where((job) => job.isViewed).toList();
     }
-    return _matchedJobs.where((job) {
-      final titleMatch = job.title.toLowerCase().contains(_searchQuery);
-      final companyMatch = job.company.toLowerCase().contains(_searchQuery);
-      final summaryMatch = job.summary.toLowerCase().contains(_searchQuery);
-      final techMatch = job.techStack.any(
-        (tech) => tech.toLowerCase().contains(_searchQuery),
-      );
-      return titleMatch || companyMatch || summaryMatch || techMatch;
-    }).toList();
+
+    if (_minScoreFilter > 0) {
+      list = list.where((job) => job.matchScore >= _minScoreFilter).toList();
+    }
+
+    if (_searchQuery.isNotEmpty) {
+      list = list.where((job) {
+        final titleMatch = job.title.toLowerCase().contains(_searchQuery);
+        final companyMatch = job.company.toLowerCase().contains(_searchQuery);
+        final summaryMatch = job.summary.toLowerCase().contains(_searchQuery);
+        final techMatch = job.techStack.any(
+          (tech) => tech.toLowerCase().contains(_searchQuery),
+        );
+        return titleMatch || companyMatch || summaryMatch || techMatch;
+      }).toList();
+    }
+
+    return list;
+  }
+
+  void _markJobAsViewedLocally(MatchedJob targetJob) {
+    if (targetJob.jobId.isEmpty) return;
+
+    _apiService.markJobAsViewed(targetJob.jobId);
+
+    setState(() {
+      final index = _matchedJobs.indexWhere((j) => j.jobId == targetJob.jobId);
+      if (index != -1) {
+        _matchedJobs[index] = _matchedJobs[index].copyWith(isViewed: true, isNew: false);
+      }
+    });
   }
 
   @override
@@ -521,26 +554,61 @@ class _MyHomePageState extends State<MyHomePage> {
         child: Row(
           children: [
             const Text(
-              'Match Filter: ',
+              'View: ',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: AppColors.onSurfaceVariant,
               ),
             ),
-            const SizedBox(width: 8),
-            _buildFilterChip('All Jobs', 0),
-            const SizedBox(width: 8),
-            _buildFilterChip('80%+ Top Match', 80),
-            const SizedBox(width: 8),
-            _buildFilterChip('60%+ Good Match', 60),
+            _buildViewFilterChip('All Matches', 'all'),
+            const SizedBox(width: 6),
+            _buildViewFilterChip('Unviewed', 'unviewed'),
+            const SizedBox(width: 6),
+            _buildViewFilterChip('Viewed', 'viewed'),
+            const SizedBox(width: 12),
+            Container(height: 16, width: 1, color: AppColors.outlineVariant),
+            const SizedBox(width: 12),
+            _buildScoreFilterChip('80%+ Top', 80),
+            const SizedBox(width: 6),
+            _buildScoreFilterChip('60%+ Good', 60),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildFilterChip(String label, int minScore) {
+  Widget _buildViewFilterChip(String label, String mode) {
+    final isSelected = _viewFilterMode == mode;
+    return ChoiceChip(
+      label: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: isSelected
+              ? AppColors.surfaceContainerLowest
+              : AppColors.onSurfaceVariant,
+        ),
+      ),
+      selected: isSelected,
+      selectedColor: AppColors.primary,
+      backgroundColor: AppColors.surfaceContainerLowest,
+      side: BorderSide(
+        color: isSelected ? AppColors.primary : AppColors.outlineVariant,
+      ),
+      onSelected: (selected) {
+        if (selected) {
+          setState(() {
+            _viewFilterMode = mode;
+          });
+          _loadMatchedJobs();
+        }
+      },
+    );
+  }
+
+  Widget _buildScoreFilterChip(String label, int minScore) {
     final isSelected = _minScoreFilter == minScore;
     return ChoiceChip(
       label: Text(
@@ -562,7 +630,7 @@ class _MyHomePageState extends State<MyHomePage> {
       onSelected: (selected) {
         if (selected) {
           setState(() {
-            _minScoreFilter = minScore;
+            _minScoreFilter = isSelected ? 0 : minScore;
           });
           _loadMatchedJobs();
         }
@@ -628,125 +696,164 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Widget _buildMatchItem(MatchedJob job) {
     final isHighMatch = job.matchScore >= 80;
-    final firstLetter =
-        job.company.isNotEmpty ? job.company[0].toUpperCase() : 'J';
 
     return InkWell(
-      onTap: () => widget.onSelectJob(job),
+      onTap: () {
+        _markJobAsViewedLocally(job);
+        widget.onSelectJob(job);
+      },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
         decoration: const BoxDecoration(
           color: AppColors.surface,
           border: Border(
             bottom: BorderSide(color: AppColors.outlineVariant, width: 1.0),
           ),
         ),
-        child: Row(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.primaryContainer,
-                border: Border.all(color: AppColors.outlineVariant),
-              ),
-              child: Center(
-                child: Text(
-                  firstLetter,
-                  style: const TextStyle(
-                    color: AppColors.onPrimaryContainer,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          job.company,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.primary,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (job.postedDate.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          job.postedDate,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: AppColors.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
                     job.title,
                     style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.onSurface,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    job.matchReasoning.isNotEmpty
-                        ? job.matchReasoning
-                        : job.summary,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w400,
-                      color: AppColors.onSurfaceVariant,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primary,
+                      letterSpacing: -0.2,
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              margin: const EdgeInsets.only(top: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: isHighMatch
-                    ? AppColors.matchGreen
-                    : AppColors.surfaceContainerLowest,
-                borderRadius: BorderRadius.circular(16),
-                border: isHighMatch
-                    ? null
-                    : Border.all(color: AppColors.outline, width: 1),
-              ),
-              child: Text(
-                '${job.matchScore}% Match',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: isHighMatch
-                      ? AppColors.onTertiary
-                      : AppColors.outline,
                 ),
-              ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: isHighMatch
+                            ? AppColors.matchGreen
+                            : AppColors.surfaceContainerLowest,
+                        borderRadius: BorderRadius.circular(16),
+                        border: isHighMatch
+                            ? null
+                            : Border.all(color: AppColors.outline, width: 1),
+                      ),
+                      child: Text(
+                        job.matchScore > 0
+                            ? '${job.matchScore}% Match'
+                            : 'Unmatched',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: isHighMatch
+                              ? AppColors.onTertiary
+                              : AppColors.outline,
+                        ),
+                      ),
+                    ),
+                    if (job.isNew) ...[
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryContainer,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'NEW',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
             ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                CompanyLogoAvatar(
+                  companyName: job.company,
+                  jobUrl: job.url,
+                  size: 20,
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  flex: 2,
+                  child: Text(
+                    job.company,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.onSurfaceVariant,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (job.location.isNotEmpty) ...[
+                  const SizedBox(width: 6),
+                  Icon(
+                    job.isRemote ? Icons.wifi : Icons.location_on_outlined,
+                    size: 12,
+                    color: AppColors.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 2),
+                  Flexible(
+                    flex: 1,
+                    child: Text(
+                      job.location,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.onSurfaceVariant,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+                if (job.postedDate.isNotEmpty) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    '• ${job.postedDate}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            if (job.matchReasoning.isNotEmpty || job.summary.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                job.matchReasoning.isNotEmpty
+                    ? job.matchReasoning
+                    : job.summary,
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  height: 1.4,
+                  fontWeight: FontWeight.w400,
+                  color: AppColors.secondary,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ],
         ),
       ),

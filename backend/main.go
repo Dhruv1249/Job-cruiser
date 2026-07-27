@@ -133,6 +133,7 @@ func main() {
 		protected.GET("/user/me", authHandler.GetMe)
 		protected.GET("/jobs", jobHandler.GetJobs)
 		protected.GET("/jobs/matched", matchedJobsHandler.GetMatchedJobs)
+		protected.POST("/jobs/:id/view", jobHandler.MarkJobViewed)
 		protected.POST("/preferences", prefHandler.UpdatePreferences)
 		protected.GET("/preferences", prefHandler.GetPreferences)
 		protected.POST("/user/parse-cv", prefHandler.ParseCV)

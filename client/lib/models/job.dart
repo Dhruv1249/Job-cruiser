@@ -21,6 +21,9 @@ class MatchedJob {
     this.salaryMin,
     this.salaryMax,
     this.currency = 'USD',
+    this.isViewed = false,
+    this.applicationStatus = 'unapplied',
+    this.isNew = false,
   });
 
   final String jobId;
@@ -41,6 +44,40 @@ class MatchedJob {
   final int? salaryMin;
   final int? salaryMax;
   final String currency;
+  final bool isViewed;
+  final String applicationStatus;
+  final bool isNew;
+
+  /// Creates a copy of [MatchedJob] with overridden fields.
+  MatchedJob copyWith({
+    bool? isViewed,
+    String? applicationStatus,
+    bool? isNew,
+  }) {
+    return MatchedJob(
+      jobId: jobId,
+      title: title,
+      company: company,
+      location: location,
+      isRemote: isRemote,
+      source: source,
+      url: url,
+      postedDate: postedDate,
+      seniority: seniority,
+      summary: summary,
+      rawDescription: rawDescription,
+      matchScore: matchScore,
+      matchReasoning: matchReasoning,
+      techStack: techStack,
+      isMatched: isMatched,
+      salaryMin: salaryMin,
+      salaryMax: salaryMax,
+      currency: currency,
+      isViewed: isViewed ?? this.isViewed,
+      applicationStatus: applicationStatus ?? this.applicationStatus,
+      isNew: isNew ?? this.isNew,
+    );
+  }
 
   /// Creates a [MatchedJob] instance from a JSON map response.
   factory MatchedJob.fromJson(Map<String, dynamic> json) {
@@ -62,6 +99,8 @@ class MatchedJob {
       }
     }
 
+    final isViewedVal = json['is_viewed'] as bool? ?? false;
+
     return MatchedJob(
       jobId: json['job_id'] as String? ?? json['id'] as String? ?? '',
       title: json['title'] as String? ?? 'Untitled Position',
@@ -81,6 +120,9 @@ class MatchedJob {
       salaryMin: json['salary_min'] as int?,
       salaryMax: json['salary_max'] as int?,
       currency: json['currency'] as String? ?? 'USD',
+      isViewed: isViewedVal,
+      applicationStatus: json['application_status'] as String? ?? 'unapplied',
+      isNew: json['is_new'] as bool? ?? (!isViewedVal),
     );
   }
 

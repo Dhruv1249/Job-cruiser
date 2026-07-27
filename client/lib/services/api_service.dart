@@ -162,9 +162,11 @@ class ApiService {
     }
   }
 
-  /// Fetches AI matched jobs for the current user, falling back to raw jobs if empty.
+  /// Fetches AI matched jobs for the current user.
   Future<List<MatchedJob>> fetchMatchedJobs({
     int minScore = 0,
+    bool viewedOnly = false,
+    bool unviewedOnly = false,
     int limit = 50,
     int offset = 0,
   }) async {
@@ -173,6 +175,8 @@ class ApiService {
         '/jobs/matched',
         queryParameters: {
           'min_score': minScore,
+          'viewed_only': viewedOnly,
+          'unviewed_only': unviewedOnly,
           'limit': limit,
           'offset': offset,
         },
@@ -181,24 +185,32 @@ class ApiService {
       final data = response.data;
       if (data != null && data['jobs'] is List) {
         final List jobsList = data['jobs'] as List;
-        final matched = jobsList
+        return jobsList
             .map((item) => MatchedJob.fromJson(item as Map<String, dynamic>))
             .toList();
-        if (matched.isNotEmpty) {
-          return matched;
-        }
       }
-
-      final page = (offset ~/ limit) + 1;
-      return await fetchRawJobs(limit: limit, page: page);
+      return [];
     } on DioException catch (e) {
       _logger.e(e.response?.data);
-      final page = (offset ~/ limit) + 1;
-      return await fetchRawJobs(limit: limit, page: page);
+      return [];
     } catch (e) {
       _logger.e(e);
-      final page = (offset ~/ limit) + 1;
-      return await fetchRawJobs(limit: limit, page: page);
+      return [];
+    }
+  }
+
+  /// Marks a specific job as viewed by the authenticated user.
+  Future<bool> markJobAsViewed(String jobId) async {
+    if (jobId.isEmpty) return false;
+    try {
+      final response = await _dio.post('/jobs/$jobId/view');
+      return response.statusCode == 200;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return false;
+    } catch (e) {
+      _logger.e(e);
+      return false;
     }
   }
 

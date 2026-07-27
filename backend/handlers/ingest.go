@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Dhruv1249/Job-cruiser/backend/services"
+	"github.com/Dhruv1249/Job-cruiser/backend/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -118,12 +119,7 @@ func (h *IngestHandler) IngestRaw(c *gin.Context) {
 			continue
 		}
 
-		companyName := "Unknown"
-		if job.Company != "" {
-			companyName = strings.TrimSpace(job.Company)
-		} else if len(job.Departments) > 0 && job.Departments[0] != "" {
-			companyName = strings.TrimSpace(job.Departments[0])
-		}
+		companyName := utils.ExtractCompanyName(job.Company, job.AbsoluteURL, job.Title)
 
 		var companyID string
 		cacheKey := strings.ToLower(companyName)
@@ -188,29 +184,20 @@ func (h *IngestHandler) IngestRaw(c *gin.Context) {
 			INSERT INTO jobs (company_id, title, location, is_remote, source, url, tags, raw_desc, job_type,
 			                  salary_min, salary_max, currency, scraped_at, ai_evaluated)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, false)
-			ON CONFLICT (url) DO UPDATE SET
-				title        = EXCLUDED.title,
-				location     = EXCLUDED.location,
-				is_remote    = EXCLUDED.is_remote,
-				source       = EXCLUDED.source,
-				tags         = EXCLUDED.tags,
-				raw_desc     = EXCLUDED.raw_desc,
-				job_type     = EXCLUDED.job_type,
-				salary_min   = EXCLUDED.salary_min,
-				salary_max   = EXCLUDED.salary_max,
-				currency     = EXCLUDED.currency,
-				scraped_at   = CURRENT_TIMESTAMP,
-				ai_evaluated = false;
+			ON CONFLICT (url) DO NOTHING
+			RETURNING id;
 		`
-		_, execErr := tx.Exec(ctx, upsertQuery,
+		var insertedID string
+		execErr := tx.QueryRow(ctx, upsertQuery,
 			companyID, job.Title, loc, isRemote, source, job.AbsoluteURL,
 			tagsJSON, job.DescriptionText, jobType, salMinParam, salMaxParam, curr,
-		)
+		).Scan(&insertedID)
 		if execErr != nil {
-			log.Printf("IngestRaw: failed to upsert job %s: %v", job.Title, execErr)
 			continue
 		}
-		insertedCount++
+		if insertedID != "" {
+			insertedCount++
+		}
 	}
 
 	updateRunQuery := `
@@ -369,35 +356,23 @@ func (h *IngestHandler) IngestJobs(c *gin.Context) {
 		}
 
 		jobQuery := `
-			INSERT INTO jobs (company_id, title, location, is_remote, source, url, tags, raw_desc, job_type, experience_required, salary_min, salary_max, currency, seniority, summary, scraped_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP)
-			ON CONFLICT (url) 
-			DO UPDATE SET
-				title = EXCLUDED.title,
-				location = EXCLUDED.location,
-				is_remote = EXCLUDED.is_remote,
-				tags = EXCLUDED.tags,
-				raw_desc = EXCLUDED.raw_desc,
-				job_type = EXCLUDED.job_type,
-				experience_required = EXCLUDED.experience_required,
-				salary_min = EXCLUDED.salary_min,
-				salary_max = EXCLUDED.salary_max,
-				currency = EXCLUDED.currency,
-				seniority = EXCLUDED.seniority,
-				summary = EXCLUDED.summary,
-				scraped_at = CURRENT_TIMESTAMP,
-				ai_evaluated = false;
+			INSERT INTO jobs (company_id, title, location, is_remote, source, url, tags, raw_desc, job_type, experience_required, salary_min, salary_max, currency, seniority, summary, scraped_at, ai_evaluated)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP, false)
+			ON CONFLICT (url) DO NOTHING
+			RETURNING id;
 		`
 		source := job.Source
 		if source == "" {
 			source = "unknown"
 		}
-		_, err = tx.Exec(ctx, jobQuery, companyID, job.Title, loc, isRemote, source, job.AbsoluteURL, tagsJSON, job.DescriptionText, jobType, expParam, salMinParam, salMaxParam, curr, seniorityParam, summaryParam)
+		var insertedID string
+		err = tx.QueryRow(ctx, jobQuery, companyID, job.Title, loc, isRemote, source, job.AbsoluteURL, tagsJSON, job.DescriptionText, jobType, expParam, salMinParam, salMaxParam, curr, seniorityParam, summaryParam).Scan(&insertedID)
 		if err != nil {
-			log.Printf("Failed to insert job %s: %v", job.Title, err)
 			continue
 		}
-		insertedCount++
+		if insertedID != "" {
+			insertedCount++
+		}
 	}
 
 	// 4. Update the scraper run telemetry details
