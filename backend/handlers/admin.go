@@ -365,3 +365,60 @@ func (h *AdminHandler) ResetUserMatches(c *gin.Context) {
 		"message": "User matches reset successfully. Re-evaluation pass triggered in background.",
 	})
 }
+
+/*
+GetScraperStats retrieves total scraped jobs, 24h scraped jobs, unique companies, and recent scraper run telemetry logs.
+*/
+func (h *AdminHandler) GetScraperStats(c *gin.Context) {
+	if !h.EnsureMasterAdmin(c) {
+		return
+	}
+
+	ctx := context.Background()
+
+	var totalJobs int
+	_ = h.DB.QueryRow(ctx, `SELECT COUNT(*) FROM jobs;`).Scan(&totalJobs)
+
+	var jobsLast24h int
+	_ = h.DB.QueryRow(ctx, `SELECT COUNT(*) FROM jobs WHERE scraped_at >= NOW() - INTERVAL '24 hours';`).Scan(&jobsLast24h)
+
+	var uniqueCompanies int
+	_ = h.DB.QueryRow(ctx, `SELECT COUNT(*) FROM companies;`).Scan(&uniqueCompanies)
+
+	query := `
+		SELECT id, started_at, COALESCE(finished_at, started_at), status, jobs_added, COALESCE(sources_hit::text, '[]')
+		FROM scraper_runs
+		ORDER BY started_at DESC
+		LIMIT 50;
+	`
+	rows, err := h.DB.Query(ctx, query)
+	var runs []gin.H
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var runID, status, sourcesRaw string
+			var startedAt, finishedAt time.Time
+			var jobsAdded int
+			if scanErr := rows.Scan(&runID, &startedAt, &finishedAt, &status, &jobsAdded, &sourcesRaw); scanErr == nil {
+				runs = append(runs, gin.H{
+					"run_id":       runID,
+					"started_at":   startedAt.Format(time.RFC3339),
+					"finished_at":  finishedAt.Format(time.RFC3339),
+					"status":       status,
+					"jobs_added":   jobsAdded,
+					"sources_hit":  sourcesRaw,
+				})
+			}
+		}
+	}
+	if runs == nil {
+		runs = []gin.H{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"total_jobs":       totalJobs,
+		"jobs_last_24h":    jobsLast24h,
+		"unique_companies": uniqueCompanies,
+		"runs":             runs,
+	})
+}

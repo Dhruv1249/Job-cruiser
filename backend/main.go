@@ -155,6 +155,7 @@ func main() {
 		protected.POST("/admin/keywords/approve", adminHandler.ApproveKeyword)
 		protected.PUT("/admin/users/:id/ai-matching", adminHandler.ToggleUserAIMatching)
 		protected.POST("/admin/reset-all-matches", adminHandler.ResetAndReevaluateMatches)
+		protected.GET("/admin/scraper-stats", adminHandler.GetScraperStats)
 	}
 
 	// Check if a specific network port was requested in the .env file.

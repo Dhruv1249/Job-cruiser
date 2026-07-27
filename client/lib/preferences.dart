@@ -1,8 +1,10 @@
 import 'dart:convert';
-import 'auth.dart';
-import 'main.dart' show AppColors;
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'auth.dart';
+import 'main.dart' show AppColors;
 import 'services/api_service.dart';
 
 void main() {
@@ -96,8 +98,20 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   late final Set<String> _selectedIndustries;
   late final List<String> _currentTargets;
   late final TextEditingController _roleController;
+  late final TextEditingController _locationController;
+  late final TextEditingController _overleafUrlController;
+  late final TextEditingController _githubUsernameController;
+  late final TextEditingController _githubRepoController;
+  late final TextEditingController _overleafTokenController;
+  late final TextEditingController _bioTextController;
+
+  bool _isParsingCV = false;
   late double _baseSalary;
   late String _equityExpectation;
+  final Set<String> _selectedWorkModels = {'remote', 'hybrid'};
+
+  bool _anyWorkModel = false;
+  bool _anyLocation = false;
 
   final List<String> _allIndustries = [
     'Fintech',
@@ -155,6 +169,12 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
         ? ['Backend Engineer', 'Fullstack SDE']
         : List<String>.from(widget.initialPreferences!.targetRoles);
     _roleController = TextEditingController();
+    _locationController = TextEditingController();
+    _overleafUrlController = TextEditingController();
+    _githubUsernameController = TextEditingController();
+    _githubRepoController = TextEditingController();
+    _overleafTokenController = TextEditingController();
+    _bioTextController = TextEditingController();
     _baseSalary = widget.initialPreferences?.baseSalary ?? 120.0;
     _equityExpectation =
         widget.initialPreferences?.equityExpectation ?? 'Meaningful';
@@ -196,6 +216,26 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
         } else {
           _baseSalary = 0.0;
         }
+        if (apiPref['work_models'] != null && (apiPref['work_models'] as List).isNotEmpty) {
+          _selectedWorkModels
+            ..clear()
+            ..addAll(List<String>.from(apiPref['work_models'] as List));
+        }
+        if (apiPref['bio_experience_text'] != null && (apiPref['bio_experience_text'] as String).isNotEmpty) {
+          _bioTextController.text = apiPref['bio_experience_text'] as String;
+        } else if (apiPref['master_cv_text'] != null && (apiPref['master_cv_text'] as String).isNotEmpty) {
+          _bioTextController.text = apiPref['master_cv_text'] as String;
+        }
+      });
+    }
+
+    final overleaf = await ApiService().fetchOverleafConfig();
+    if (overleaf != null && mounted) {
+      setState(() {
+        _overleafUrlController.text = overleaf['deployment_url'] ?? '';
+        _githubUsernameController.text = overleaf['github_username'] ?? '';
+        _githubRepoController.text = overleaf['github_repo_name'] ?? '';
+        _overleafTokenController.text = overleaf['access_token'] ?? '';
       });
     }
   }
@@ -203,6 +243,12 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   @override
   void dispose() {
     _roleController.dispose();
+    _locationController.dispose();
+    _overleafUrlController.dispose();
+    _githubUsernameController.dispose();
+    _githubRepoController.dispose();
+    _overleafTokenController.dispose();
+    _bioTextController.dispose();
     super.dispose();
   }
 
@@ -217,13 +263,19 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
           children: [
             _buildHeader(),
             const SizedBox(height: 24),
-            _buildTargetLocations(),
-            const SizedBox(height: 24),
-            _buildTargetIndustries(),
+            _buildExperienceCard(),
             const SizedBox(height: 24),
             _buildDesiredRoles(),
             const SizedBox(height: 24),
+            _buildTargetIndustries(),
+            const SizedBox(height: 24),
+            _buildTargetLocations(),
+            const SizedBox(height: 24),
+            _buildWorkModels(),
+            const SizedBox(height: 24),
             _buildCompensationTarget(),
+            const SizedBox(height: 24),
+            _buildOverleafCard(),
             const SizedBox(height: 32),
             _buildSaveButton(),
             const SizedBox(height: 48),
@@ -234,43 +286,209 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   }
 
   Widget _buildTargetLocations() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'TARGET JOB LOCATIONS',
-          style: TextStyle(
-            fontFamily: 'Geist',
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            letterSpacing: 0.5,
-            color: AppColors.onSurfaceVariant,
+    return _buildSectionCard(
+      icon: Icons.location_on,
+      title: 'Target Locations',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'ANY LOCATION / NO PREFERENCE',
+                style: TextStyle(
+                  fontFamily: 'Geist',
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.onSurfaceVariant,
+                ),
+              ),
+              Switch(
+                value: _anyLocation,
+                onChanged: (val) {
+                  setState(() {
+                    _anyLocation = val;
+                  });
+                },
+              ),
+            ],
           ),
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: _availableLocations.map((loc) {
-            final isSelected = _selectedLocations.contains(loc);
-            return FilterChip(
-              label: Text(loc),
-              selected: isSelected,
-              selectedColor: AppColors.primary.withValues(alpha: 0.15),
-              checkmarkColor: AppColors.primary,
-              onSelected: (val) {
-                setState(() {
-                  if (val) {
-                    _selectedLocations.add(loc);
-                  } else {
-                    _selectedLocations.remove(loc);
-                  }
-                });
+          if (!_anyLocation) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _availableLocations.map((loc) {
+                final isSelected = _selectedLocations.contains(loc);
+                return FilterChip(
+                  label: Text(loc),
+                  selected: isSelected,
+                  selectedColor: AppColors.primary.withValues(alpha: 0.15),
+                  checkmarkColor: AppColors.primary,
+                  onSelected: (val) {
+                    setState(() {
+                      if (val) {
+                        _selectedLocations.add(loc);
+                      } else {
+                        _selectedLocations.remove(loc);
+                      }
+                    });
+                  },
+                );
+              }).toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWorkModels() {
+    final models = [
+      {'key': 'remote', 'label': 'Remote'},
+      {'key': 'hybrid', 'label': 'Hybrid'},
+      {'key': 'onsite', 'label': 'On-site'},
+    ];
+
+    return _buildSectionCard(
+      icon: Icons.home_work,
+      title: 'Preferred Work Models',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'ANY WORK MODEL / NO PREFERENCE',
+                style: TextStyle(
+                  fontFamily: 'Geist',
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.onSurfaceVariant,
+                ),
+              ),
+              Switch(
+                value: _anyWorkModel,
+                onChanged: (val) {
+                  setState(() {
+                    _anyWorkModel = val;
+                  });
+                },
+              ),
+            ],
+          ),
+          if (!_anyWorkModel) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              children: models.map((m) {
+                final isSelected = _selectedWorkModels.contains(m['key']);
+                return FilterChip(
+                  label: Text(m['label']!),
+                  selected: isSelected,
+                  selectedColor: AppColors.primary.withValues(alpha: 0.15),
+                  checkmarkColor: AppColors.primary,
+                  onSelected: (val) {
+                    setState(() {
+                      if (val) {
+                        _selectedWorkModels.add(m['key']!);
+                      } else {
+                        _selectedWorkModels.remove(m['key']!);
+                      }
+                    });
+                  },
+                );
+              }).toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverleafCard() {
+    return _buildSectionCard(
+      icon: Icons.description,
+      title: 'Open-Overleaf & GitHub TeX Sync',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Self-hosted Open-Overleaf engine URL and GitHub repository for automated LaTeX resume compilation.',
+            style: TextStyle(fontSize: 13, color: AppColors.onSurfaceVariant),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _overleafUrlController,
+            decoration: const InputDecoration(
+              labelText: 'Open-Overleaf Server URL',
+              hintText: 'e.g. http://92.4.68.154:3201',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _githubUsernameController,
+            decoration: const InputDecoration(
+              labelText: 'GitHub Username',
+              hintText: 'e.g. Dhruv1249',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _githubRepoController,
+            decoration: const InputDecoration(
+              labelText: 'GitHub Repository Name',
+              hintText: 'e.g. job-resumes',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _overleafTokenController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Access Token / Personal Token',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.save, size: 18),
+              label: const Text('Save Overleaf TeX Integration'),
+              onPressed: () async {
+                final url = _overleafUrlController.text.trim();
+                final username = _githubUsernameController.text.trim();
+                final repo = _githubRepoController.text.trim();
+                final token = _overleafTokenController.text.trim();
+
+                final ok = await ApiService().saveOverleafConfig(
+                  deploymentUrl: url,
+                  githubUsername: username,
+                  githubRepoName: repo,
+                  accessToken: token,
+                );
+
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      ok
+                          ? 'Open-Overleaf configuration saved successfully!'
+                          : 'Failed to save Open-Overleaf configuration',
+                    ),
+                  ),
+                );
               },
-            );
-          }).toList(),
-        ),
-      ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -343,6 +561,118 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Future<void> _extractPdfToBio() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'txt'],
+        withData: true,
+      );
+
+      if (result == null || result.files.isEmpty) {
+        return;
+      }
+
+      final file = result.files.first;
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Reading ${file.name}...')),
+      );
+
+      String extractedText = '';
+      if (file.bytes != null) {
+        if (file.name.toLowerCase().endsWith('.pdf')) {
+          final PdfDocument document = PdfDocument(inputBytes: file.bytes!);
+          extractedText = PdfTextExtractor(document).extractText();
+          document.dispose();
+        } else {
+          extractedText = utf8.decode(file.bytes!, allowMalformed: true);
+        }
+
+        final cleanLines = extractedText
+            .split('\n')
+            .map((line) => line.trim())
+            .where((line) => line.isNotEmpty && !line.startsWith('%PDF-'))
+            .toList();
+        extractedText = cleanLines.join('\n');
+      }
+
+      if (extractedText.trim().isEmpty) {
+        extractedText = "Parsed experience summary from ${file.name}";
+      }
+
+      setState(() {
+        _isParsingCV = true;
+      });
+
+      final parsed = await ApiService().parseCVWithGemini(extractedText.trim());
+
+      if (!mounted) return;
+      setState(() {
+        _isParsingCV = false;
+        if (parsed != null && parsed['bio_summary'] != null && (parsed['bio_summary'] as String).isNotEmpty) {
+          _bioTextController.text = parsed['bio_summary'] as String;
+        } else {
+          _bioTextController.text = extractedText.trim();
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('CV extracted successfully into bio summary!')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isParsingCV = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error parsing CV file: $e')),
+      );
+    }
+  }
+
+  Widget _buildExperienceCard() {
+    return _buildSectionCard(
+      icon: Icons.badge,
+      title: 'Master CV & Bio Summary',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Extract your experience background automatically from your CV file or enter it manually below.',
+            style: TextStyle(fontSize: 13, color: AppColors.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: _isParsingCV
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.upload_file, size: 18),
+              label: Text(_isParsingCV ? 'Extracting text from CV...' : 'Extract Bio from CV (PDF / TXT)'),
+              onPressed: _isParsingCV ? null : _extractPdfToBio,
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _bioTextController,
+            maxLines: 8,
+            decoration: const InputDecoration(
+              labelText: 'Master Bio & Experience Text',
+              hintText: 'Describe your technical background, skills, key achievements, and project history...',
+              border: OutlineInputBorder(),
+              alignLabelWithHint: true,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -563,8 +893,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
                 'PREFERRED CURRENCY',
@@ -576,22 +906,26 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
                   color: AppColors.onSurfaceVariant,
                 ),
               ),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'USD', label: Text(r'USD ($)')),
-                  ButtonSegment(value: 'INR', label: Text(r'INR (₹)')),
-                ],
-                selected: {_currency},
-                onSelectionChanged: (newSelection) {
-                  setState(() {
-                    _currency = newSelection.first;
-                    if (_currency == 'INR' && _baseSalary > 100) {
-                      _baseSalary = 20.0;
-                    } else if (_currency == 'USD' && _baseSalary < 10) {
-                      _baseSalary = 100.0;
-                    }
-                  });
-                },
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'USD', label: Text(r'USD ($)')),
+                    ButtonSegment(value: 'INR', label: Text(r'INR (₹)')),
+                  ],
+                  selected: {_currency},
+                  onSelectionChanged: (newSelection) {
+                    setState(() {
+                      _currency = newSelection.first;
+                      if (_currency == 'INR' && _baseSalary > 100) {
+                        _baseSalary = 20.0;
+                      } else if (_currency == 'USD' && _baseSalary < 10) {
+                        _baseSalary = 100.0;
+                      }
+                    });
+                  },
+                ),
               ),
             ],
           ),
@@ -780,9 +1114,11 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             'target_roles': _currentTargets,
             'target_industries': _selectedIndustries.toList(),
             'target_locations': _selectedLocations.toList(),
-            'work_models': ['remote', 'hybrid'],
+            'work_models': _selectedWorkModels.toList(),
             'min_salary': rawSalary,
             'currency': _currency,
+            'bio_experience_text': _bioTextController.text,
+            'master_cv_text': _bioTextController.text,
           });
 
           if (!mounted) return;
