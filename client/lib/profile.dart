@@ -422,18 +422,6 @@ class _ProfilePageState extends State<ProfilePage> {
               },
             ),
           _buildActionTile(
-            icon: Icons.tune_outlined,
-            title: 'Match Preferences',
-            hasBorder: true,
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const preferences_page.SetPreferencesScreen(),
-                ),
-              );
-            },
-          ),
-          _buildActionTile(
             icon: Icons.logout,
             title: 'Sign Out',
             hasBorder: false,

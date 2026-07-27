@@ -21,12 +21,13 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
   List<Map<String, dynamic>> _whitelistedEmails = [];
   List<Map<String, dynamic>> _pendingKeywords = [];
   List<Map<String, dynamic>> _registeredUsers = [];
+  Map<String, dynamic>? _scraperStats;
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _loadAdminData();
   }
 
@@ -46,6 +47,7 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
     final emails = await _apiService.fetchWhitelistedEmails();
     final keywords = await _apiService.fetchPendingKeywords();
     final users = await _apiService.fetchUsersForAdmin();
+    final stats = await _apiService.fetchScraperStats();
 
     if (!mounted) return;
 
@@ -53,6 +55,7 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
       _whitelistedEmails = emails;
       _pendingKeywords = keywords;
       _registeredUsers = users;
+      _scraperStats = stats;
       _isLoading = false;
     });
   }
@@ -147,6 +150,7 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
                 _buildUsersTab(),
                 _buildWhitelistTab(),
                 _buildKeywordQueueTab(),
+                _buildScraperTelemetryTab(),
               ],
             ),
     );
@@ -175,6 +179,7 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
           Tab(text: 'User AI Search'),
           Tab(text: 'Access Whitelist'),
           Tab(text: 'Keywords Queue'),
+          Tab(text: 'Scraper Telemetry'),
         ],
       ),
     );
@@ -435,6 +440,143 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
                     );
                   },
                 ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScraperTelemetryTab() {
+    final totalJobs = _scraperStats?['total_jobs'] ?? 0;
+    final jobsLast24h = _scraperStats?['jobs_last_24h'] ?? 0;
+    final uniqueCompanies = _scraperStats?['unique_companies'] ?? 0;
+    final List runs = (_scraperStats?['runs'] as List?) ?? [];
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        const Text(
+          'Scraper Telemetry Dashboard',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: AppColors.primary,
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Track live scraper run performance and new unique job metrics.',
+          style: TextStyle(
+            fontSize: 13,
+            color: AppColors.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(child: _buildStatCard('Total Jobs', '$totalJobs', Icons.work_outline)),
+            const SizedBox(width: 10),
+            Expanded(child: _buildStatCard('New 24h Jobs', '$jobsLast24h', Icons.schedule)),
+            const SizedBox(width: 10),
+            Expanded(child: _buildStatCard('Companies', '$uniqueCompanies', Icons.business)),
+          ],
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'Scraper Run Logs',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: AppColors.primary,
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (runs.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child: Center(
+              child: Text(
+                'No scraper run logs recorded yet.',
+                style: TextStyle(color: AppColors.onSurfaceVariant),
+              ),
+            ),
+          )
+        else
+          ...runs.map((r) {
+            final runMap = Map<String, dynamic>.from(r as Map);
+            final status = runMap['status'] ?? 'completed';
+            final jobsAdded = runMap['jobs_added'] ?? 0;
+            final startedAt = runMap['started_at'] ?? '';
+
+            return Card(
+              margin: const EdgeInsets.only(bottom: 10),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: const BorderSide(color: AppColors.outlineVariant),
+              ),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: status == 'completed'
+                      ? AppColors.matchGreen
+                      : AppColors.primaryContainer,
+                  child: Icon(
+                    status == 'completed' ? Icons.check : Icons.sync,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                title: Text(
+                  'New Unique Jobs Found: $jobsAdded',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                    color: AppColors.primary,
+                  ),
+                ),
+                subtitle: Text(
+                  'Started: $startedAt • Status: ${status.toString().toUpperCase()}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            );
+          }),
+      ],
+    );
+  }
+
+  Widget _buildStatCard(String title, String value, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: AppColors.primary),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: AppColors.primary,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.onSurfaceVariant,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ],
       ),
     );

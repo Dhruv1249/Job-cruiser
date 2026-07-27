@@ -413,6 +413,20 @@ class ApiService {
     }
   }
 
+  /// Fetches self-hosted open-overleaf configuration.
+  Future<Map<String, dynamic>?> fetchOverleafConfig() async {
+    try {
+      final response = await _dio.get('/overleaf/config');
+      if (response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      _logger.e(e);
+      return null;
+    }
+  }
+
   /// Fetches registered users for Master Admin management.
   Future<List<Map<String, dynamic>>> fetchUsersForAdmin() async {
     try {
@@ -438,6 +452,20 @@ class ApiService {
     } catch (e) {
       _logger.e(e);
       return false;
+    }
+  }
+
+  /// Fetches scraper telemetry stats (Master Admin only).
+  Future<Map<String, dynamic>?> fetchScraperStats() async {
+    try {
+      final response = await _dio.get('/admin/scraper-stats');
+      if (response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      _logger.e(e);
+      return null;
     }
   }
 }
