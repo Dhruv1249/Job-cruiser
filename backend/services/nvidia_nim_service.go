@@ -47,6 +47,7 @@ type UserProfileData struct {
 	UserID             string   `json:"user_id"`
 	Email              string   `json:"email"`
 	ParsedBio          string   `json:"parsed_bio"`
+	MasterCVText       string   `json:"master_cv_text"`
 	PreferredRoles     []string `json:"preferred_roles"`
 	PreferredLocations []string `json:"preferred_locations"`
 	WorkModel          string   `json:"work_model"`
@@ -488,7 +489,7 @@ func (s *NvidiaNimService) evaluateJobBatchWithBackoff(
 	}
 
 	for _, res := range batchResult.Results {
-		if res.JobID == "" || res.UserID == "" {
+		if res.JobID == "" || res.UserID == "" || !isValidUUIDString(res.JobID) || !isValidUUIDString(res.UserID) {
 			continue
 		}
 		isMatch := res.MatchScore >= matchScoreMinThreshold
@@ -665,14 +666,30 @@ func (s *NvidiaNimService) enforceMinimumRequestSpacing() {
 func (s *NvidiaNimService) buildMultiJobPrompt(userProfiles []UserProfileData, jobsBatch []JobSnippetData) string {
 	var builder strings.Builder
 
-	builder.WriteString("Evaluate the following batch of job listings against candidate profiles and assign match scores (0 to 100).\n")
+	builder.WriteString("Evaluate the following batch of job listings against candidate profiles and assign match scores (0 to 100).\n\n")
+	builder.WriteString("STRICT SCORING RULES YOU MUST ENFORCE WITHOUT EXCEPTION:\n")
+	builder.WriteString("1. LOCATION & WORK AUTHORIZATION MISMATCH:\n")
+	builder.WriteString("   - Candidate target locations are India (Onsite/Hybrid), India (Remote), or Global Remote.\n")
+	builder.WriteString("   - If job is US Onsite, US Hybrid, or US-only Remote (e.g. Remote Texas, Remote SF, Remote NYC, US-based), assign MAX MATCH SCORE OF 0 to 15.\n")
+	builder.WriteString("   - Candidates in India CANNOT work US-restricted remote or US onsite jobs.\n\n")
+	builder.WriteString("2. SENIORITY & EXPERIENCE GAP MISMATCH:\n")
+	builder.WriteString("   - Candidate is early-career / junior engineer (~1 Year of Experience).\n")
+	builder.WriteString("   - If job title contains 'Senior', 'Sr', 'Staff', 'Lead', 'Principal', 'Architect', 'Director', 'Head', or requires 5+ years of experience, assign MAX MATCH SCORE OF 15 to 30.\n")
+	builder.WriteString("   - Early career candidates DO NOT match Senior/Staff/Architect positions.\n\n")
+	builder.WriteString("3. HIGH MATCH QUALIFICATION (80-100):\n")
+	builder.WriteString("   - High scores (80 to 100) are reserved EXCLUSIVELY for Entry-Level, Junior, Associate, or Mid-Level Software Engineer, Full Stack, Backend, Frontend, or AI/ML Engineer roles matching candidate's stack in India or Global Remote.\n\n")
+
 	builder.WriteString("Return ONLY a raw JSON object formatted as follows:\n")
 	builder.WriteString("{\n  \"results\": [\n    {\n      \"job_id\": \"string\",\n      \"user_id\": \"string\",\n      \"match_score\": 85,\n      \"match_reasoning\": \"short bullet reasoning\",\n      \"is_matched\": true\n    }\n  ]\n}\n\n")
 
 	builder.WriteString("### Candidate Profiles\n")
 	for _, profile := range userProfiles {
-		fmt.Fprintf(&builder, "User ID: %s\nBio/Experience:\n%s\nPreferred Roles: %s\nPreferred Locations: %s\nWork Model: %s\n\n",
-			profile.UserID, profile.ParsedBio, strings.Join(profile.PreferredRoles, ", "), strings.Join(profile.PreferredLocations, ", "), profile.WorkModel)
+		combinedProfileText := profile.ParsedBio
+		if profile.MasterCVText != "" {
+			combinedProfileText += "\n\nMaster CV / Full Experience Context:\n" + profile.MasterCVText
+		}
+		fmt.Fprintf(&builder, "User ID: %s\nProfile & Resume Context:\n%s\nPreferred Roles: %s\nPreferred Locations: %s\nWork Model: %s\n\n",
+			profile.UserID, combinedProfileText, strings.Join(profile.PreferredRoles, ", "), strings.Join(profile.PreferredLocations, ", "), profile.WorkModel)
 	}
 
 	builder.WriteString("### Job Listings to Evaluate\n")
@@ -686,7 +703,7 @@ func (s *NvidiaNimService) buildMultiJobPrompt(userProfiles []UserProfileData, j
 
 func (s *NvidiaNimService) fetchAllUserProfiles(ctx context.Context) ([]UserProfileData, error) {
 	sqlQuery := `
-		SELECT u.id, u.primary_email, COALESCE(up.bio_experience_text, ''), COALESCE(up.target_roles, '[]'),
+		SELECT u.id, u.primary_email, COALESCE(up.bio_experience_text, ''), COALESCE(up.master_cv_text, ''), COALESCE(up.target_roles, '[]'),
 		       COALESCE(up.target_locations, '[]'), COALESCE(up.work_models->>0, ''), 0
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id;
@@ -700,7 +717,7 @@ func (s *NvidiaNimService) fetchAllUserProfiles(ctx context.Context) ([]UserProf
 	var profiles []UserProfileData
 	for rows.Next() {
 		var item UserProfileData
-		scanErr := rows.Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears)
+		scanErr := rows.Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.MasterCVText, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears)
 		if scanErr == nil {
 			profiles = append(profiles, item)
 		}
@@ -710,14 +727,14 @@ func (s *NvidiaNimService) fetchAllUserProfiles(ctx context.Context) ([]UserProf
 
 func (s *NvidiaNimService) fetchSingleUserProfile(ctx context.Context, targetUserID string) (*UserProfileData, error) {
 	sqlQuery := `
-		SELECT u.id, u.primary_email, COALESCE(up.bio_experience_text, ''), COALESCE(up.target_roles, '[]'),
+		SELECT u.id, u.primary_email, COALESCE(up.bio_experience_text, ''), COALESCE(up.master_cv_text, ''), COALESCE(up.target_roles, '[]'),
 		       COALESCE(up.target_locations, '[]'), COALESCE(up.work_models->>0, ''), 0
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id
 		WHERE u.id = $1;
 	`
 	var item UserProfileData
-	scanErr := s.DB.QueryRow(ctx, sqlQuery, targetUserID).Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears)
+	scanErr := s.DB.QueryRow(ctx, sqlQuery, targetUserID).Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.MasterCVText, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears)
 	if scanErr != nil {
 		return nil, scanErr
 	}
@@ -828,4 +845,26 @@ func truncateTextString(sourceText string, maxLength int) string {
 		return sourceText
 	}
 	return sourceText[:maxLength]
+}
+
+func isValidUUIDString(u string) bool {
+	if len(u) != 36 {
+		return false
+	}
+	for index, char := range u {
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			if char != '-' {
+				return false
+			}
+		} else {
+			if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func IsValidUUIDStringForTest(u string) bool {
+	return isValidUUIDString(u)
 }
