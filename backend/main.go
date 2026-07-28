@@ -11,6 +11,7 @@ import (
 	"github.com/Dhruv1249/Job-cruiser/backend/handlers"
 	"github.com/Dhruv1249/Job-cruiser/backend/middleware"
 	"github.com/Dhruv1249/Job-cruiser/backend/services"
+	"github.com/Dhruv1249/Job-cruiser/backend/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,7 +19,10 @@ import (
 )
 
 func main() {
-	// Load the .env file. If it fails, we log a warning but don't crash,
+	utils.InitColorLogger()
+	utils.ClearRawAILogFile()
+	gin.ForceConsoleColor()
+
 	loadError := godotenv.Load()
 	if loadError != nil {
 		log.Println("Note: No local .env file found. Relying on system variables.")

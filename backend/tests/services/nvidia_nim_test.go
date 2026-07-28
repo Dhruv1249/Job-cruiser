@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Dhruv1249/Job-cruiser/backend/services"
@@ -147,5 +148,130 @@ func TestIsValidUUIDValidation(t *testing.T) {
 	}
 	if services.IsValidUUIDStringForTest(invalidShortUUID) {
 		t.Errorf("expected truncated UUID %s to fail validation", invalidShortUUID)
+	}
+}
+
+// TestNvidiaNimGenerateCompletionWithJSONSchema verifies that guided_json schema is cleanly passed in payload.nvext.
+func TestNvidiaNimGenerateCompletionWithJSONSchema(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var requestPayload map[string]interface{}
+		if errDecode := json.NewDecoder(r.Body).Decode(&requestPayload); errDecode != nil {
+			http.Error(w, "invalid json payload", http.StatusBadRequest)
+			return
+		}
+
+		nvExtMap, exists := requestPayload["nvext"].(map[string]interface{})
+		if !exists {
+			http.Error(w, "missing nvext in payload", http.StatusBadRequest)
+			return
+		}
+
+		guidedJSON, hasJSON := nvExtMap["guided_json"].(map[string]interface{})
+		if !hasJSON || guidedJSON["type"] != "object" {
+			http.Error(w, "missing or invalid guided_json in nvext payload", http.StatusBadRequest)
+			return
+		}
+
+		responsePayload := map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message": map[string]string{
+						"content": `{"title":"Inception","rating":4.0}`,
+					},
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(responsePayload)
+	}))
+	defer mockServer.Close()
+
+	service := services.NewNvidiaNimService(nil, "test-nvidia-key")
+	service.Endpoint = mockServer.URL
+	service.HTTPClient = mockServer.Client()
+
+	movieSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"title":  map[string]any{"type": "string"},
+			"rating": map[string]any{"type": "number"},
+		},
+		"required": []string{"title", "rating"},
+	}
+
+	result, errCall := service.GenerateCompletionWithSchema(context.Background(), "Rate Inception", "", movieSchema)
+	if errCall != nil {
+		t.Fatalf("expected successful schema completion, got error: %v", errCall)
+	}
+
+	if result != `{"title":"Inception","rating":4.0}` {
+		t.Errorf("unexpected content: %s", result)
+	}
+}
+
+// TestNvidiaNimGenerateCompletionWithNvExt verifies guided_regex transmission in nvext payload.
+func TestNvidiaNimGenerateCompletionWithNvExt(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var requestPayload map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&requestPayload)
+
+		nvExtMap, exists := requestPayload["nvext"].(map[string]interface{})
+		if !exists {
+			http.Error(w, "missing nvext", http.StatusBadRequest)
+			return
+		}
+
+		regex, _ := nvExtMap["guided_regex"].(string)
+		if regex != "[1-5]" {
+			http.Error(w, "invalid guided_regex", http.StatusBadRequest)
+			return
+		}
+
+		responsePayload := map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message": map[string]string{
+						"content": "4",
+					},
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(responsePayload)
+	}))
+	defer mockServer.Close()
+
+	service := services.NewNvidiaNimService(nil, "test-nvidia-key")
+	service.Endpoint = mockServer.URL
+	service.HTTPClient = mockServer.Client()
+
+	nvExt := &services.NvidiaNvExt{
+		GuidedRegex: "[1-5]",
+	}
+
+	result, errCall := service.GenerateCompletionWithNvExt(context.Background(), "Rate 1-5", "", nvExt)
+	if errCall != nil {
+		t.Fatalf("expected successful guided_regex completion, got error: %v", errCall)
+	}
+
+	if result != "4" {
+		t.Errorf("unexpected result: %s", result)
+	}
+}
+
+// TestSanitizeJSONResponseWithPreambleText verifies that preamble reasoning text starting with 'L' is cleanly trimmed before parsing JSON.
+func TestSanitizeJSONResponseWithPreambleText(t *testing.T) {
+	rawLLMOutput := "Looking at the candidate profiles and job listings, here is the structured evaluation:\n\n" +
+		`{"results":[{"job_id":"96b83816-1389-4399-0ff5-cf5f135249b0","user_id":"96b83816-1389-4399-0ff5-cf5f135249b0","match_score":85,"match_reasoning":"Good match","is_matched":true}]}`
+
+	sanitized := services.SanitizeJSONResponseForTest(rawLLMOutput)
+	expectedPrefix := "{\"results\":"
+	if !strings.HasPrefix(sanitized, expectedPrefix) {
+		t.Fatalf("expected sanitized JSON to start with %s, got: %s", expectedPrefix, sanitized)
+	}
+
+	var parsed map[string]interface{}
+	if errUnmarshal := json.Unmarshal([]byte(sanitized), &parsed); errUnmarshal != nil {
+		t.Fatalf("expected clean unmarshal of sanitized JSON, got error: %v", errUnmarshal)
 	}
 }

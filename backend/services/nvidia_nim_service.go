@@ -15,17 +15,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Dhruv1249/Job-cruiser/backend/utils"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
 	defaultNvidiaNimEndpoint        = "https://integrate.api.nvidia.com/v1/chat/completions"
-	defaultNvidiaNimModel           = "nvidia/nemotron-3-super-120b-a12b"
-	backgroundWorkerBatchSize       = 20
+	defaultNvidiaNimModel           = "minimaxai/minimax-m3"
+	backgroundWorkerBatchSize       = 10
 	backgroundTickerIntervalSeconds = 15
 	maxJobDescriptionLength         = 6000
 	matchScoreMinThreshold          = 50
-	maxTargetTokensPerPrompt        = 200000
+	maxTargetTokensPerPrompt        = 250000
+	maxJobsPerBatch                 = 100
 )
 
 // NvidiaNimService manages single-key AI job matching, CV parsing, and queue preemption for NVIDIA NIM API.
@@ -84,14 +86,138 @@ type nvidiaResponseFormat struct {
 	Type string `json:"type"`
 }
 
+// NvidiaNvExt defines the nvext parameters for NVIDIA NIM structured output generation (guided_json, guided_regex, guided_choice, guided_grammar).
+type NvidiaNvExt struct {
+	GuidedJSON    any      `json:"guided_json,omitempty"`
+	GuidedRegex   string   `json:"guided_regex,omitempty"`
+	GuidedChoice  []string `json:"guided_choice,omitempty"`
+	GuidedGrammar string   `json:"guided_grammar,omitempty"`
+}
+
+// buildBatchJobMatchSchema returns a JSON schema for the batch job match evaluation output.
+// The expectedCount is the exact number of result objects the model must emit, enforced via
+// minItems and maxItems so the model cannot satisfy the schema with an empty or partial array.
+func buildBatchJobMatchSchema(expectedCount int) map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"results": map[string]any{
+				"type":     "array",
+				"minItems": expectedCount,
+				"maxItems": expectedCount,
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"job_id":          map[string]any{"type": "string"},
+						"user_id":         map[string]any{"type": "string"},
+						"match_score":     map[string]any{"type": "integer"},
+						"match_reasoning": map[string]any{"type": "string"},
+						"is_matched":      map[string]any{"type": "boolean"},
+					},
+					"required": []string{"job_id", "user_id", "match_score", "match_reasoning", "is_matched"},
+				},
+			},
+		},
+		"required": []string{"results"},
+	}
+}
+
+// CVParsingJSONSchema defines the JSON schema enforcing structured resume parsing output format from NVIDIA NIM.
+var CVParsingJSONSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"bio_summary": map[string]any{"type": "string"},
+		"location":    map[string]any{"type": "string"},
+		"skills": map[string]any{
+			"type":  "array",
+			"items": map[string]any{"type": "string"},
+		},
+		"education": map[string]any{
+			"type": "array",
+			"items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"institution": map[string]any{"type": "string"},
+					"degree":      map[string]any{"type": "string"},
+					"year":        map[string]any{"type": "string"},
+					"grade":       map[string]any{"type": "string"},
+				},
+				"required": []string{"institution", "degree"},
+			},
+		},
+		"experience": map[string]any{
+			"type": "array",
+			"items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"company":    map[string]any{"type": "string"},
+					"role":       map[string]any{"type": "string"},
+					"duration":   map[string]any{"type": "string"},
+					"highlights": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				},
+				"required": []string{"company", "role"},
+			},
+		},
+		"projects": map[string]any{
+			"type": "array",
+			"items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"title":       map[string]any{"type": "string"},
+					"tech_stack":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"description": map[string]any{"type": "string"},
+					"link":        map[string]any{"type": "string"},
+				},
+				"required": []string{"title"},
+			},
+		},
+		"achievements": map[string]any{
+			"type": "array",
+			"items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"title":   map[string]any{"type": "string"},
+					"details": map[string]any{"type": "string"},
+				},
+				"required": []string{"title"},
+			},
+		},
+		"certifications": map[string]any{
+			"type": "array",
+			"items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":   map[string]any{"type": "string"},
+					"issuer": map[string]any{"type": "string"},
+				},
+				"required": []string{"name"},
+			},
+		},
+		"discovered_keywords": map[string]any{
+			"type":  "array",
+			"items": map[string]any{"type": "string"},
+		},
+	},
+	"required": []string{"bio_summary", "location", "skills", "education", "experience", "projects", "achievements", "certifications", "discovered_keywords"},
+}
+
+type nvidiaChatTemplateKwargs struct {
+	EnableThinking       bool   `json:"enable_thinking,omitempty"`
+	ThinkingMode         string `json:"thinking_mode,omitempty"`
+	ForceNonemptyContent bool   `json:"force_nonempty_content,omitempty"`
+}
+
 type nvidiaRequest struct {
-	Model       string                 `json:"model"`
-	Messages    []nvidiaRequestMessage `json:"messages"`
-	Temperature float64                `json:"temperature"`
-	TopP        float64                `json:"top_p"`
-	MaxTokens   int                    `json:"max_tokens,omitempty"`
-	Seed        int                    `json:"seed,omitempty"`
-	Stream      bool                   `json:"stream,omitempty"`
+	Model              string                    `json:"model"`
+	Messages           []nvidiaRequestMessage    `json:"messages"`
+	Temperature        float64                   `json:"temperature"`
+	TopP               float64                   `json:"top_p"`
+	MaxTokens          int                       `json:"max_tokens,omitempty"`
+	Seed               int                       `json:"seed,omitempty"`
+	Stream             bool                      `json:"stream,omitempty"`
+	ChatTemplateKwargs *nvidiaChatTemplateKwargs `json:"chat_template_kwargs,omitempty"`
+	ResponseFormat     *nvidiaResponseFormat     `json:"response_format,omitempty"`
+	NvExt              *NvidiaNvExt              `json:"nvext,omitempty"`
 }
 
 type nvidiaTokenizeRequest struct {
@@ -116,6 +242,7 @@ type nvidiaStreamChunk struct {
 	Choices []struct {
 		Delta struct {
 			ReasoningContent string `json:"reasoning_content"`
+			Reasoning        string `json:"reasoning"`
 			Content          string `json:"content"`
 		} `json:"delta"`
 	} `json:"choices"`
@@ -230,24 +357,24 @@ func (s *NvidiaNimService) EvaluatePendingForAllUsers(ctx context.Context) {
 		return
 	}
 
-	limit := backgroundWorkerBatchSize
-	if len(jobBatches) < limit {
-		limit = len(jobBatches)
-	}
-	batchesToEvaluate := jobBatches[:limit]
-	log.Printf("[NvidiaNimService] Dispatching %d parallel worker goroutines (Evaluating %d batches out of %d total packed)...", limit, limit, len(jobBatches))
+	log.Printf("[NvidiaNimService] Dispatching continuous pipeline: %d max concurrent workers across %d total batches...", backgroundWorkerBatchSize, len(jobBatches))
 
 	evaluatedJobIDs := make(map[string]bool)
 	var syncMutex sync.Mutex
 	var workerWaitGroup sync.WaitGroup
 
-	for index := 0; index < len(batchesToEvaluate); index++ {
+	workerPool := make(chan int, backgroundWorkerBatchSize)
+	for i := 1; i <= backgroundWorkerBatchSize; i++ {
+		workerPool <- i
+	}
+
+	for _, singleBatch := range jobBatches {
+		workerID := <-workerPool
 		workerWaitGroup.Add(1)
-		singleBatch := batchesToEvaluate[index]
-		workerID := index + 1
 
 		go func(batch []JobSnippetData, id int) {
 			defer workerWaitGroup.Done()
+			defer func() { workerPool <- id }()
 			log.Printf("[NvidiaNimWorker-%d] Starting evaluation for batch of %d jobs...", id, len(batch))
 			success := s.evaluateJobBatchWithBackoff(ctx, userProfiles, batch, evaluatedJobIDs, &syncMutex, id)
 			if !success {
@@ -265,7 +392,7 @@ func (s *NvidiaNimService) EvaluatePendingForAllUsers(ctx context.Context) {
 		if markErr != nil {
 			log.Printf("[NvidiaNimService] Failed marking jobs as evaluated: %v", markErr)
 		} else {
-			log.Printf("[NvidiaNimService] Pass complete: Marked %d jobs as evaluated in database across 5 workers.", len(evaluatedJobIDs))
+			log.Printf("[NvidiaNimService] Pass complete: Marked %d jobs as evaluated in database.", len(evaluatedJobIDs))
 		}
 	}
 }
@@ -312,6 +439,21 @@ func (s *NvidiaNimService) EvaluateForSingleUser(ctx context.Context, targetUser
 
 // GenerateCompletion executes a synchronous API request for CV parsing or Overleaf interactive tasks.
 func (s *NvidiaNimService) GenerateCompletion(ctx context.Context, promptContent string, systemInstruction string) (string, error) {
+	return s.GenerateCompletionWithSchema(ctx, promptContent, systemInstruction, nil)
+}
+
+// GenerateCompletionWithSchema executes a synchronous API request with an optional JSON schema constraint in nvext.guided_json.
+func (s *NvidiaNimService) GenerateCompletionWithSchema(ctx context.Context, promptContent string, systemInstruction string, jsonSchema any) (string, error) {
+	if jsonSchema == nil {
+		return s.GenerateCompletionWithNvExt(ctx, promptContent, systemInstruction, nil)
+	}
+	return s.GenerateCompletionWithNvExt(ctx, promptContent, systemInstruction, &NvidiaNvExt{
+		GuidedJSON: jsonSchema,
+	})
+}
+
+// GenerateCompletionWithNvExt executes a synchronous API request with explicit nvext constraints (guided_json, guided_regex, guided_choice, guided_grammar).
+func (s *NvidiaNimService) GenerateCompletionWithNvExt(ctx context.Context, promptContent string, systemInstruction string, nvExt *NvidiaNvExt) (string, error) {
 	s.PauseQueue()
 	defer s.ResumeQueue()
 
@@ -324,26 +466,37 @@ func (s *NvidiaNimService) GenerateCompletion(ctx context.Context, promptContent
 	payload := nvidiaRequest{
 		Model:       s.ModelName,
 		Messages:    messages,
-		Temperature: 0.3,
+		Temperature: 1.0,
 		TopP:        0.95,
 		Seed:        42,
+		ChatTemplateKwargs: &nvidiaChatTemplateKwargs{
+			EnableThinking:      false,
+			ForceNonemptyContent: true,
+		},
+		NvExt: nvExt,
 	}
 
+	requestStart := time.Now()
 	rawResponseBody, errCall := s.executeNvidiaAPIWithRetry(ctx, payload, 0)
 	if errCall != nil {
+		utils.LogRawAIResponse("GenerateCompletion", s.ModelName, promptContent, "ERROR: "+errCall.Error(), time.Since(requestStart), true)
 		return "", errCall
 	}
 
 	var parsedResponse nvidiaAPIResponse
 	if errUnmarshal := json.Unmarshal(rawResponseBody, &parsedResponse); errUnmarshal != nil {
+		utils.LogRawAIResponse("GenerateCompletion", s.ModelName, promptContent, string(rawResponseBody), time.Since(requestStart), true)
 		return "", fmt.Errorf("failed unmarshaling NVIDIA response: %w", errUnmarshal)
 	}
 
 	if len(parsedResponse.Choices) == 0 {
+		utils.LogRawAIResponse("GenerateCompletion", s.ModelName, promptContent, string(rawResponseBody), time.Since(requestStart), true)
 		return "", fmt.Errorf("empty choice array returned from NVIDIA API")
 	}
 
-	return parsedResponse.Choices[0].Message.Content, nil
+	generatedContent := parsedResponse.Choices[0].Message.Content
+	utils.LogRawAIResponse("GenerateCompletion", s.ModelName, promptContent, generatedContent, time.Since(requestStart), false)
+	return generatedContent, nil
 }
 
 // CountTokens requests exact token count for prompt text via NVIDIA NIM tokenize API with subword tokenization fallback.
@@ -426,7 +579,9 @@ func (s *NvidiaNimService) buildMultiJobTokenBatches(ctx context.Context, allJob
 
 		itemTokens := s.calculateExactSubwordTokens(snippetText)
 
-		if len(currentBatch) > 0 && (currentTokens+itemTokens > targetTokenBudget) {
+		tokenBudgetExceeded := len(currentBatch) > 0 && currentTokens+itemTokens > targetTokenBudget
+		jobCountExceeded := len(currentBatch) >= maxJobsPerBatch
+		if tokenBudgetExceeded || jobCountExceeded {
 			resultBatches = append(resultBatches, currentBatch)
 			currentBatch = []JobSnippetData{}
 			currentTokens = 0
@@ -451,42 +606,20 @@ func (s *NvidiaNimService) evaluateJobBatchWithBackoff(
 	syncMutex *sync.Mutex,
 	workerID int,
 ) bool {
-	promptText := s.buildMultiJobPrompt(userProfiles, batch)
-	payload := nvidiaRequest{
-		Model:       s.ModelName,
-		Messages:    []nvidiaRequestMessage{{Role: "user", Content: promptText}},
-		Temperature: 1.0,
-		TopP:        1.0,
-		MaxTokens:   500000,
-		Seed:        42,
-		Stream:      true,
-	}
-
-	responseBytes, errCall := s.executeNvidiaAPIWithRetry(ctx, payload, workerID)
-	if errCall != nil {
-		log.Printf("[Worker-%d] API call failed for batch of %d jobs: %v", workerID, len(batch), errCall)
+	expectedResultCount := len(batch) * len(userProfiles)
+	batchResult, rawText, promptText, ok := s.callBatchEvaluationAPI(ctx, userProfiles, batch, expectedResultCount, workerID)
+	if !ok {
+		utils.LogRawAIResponse(fmt.Sprintf("Worker-%d-ERROR", workerID), s.ModelName, promptText, rawText, 0, true)
 		return false
 	}
 
-	var parsedResponse nvidiaAPIResponse
-	if errUnmarshal := json.Unmarshal(responseBytes, &parsedResponse); errUnmarshal != nil {
-		log.Printf("[Worker-%d] Unmarshal error for batch of %d jobs: %v", workerID, len(batch), errUnmarshal)
+	if len(batchResult.Results) == 0 {
+		log.Printf("[Worker-%d] Model returned empty results for batch of %d jobs — skipping.", workerID, len(batch))
+		utils.LogRawAIResponse(fmt.Sprintf("Worker-%d-EMPTY", workerID), s.ModelName, promptText, rawText, 0, true)
 		return false
 	}
 
-	if len(parsedResponse.Choices) == 0 {
-		log.Printf("[Worker-%d] Empty choices array for batch of %d jobs", workerID, len(batch))
-		return false
-	}
-
-	rawText := parsedResponse.Choices[0].Message.Content
-	cleanJSON := sanitizeJSONResponse(rawText)
-
-	var batchResult nvidiaBatchResponse
-	if errJSON := json.Unmarshal([]byte(cleanJSON), &batchResult); errJSON != nil {
-		log.Printf("[Worker-%d] JSON parse error for batch of %d jobs: %v", workerID, len(batch), errJSON)
-		return false
-	}
+	utils.LogRawAIResponse(fmt.Sprintf("Worker-%d", workerID), s.ModelName, promptText, rawText, 0, false)
 
 	for _, res := range batchResult.Results {
 		if res.JobID == "" || res.UserID == "" || !isValidUUIDString(res.JobID) || !isValidUUIDString(res.UserID) {
@@ -503,6 +636,83 @@ func (s *NvidiaNimService) evaluateJobBatchWithBackoff(
 	}
 
 	return true
+}
+
+// callBatchEvaluationAPI issues a single NIM API call for the given batch and returns the parsed
+// result, the raw response text, the prompt used, and whether the call succeeded structurally.
+func (s *NvidiaNimService) callBatchEvaluationAPI(
+	ctx context.Context,
+	userProfiles []UserProfileData,
+	batch []JobSnippetData,
+	expectedResultCount int,
+	workerID int,
+) (nvidiaBatchResponse, string, string, bool) {
+	promptText := s.buildMultiJobPrompt(userProfiles, batch, expectedResultCount)
+	messages := []nvidiaRequestMessage{
+		{
+			Role: "system",
+			Content: `You are a JSON-only API. Your entire response must be one single valid JSON object — no prose, no markdown, no code fences, no explanation, no preamble, no postamble. Not a single word outside the JSON.
+
+You MUST output exactly this structure:
+{
+  "results": [
+    {
+      "job_id": "<uuid string>",
+      "user_id": "<uuid string>",
+      "match_score": <integer 0-100>,
+      "match_reasoning": "<one sentence>",
+      "is_matched": <true|false>
+    }
+  ]
+}
+
+Violating this format — outputting any text before or after the JSON, using a different key name, returning an empty array, or omitting any entry — is a critical failure.`,
+		},
+		{
+			Role:    "user",
+			Content: promptText,
+		},
+	}
+	payload := nvidiaRequest{
+		Model:       s.ModelName,
+		Messages:    messages,
+		Temperature: 1.0,
+		TopP:        0.95,
+		MaxTokens:   500000,
+		Stream:      true,
+		ChatTemplateKwargs: &nvidiaChatTemplateKwargs{
+			ThinkingMode: "disabled",
+		},
+	}
+
+	responseBytes, errCall := s.executeNvidiaAPIWithRetry(ctx, payload, workerID)
+	if errCall != nil {
+		log.Printf("[Worker-%d] API call failed for batch of %d jobs: %v", workerID, len(batch), errCall)
+		return nvidiaBatchResponse{}, "", promptText, false
+	}
+
+	var parsedResponse nvidiaAPIResponse
+	if errUnmarshal := json.Unmarshal(responseBytes, &parsedResponse); errUnmarshal != nil {
+		log.Printf("[Worker-%d] Unmarshal error for batch of %d jobs: %v", workerID, len(batch), errUnmarshal)
+		return nvidiaBatchResponse{}, "", promptText, false
+	}
+
+	if len(parsedResponse.Choices) == 0 {
+		log.Printf("[Worker-%d] Empty choices array for batch of %d jobs", workerID, len(batch))
+		return nvidiaBatchResponse{}, "", promptText, false
+	}
+
+	rawText := parsedResponse.Choices[0].Message.Content
+	cleanJSON := sanitizeJSONResponse(rawText)
+
+	var batchResult nvidiaBatchResponse
+	if errJSON := json.Unmarshal([]byte(cleanJSON), &batchResult); errJSON != nil {
+		log.Printf("[Worker-%d] JSON parse error for batch of %d jobs: %v", workerID, len(batch), errJSON)
+		utils.LogRawAIResponse(fmt.Sprintf("Worker-%d-ERROR", workerID), s.ModelName, promptText, "RAW_OUTPUT:\n"+rawText+"\n\nCLEANED_JSON:\n"+cleanJSON, 0, true)
+		return nvidiaBatchResponse{}, rawText, promptText, false
+	}
+
+	return batchResult, rawText, promptText, true
 }
 
 func (s *NvidiaNimService) executeNvidiaAPIWithRetry(ctx context.Context, payload nvidiaRequest, workerID int) ([]byte, error) {
@@ -531,7 +741,11 @@ func (s *NvidiaNimService) executeNvidiaAPIWithRetry(ctx context.Context, payloa
 		}
 
 		httpRequest.Header.Set("Content-Type", "application/json")
-		httpRequest.Header.Set("Accept", "application/json")
+		if payload.Stream {
+			httpRequest.Header.Set("Accept", "text/event-stream")
+		} else {
+			httpRequest.Header.Set("Accept", "application/json")
+		}
 		httpRequest.Header.Set("Authorization", "Bearer "+s.APIKey)
 
 		httpResponse, errDo := s.HTTPClient.Do(httpRequest)
@@ -545,13 +759,19 @@ func (s *NvidiaNimService) executeNvidiaAPIWithRetry(ctx context.Context, payloa
 			continue
 		}
 
-		if payload.Stream {
-			if httpResponse.StatusCode != http.StatusOK {
-				bodyBytes, _ := io.ReadAll(httpResponse.Body)
-				httpResponse.Body.Close()
+		if httpResponse.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(httpResponse.Body)
+			httpResponse.Body.Close()
+			log.Printf("[Worker-%d] API returned error HTTP %d (Attempt %d/%d): %s", workerID, httpResponse.StatusCode, attempt, maxAttempts, string(bodyBytes))
+			if attempt == maxAttempts {
 				return nil, fmt.Errorf("NVIDIA API error HTTP %d: %s", httpResponse.StatusCode, string(bodyBytes))
 			}
+			time.Sleep(backoffDuration)
+			backoffDuration *= 2
+			continue
+		}
 
+		if payload.Stream {
 			scanner := bufio.NewScanner(httpResponse.Body)
 			var accumulatedBuilder strings.Builder
 			reasoningTokenCount := 0
@@ -581,26 +801,31 @@ func (s *NvidiaNimService) executeNvidiaAPIWithRetry(ctx context.Context, payloa
 					if errJson := json.Unmarshal([]byte(dataStr), &chunk); errJson == nil {
 						if len(chunk.Choices) > 0 {
 							delta := chunk.Choices[0].Delta
-							if delta.ReasoningContent != "" || delta.Content != "" {
+							reasoningText := delta.ReasoningContent
+							if reasoningText == "" {
+								reasoningText = delta.Reasoning
+							}
+
+							if reasoningText != "" || delta.Content != "" {
 								lastChunkTime = time.Now()
 							}
-							if delta.ReasoningContent != "" {
-								reasoningTokenCount += len(delta.ReasoningContent)
+							if reasoningText != "" {
+								reasoningTokenCount += len(reasoningText)
 								if !firstTokenReceived {
 									firstTokenReceived = true
-									log.Printf("[Worker-%d] Streaming first reasoning token received after %v", workerID, time.Since(requestStart))
+									log.Printf("[STREAM] [Worker-%d] First reasoning token received after %v", workerID, time.Since(requestStart))
 								}
 							}
 							if delta.Content != "" {
 								if !firstTokenReceived {
 									firstTokenReceived = true
-									log.Printf("[Worker-%d] Streaming first content token received after %v", workerID, time.Since(requestStart))
+									log.Printf("[STREAM] [Worker-%d] First content token received after %v", workerID, time.Since(requestStart))
 								}
 								accumulatedBuilder.WriteString(delta.Content)
 							}
 
 							if time.Since(lastLogTime) >= 10*time.Second {
-								log.Printf("[Worker-%d] Live Stream: Reasoning bytes: %d, Response bytes: %d (Elapsed: %v)",
+								log.Printf("[STREAM] [Worker-%d] Live Progress: Reasoning bytes: %d, Response bytes: %d (Elapsed: %v)",
 									workerID, reasoningTokenCount, accumulatedBuilder.Len(), time.Since(requestStart).Truncate(time.Second))
 								lastLogTime = time.Now()
 							}
@@ -611,7 +836,7 @@ func (s *NvidiaNimService) executeNvidiaAPIWithRetry(ctx context.Context, payloa
 			httpResponse.Body.Close()
 
 			accumulatedJSON := accumulatedBuilder.String()
-			log.Printf("[Worker-%d] Streaming finished in %v (Reasoning bytes: %d, Response size: %d bytes)",
+			log.Printf("[STREAM] [Worker-%d] Streaming finished in %v (Reasoning bytes: %d, Response size: %d bytes)",
 				workerID, time.Since(requestStart).Truncate(time.Millisecond), reasoningTokenCount, len(accumulatedJSON))
 
 			syntheticResponse := nvidiaAPIResponse{}
@@ -630,21 +855,6 @@ func (s *NvidiaNimService) executeNvidiaAPIWithRetry(ctx context.Context, payloa
 		if errRead != nil {
 			return nil, fmt.Errorf("failed reading response body: %w", errRead)
 		}
-
-		log.Printf("[NvidiaNimHTTP] Received HTTP %d in %v (Response size: %d bytes)",
-			httpResponse.StatusCode, time.Since(requestStart), len(bodyBytes))
-
-		if httpResponse.StatusCode == http.StatusTooManyRequests {
-			log.Printf("[NvidiaNimService] Rate limited (429). Retrying in %v...", backoffDuration)
-			time.Sleep(backoffDuration)
-			backoffDuration *= 2
-			continue
-		}
-
-		if httpResponse.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("NVIDIA API error HTTP %d: %s", httpResponse.StatusCode, string(bodyBytes))
-		}
-
 		return bodyBytes, nil
 	}
 
@@ -663,26 +873,23 @@ func (s *NvidiaNimService) enforceMinimumRequestSpacing() {
 	s.lastRequestTime = time.Now()
 }
 
-func (s *NvidiaNimService) buildMultiJobPrompt(userProfiles []UserProfileData, jobsBatch []JobSnippetData) string {
+// buildMultiJobPrompt constructs the evaluation prompt for a batch of jobs against a set of
+// user profiles. expectedResultCount is injected explicitly so the model knows the exact number
+// of entries it must emit in the results array, acting as a belt-and-suspenders guard alongside
+// the minItems/maxItems constraint in the guided_json schema.
+func (s *NvidiaNimService) buildMultiJobPrompt(userProfiles []UserProfileData, jobsBatch []JobSnippetData, expectedResultCount int) string {
 	var builder strings.Builder
 
-	builder.WriteString("Evaluate the following batch of job listings against candidate profiles and assign match scores (0 to 100).\n\n")
-	builder.WriteString("STRICT SCORING RULES YOU MUST ENFORCE WITHOUT EXCEPTION:\n")
-	builder.WriteString("1. LOCATION & WORK AUTHORIZATION MISMATCH:\n")
-	builder.WriteString("   - Candidate target locations are India (Onsite/Hybrid), India (Remote), or Global Remote.\n")
-	builder.WriteString("   - If job is US Onsite, US Hybrid, or US-only Remote (e.g. Remote Texas, Remote SF, Remote NYC, US-based), assign MAX MATCH SCORE OF 0 to 15.\n")
-	builder.WriteString("   - Candidates in India CANNOT work US-restricted remote or US onsite jobs.\n\n")
-	builder.WriteString("2. SENIORITY & EXPERIENCE GAP MISMATCH:\n")
-	builder.WriteString("   - Candidate is early-career / junior engineer (~1 Year of Experience).\n")
-	builder.WriteString("   - If job title contains 'Senior', 'Sr', 'Staff', 'Lead', 'Principal', 'Architect', 'Director', 'Head', or requires 5+ years of experience, assign MAX MATCH SCORE OF 15 to 30.\n")
-	builder.WriteString("   - Early career candidates DO NOT match Senior/Staff/Architect positions.\n\n")
-	builder.WriteString("3. HIGH MATCH QUALIFICATION (80-100):\n")
-	builder.WriteString("   - High scores (80 to 100) are reserved EXCLUSIVELY for Entry-Level, Junior, Associate, or Mid-Level Software Engineer, Full Stack, Backend, Frontend, or AI/ML Engineer roles matching candidate's stack in India or Global Remote.\n\n")
-
 	builder.WriteString("Return ONLY a raw JSON object formatted as follows:\n")
-	builder.WriteString("{\n  \"results\": [\n    {\n      \"job_id\": \"string\",\n      \"user_id\": \"string\",\n      \"match_score\": 85,\n      \"match_reasoning\": \"short bullet reasoning\",\n      \"is_matched\": true\n    }\n  ]\n}\n\n")
+	builder.WriteString("{\n  \"results\": [\n    {\n      \"job_id\": \"<job_id string copied verbatim from JOB LISTINGS below>\",\n      \"user_id\": \"<user_id string copied verbatim from CANDIDATE PROFILES below>\",\n      \"match_score\": 85,\n      \"match_reasoning\": \"short bullet reasoning\",\n      \"is_matched\": true\n    }\n  ]\n}\n\n")
+	fmt.Fprintf(&builder, "IMPORTANT: You MUST return exactly %d entries in the \"results\" array — one for every (job × candidate) pair listed below. An empty array or partial array is invalid.\n\n", expectedResultCount)
 
-	builder.WriteString("### Candidate Profiles\n")
+	builder.WriteString("SCORING RULES:\n")
+	builder.WriteString("1. LOCATION MISMATCH: Candidate is India-based. US Onsite / US Hybrid / US-only Remote jobs → score 0–15.\n")
+	builder.WriteString("2. SENIORITY MISMATCH: Candidate is early-career (~1 YoE). Senior/Staff/Lead/Principal/Architect/Director → score 15–30.\n")
+	builder.WriteString("3. HIGH MATCH (80–100): Entry-Level/Junior/Associate/Mid-Level SWE, Full Stack, Backend, Frontend, or AI/ML roles in India or Global Remote matching candidate stack only.\n\n")
+
+	builder.WriteString("### CANDIDATE PROFILES\n")
 	for _, profile := range userProfiles {
 		combinedProfileText := profile.ParsedBio
 		if profile.MasterCVText != "" {
@@ -692,11 +899,13 @@ func (s *NvidiaNimService) buildMultiJobPrompt(userProfiles []UserProfileData, j
 			profile.UserID, combinedProfileText, strings.Join(profile.PreferredRoles, ", "), strings.Join(profile.PreferredLocations, ", "), profile.WorkModel)
 	}
 
-	builder.WriteString("### Job Listings to Evaluate\n")
+	builder.WriteString("### JOB LISTINGS TO EVALUATE\n")
 	for _, job := range jobsBatch {
 		fmt.Fprintf(&builder, "---\nID: %s\nTitle: %s\nCompany: %s\nLocation: %s\nDescription:\n%s\n\n",
 			job.JobID, job.Title, job.Company, job.Location, truncateTextString(job.Description, maxJobDescriptionLength))
 	}
+
+	fmt.Fprintf(&builder, "NOW OUTPUT THE JSON. Exactly %d entries. No other text. Start your response with '{' and end it with '}'.\n", expectedResultCount)
 
 	return builder.String()
 }
@@ -833,11 +1042,26 @@ func sanitizeJSONResponse(textContent string) string {
 	if strings.HasPrefix(clean, "```json") {
 		clean = strings.TrimPrefix(clean, "```json")
 		clean = strings.TrimSuffix(clean, "```")
+		clean = strings.TrimSpace(clean)
 	} else if strings.HasPrefix(clean, "```") {
 		clean = strings.TrimPrefix(clean, "```")
 		clean = strings.TrimSuffix(clean, "```")
+		clean = strings.TrimSpace(clean)
 	}
-	return strings.TrimSpace(clean)
+
+	firstBrace := strings.Index(clean, "{")
+	lastBrace := strings.LastIndex(clean, "}")
+	if firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace {
+		return clean[firstBrace : lastBrace+1]
+	}
+
+	firstBracket := strings.Index(clean, "[")
+	lastBracket := strings.LastIndex(clean, "]")
+	if firstBracket != -1 && lastBracket != -1 && lastBracket > firstBracket {
+		return clean[firstBracket : lastBracket+1]
+	}
+
+	return clean
 }
 
 func truncateTextString(sourceText string, maxLength int) string {
@@ -867,4 +1091,8 @@ func isValidUUIDString(u string) bool {
 
 func IsValidUUIDStringForTest(u string) bool {
 	return isValidUUIDString(u)
+}
+
+func SanitizeJSONResponseForTest(s string) string {
+	return sanitizeJSONResponse(s)
 }
