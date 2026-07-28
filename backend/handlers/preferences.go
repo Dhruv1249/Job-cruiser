@@ -412,7 +412,7 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 
 	var rawJSON string
 	if h.NimService != nil {
-		completionContent, errNim := h.NimService.GenerateCompletion(ctx, prompt, "")
+		completionContent, errNim := h.NimService.GenerateCompletionWithSchema(ctx, prompt, "", services.CVParsingJSONSchema)
 		if errNim != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "NVIDIA NIM CV parsing failed: " + errNim.Error()})
 			return

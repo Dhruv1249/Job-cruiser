@@ -34,6 +34,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
   bool _anyIndustry = true;
   bool _anySalary = true;
   bool _anyLocation = false;
+  bool _anyWorkModel = false;
   bool _isParsingCV = false;
   String _rawCvText = '';
 
@@ -57,6 +58,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
   final Set<String> _selectedRoles = {'Backend Engineer', 'Fullstack SDE'};
   final Set<String> _selectedIndustries = {'Fintech', 'AI / ML', 'Enterprise SaaS'};
   final Set<String> _selectedWorkModels = {'remote', 'hybrid'};
+  final List<String> _availableWorkModels = ['remote', 'hybrid', 'onsite'];
 
   final List<String> _availableRoles = [
     'Backend Engineer',
@@ -1700,6 +1702,29 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
             ),
           ],
         ),
+        if (!_anyWorkModel) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: _availableWorkModels.map((wm) {
+              final isSelected = _selectedWorkModels.contains(wm);
+              return FilterChip(
+                label: Text(wm.toUpperCase()),
+                selected: isSelected,
+                onSelected: (val) {
+                  setState(() {
+                    if (val) {
+                      _selectedWorkModels.add(wm);
+                    } else {
+                      _selectedWorkModels.remove(wm);
+                    }
+                  });
+                },
+              );
+            }).toList(),
+          ),
+        ],
       ],
     );
   }
