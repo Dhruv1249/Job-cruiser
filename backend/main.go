@@ -100,6 +100,15 @@ func main() {
 		BasicService: basicMatcherService,
 	}
 
+	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
+	overleafURL := os.Getenv("OVERLEAF_MCP_URL")
+	if overleafURL == "" {
+		overleafURL = "http://localhost:3202"
+	}
+	mcpClient := services.NewMCPClient(overleafURL, os.Getenv("OVERLEAF_MCP_TOKEN"))
+	tailorService := services.NewResumeTailorService("https://generativelanguage.googleapis.com", geminiAPIKey, mcpClient)
+	tailorHandler := handlers.NewTailorHandler(tailorService, databasePool)
+
 	// Initialize the default Gin web router with basic logging and crash-recovery built in.
 	webRouter := gin.Default()
 
@@ -134,6 +143,9 @@ func main() {
 		protected.POST("/user/parse-cv", prefHandler.ParseCV)
 		protected.POST("/overleaf/config", prefHandler.UpdateOverleafConfig)
 		protected.GET("/overleaf/config", prefHandler.GetOverleafConfig)
+
+		protected.POST("/tailor/resume", tailorHandler.TailorResume)
+		protected.POST("/tailor/cover-letter", tailorHandler.GenerateCoverLetter)
 
 		protected.POST("/applications", appHandler.CreateApplication)
 		protected.GET("/applications", appHandler.GetUserApplications)
