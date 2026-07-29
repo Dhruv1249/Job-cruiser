@@ -915,7 +915,8 @@ func (s *NvidiaNimService) fetchAllUserProfiles(ctx context.Context) ([]UserProf
 		SELECT u.id, u.primary_email, COALESCE(up.bio_experience_text, ''), COALESCE(up.master_cv_text, ''), COALESCE(up.target_roles, '[]'),
 		       COALESCE(up.target_locations, '[]'), COALESCE(up.work_models->>0, ''), 0
 		FROM users u
-		LEFT JOIN user_preferences up ON u.id = up.user_id;
+		LEFT JOIN user_preferences up ON u.id = up.user_id
+		WHERE u.ai_matching_enabled = true;
 	`
 	rows, errQuery := s.DB.Query(ctx, sqlQuery)
 	if errQuery != nil {
@@ -980,7 +981,8 @@ func (s *NvidiaNimService) fetchJobsUnmatchedForUser(ctx context.Context, target
 		SELECT j.id, j.title, COALESCE(c.name, ''), COALESCE(j.location, ''), COALESCE(j.raw_desc, '')
 		FROM jobs j
 		LEFT JOIN companies c ON j.company_id = c.id
-		WHERE NOT EXISTS (
+		WHERE j.ai_evaluated = true
+		  AND NOT EXISTS (
 			SELECT 1 FROM user_job_matches ujm
 			WHERE ujm.job_id = j.id AND ujm.user_id = $1
 		)
