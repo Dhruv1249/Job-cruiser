@@ -53,6 +53,23 @@ type PreviewImageResult struct {
 	SizeBytes  int64  `json:"sizeBytes"`
 }
 
+// FileEntryItem represents metadata for a file or sub-directory inside an open-overleaf project.
+type FileEntryItem struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	IsDirectory bool   `json:"isDirectory"`
+	SizeBytes   int64  `json:"sizeBytes"`
+}
+
+// ReadLinesResult holds sliced content of specific file line ranges.
+type ReadLinesResult struct {
+	FilePath     string `json:"filePath"`
+	StartLine    int    `json:"startLine"`
+	EndLine      int    `json:"endLine"`
+	TotalLines   int    `json:"totalLines"`
+	LinesContent string `json:"linesContent"`
+}
+
 // MCPToolResponse defines standard JSON RPC envelope returned by open-overleaf tool HTTP endpoints.
 type MCPToolResponse struct {
 	Success bool                   `json:"success"`
@@ -105,6 +122,31 @@ func (client *MCPClient) ListProjects(ctx context.Context) ([]string, error) {
 	return projectNames, nil
 }
 
+// ListFiles retrieves recursive file tree entries inside an open-overleaf LaTeX project.
+func (client *MCPClient) ListFiles(ctx context.Context, projectName string, subDir string) ([]FileEntryItem, error) {
+	arguments := map[string]interface{}{
+		"projectName": projectName,
+		"subDir":      subDir,
+	}
+
+	responsePayload, err := client.executeTool(ctx, "list_files", arguments)
+	if err != nil {
+		return nil, err
+	}
+
+	marshaledBytes, err := json.Marshal(responsePayload["files"])
+	if err != nil {
+		return nil, fmt.Errorf("failed marshaling files list: %w", err)
+	}
+
+	var filesList []FileEntryItem
+	if err := json.Unmarshal(marshaledBytes, &filesList); err != nil {
+		return nil, fmt.Errorf("failed unmarshaling file entries: %w", err)
+	}
+
+	return filesList, nil
+}
+
 // ReadProjectFile reads text content of a file inside an open-overleaf LaTeX project.
 func (client *MCPClient) ReadProjectFile(ctx context.Context, projectName string, filePath string) (string, error) {
 	arguments := map[string]interface{}{
@@ -125,6 +167,33 @@ func (client *MCPClient) ReadProjectFile(ctx context.Context, projectName string
 	return contentString, nil
 }
 
+// ReadFileLines reads specific line ranges [startLine, endLine] from a file inside an open-overleaf project.
+func (client *MCPClient) ReadFileLines(ctx context.Context, projectName string, filePath string, startLine int, endLine int) (*ReadLinesResult, error) {
+	arguments := map[string]interface{}{
+		"projectName": projectName,
+		"filePath":    filePath,
+		"startLine":   startLine,
+		"endLine":     endLine,
+	}
+
+	responsePayload, err := client.executeTool(ctx, "read_file_lines", arguments)
+	if err != nil {
+		return nil, err
+	}
+
+	marshaledBytes, err := json.Marshal(responsePayload)
+	if err != nil {
+		return nil, fmt.Errorf("failed marshaling read_file_lines payload: %w", err)
+	}
+
+	var linesResult ReadLinesResult
+	if err := json.Unmarshal(marshaledBytes, &linesResult); err != nil {
+		return nil, fmt.Errorf("failed unmarshaling read_file_lines result: %w", err)
+	}
+
+	return &linesResult, nil
+}
+
 // WriteProjectFile updates or creates a text file inside an open-overleaf LaTeX project.
 func (client *MCPClient) WriteProjectFile(ctx context.Context, projectName string, filePath string, content string) error {
 	arguments := map[string]interface{}{
@@ -134,6 +203,28 @@ func (client *MCPClient) WriteProjectFile(ctx context.Context, projectName strin
 	}
 
 	_, err := client.executeTool(ctx, "write_project_file", arguments)
+	return err
+}
+
+// DeleteFile deletes a file or directory inside an open-overleaf LaTeX project.
+func (client *MCPClient) DeleteFile(ctx context.Context, projectName string, filePath string) error {
+	arguments := map[string]interface{}{
+		"projectName": projectName,
+		"filePath":    filePath,
+	}
+
+	_, err := client.executeTool(ctx, "delete_file", arguments)
+	return err
+}
+
+// SyncProject triggers local git commit and status synchronization for a project.
+func (client *MCPClient) SyncProject(ctx context.Context, projectName string, commitMessage string) error {
+	arguments := map[string]interface{}{
+		"projectName":   projectName,
+		"commitMessage": commitMessage,
+	}
+
+	_, err := client.executeTool(ctx, "sync_project", arguments)
 	return err
 }
 
