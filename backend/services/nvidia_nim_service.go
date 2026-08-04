@@ -884,10 +884,14 @@ func (s *NvidiaNimService) buildMultiJobPrompt(userProfiles []UserProfileData, j
 	builder.WriteString("{\n  \"results\": [\n    {\n      \"job_id\": \"<job_id string copied verbatim from JOB LISTINGS below>\",\n      \"user_id\": \"<user_id string copied verbatim from CANDIDATE PROFILES below>\",\n      \"match_score\": 85,\n      \"match_reasoning\": \"short bullet reasoning\",\n      \"is_matched\": true\n    }\n  ]\n}\n\n")
 	fmt.Fprintf(&builder, "IMPORTANT: You MUST return exactly %d entries in the \"results\" array — one for every (job × candidate) pair listed below. An empty array or partial array is invalid.\n\n", expectedResultCount)
 
-	builder.WriteString("SCORING RULES:\n")
-	builder.WriteString("1. LOCATION MISMATCH: Candidate is India-based. US Onsite / US Hybrid / US-only Remote jobs → score 0–15.\n")
-	builder.WriteString("2. SENIORITY MISMATCH: Candidate is early-career (~1 YoE). Senior/Staff/Lead/Principal/Architect/Director → score 15–30.\n")
-	builder.WriteString("3. HIGH MATCH (80–100): Entry-Level/Junior/Associate/Mid-Level SWE, Full Stack, Backend, Frontend, or AI/ML roles in India or Global Remote matching candidate stack only.\n\n")
+	builder.WriteString("SCORING RULES — apply in strict priority order; a higher-priority penalty overrides skill match entirely:\n")
+	builder.WriteString("1. LOCATION MISMATCH (HARD CAP): Candidate is India-based. Any job that is US Onsite, US Hybrid, or US-only Remote (explicitly excludes non-US applicants) → cap score at 0–15, regardless of any other signal.\n")
+	builder.WriteString("2. EXPERIENCE GAP (HARD CAP — highest priority penalty):\n")
+	builder.WriteString("   - Infer candidate YoE from their profile/resume. Infer job's minimum required YoE from the JD (look for phrases like '4+ years', '5-7 years experience', 'Senior', 'Staff', 'Lead', 'Principal', etc.).\n")
+	builder.WriteString("   - If the job's minimum required YoE > (candidate YoE + 2): cap score at 0–25. Skill match is IRRELEVANT — a candidate cannot overcome a 3+ year experience deficit.\n")
+	builder.WriteString("   - If the job's minimum required YoE is (candidate YoE + 1) to (candidate YoE + 2): cap score at 26–45. This is a stretch role the candidate cannot realistically get.\n")
+	builder.WriteString("   - Titles like Senior, Staff, Lead, Principal, Architect, Director implicitly require 4+ YoE minimum — treat them as requiring 4 YoE if no explicit number is given.\n")
+	builder.WriteString("3. HIGH MATCH (75–100): ONLY for Entry-Level / Junior / Associate / Mid-Level roles where candidate YoE meets or slightly exceeds the minimum, role is in India or Global Remote, and the tech stack matches the candidate profile.\n\n")
 
 	builder.WriteString("### CANDIDATE PROFILES\n")
 	for _, profile := range userProfiles {
