@@ -880,6 +880,8 @@ func (s *NvidiaNimService) enforceMinimumRequestSpacing() {
 func (s *NvidiaNimService) buildMultiJobPrompt(userProfiles []UserProfileData, jobsBatch []JobSnippetData, expectedResultCount int) string {
 	var builder strings.Builder
 
+	currentTimeText := time.Now().Format("January 2006")
+
 	builder.WriteString("Return ONLY a raw JSON object formatted as follows:\n")
 	builder.WriteString("{\n  \"results\": [\n    {\n      \"job_id\": \"<job_id string copied verbatim from JOB LISTINGS below>\",\n      \"user_id\": \"<user_id string copied verbatim from CANDIDATE PROFILES below>\",\n      \"match_score\": 85,\n      \"match_reasoning\": \"short bullet reasoning\",\n      \"is_matched\": true\n    }\n  ]\n}\n\n")
 	fmt.Fprintf(&builder, "IMPORTANT: You MUST return exactly %d entries in the \"results\" array — one for every (job × candidate) pair listed below. An empty array or partial array is invalid.\n\n", expectedResultCount)
@@ -887,7 +889,7 @@ func (s *NvidiaNimService) buildMultiJobPrompt(userProfiles []UserProfileData, j
 	builder.WriteString("SCORING RULES — apply in strict priority order; a higher-priority penalty overrides skill match entirely:\n")
 	builder.WriteString("1. LOCATION MISMATCH (HARD CAP): Candidate is India-based. Any job that is US Onsite, US Hybrid, or US-only Remote (explicitly excludes non-US applicants) → cap score at 0–15, regardless of any other signal.\n")
 	builder.WriteString("2. EXPERIENCE GAP (HARD CAP — highest priority penalty):\n")
-	builder.WriteString("   - Infer candidate YoE from their profile/resume. Infer job's minimum required YoE from the JD (look for phrases like '4+ years', '5-7 years experience', 'Senior', 'Staff', 'Lead', 'Principal', etc.).\n")
+	fmt.Fprintf(&builder, "   - Use the provided Candidate Years of Experience (YoE) calculated from their resume, or infer it from the profile/resume relative to the current evaluation date: %s. Infer job's minimum required YoE from the JD (look for phrases like '4+ years', '5-7 years experience', 'Senior', 'Staff', 'Lead', 'Principal', etc.).\n", currentTimeText)
 	builder.WriteString("   - If the job's minimum required YoE > (candidate YoE + 2): cap score at 0–25. Skill match is IRRELEVANT — a candidate cannot overcome a 3+ year experience deficit.\n")
 	builder.WriteString("   - If the job's minimum required YoE is (candidate YoE + 1) to (candidate YoE + 2): cap score at 26–45. This is a stretch role the candidate cannot realistically get.\n")
 	builder.WriteString("   - Titles like Senior, Staff, Lead, Principal, Architect, Director implicitly require 4+ YoE minimum — treat them as requiring 4 YoE if no explicit number is given.\n")
@@ -899,8 +901,8 @@ func (s *NvidiaNimService) buildMultiJobPrompt(userProfiles []UserProfileData, j
 		if profile.MasterCVText != "" {
 			combinedProfileText += "\n\nMaster CV / Full Experience Context:\n" + profile.MasterCVText
 		}
-		fmt.Fprintf(&builder, "User ID: %s\nProfile & Resume Context:\n%s\nPreferred Roles: %s\nPreferred Locations: %s\nWork Model: %s\n\n",
-			profile.UserID, combinedProfileText, strings.Join(profile.PreferredRoles, ", "), strings.Join(profile.PreferredLocations, ", "), profile.WorkModel)
+		fmt.Fprintf(&builder, "User ID: %s\nCandidate Years of Experience (YoE): %d\nProfile & Resume Context:\n%s\nPreferred Roles: %s\nPreferred Locations: %s\nWork Model: %s\n\n",
+			profile.UserID, profile.ExperienceYears, combinedProfileText, strings.Join(profile.PreferredRoles, ", "), strings.Join(profile.PreferredLocations, ", "), profile.WorkModel)
 	}
 
 	builder.WriteString("### JOB LISTINGS TO EVALUATE\n")
@@ -933,6 +935,7 @@ func (s *NvidiaNimService) fetchAllUserProfiles(ctx context.Context) ([]UserProf
 		var item UserProfileData
 		scanErr := rows.Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.MasterCVText, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears)
 		if scanErr == nil {
+			item.ExperienceYears = calculateTotalExperienceYears(item.MasterCVText)
 			profiles = append(profiles, item)
 		}
 	}
@@ -952,6 +955,7 @@ func (s *NvidiaNimService) fetchSingleUserProfile(ctx context.Context, targetUse
 	if scanErr != nil {
 		return nil, scanErr
 	}
+	item.ExperienceYears = calculateTotalExperienceYears(item.MasterCVText)
 	return &item, nil
 }
 
@@ -1101,4 +1105,109 @@ func IsValidUUIDStringForTest(u string) bool {
 
 func SanitizeJSONResponseForTest(s string) string {
 	return sanitizeJSONResponse(s)
+}
+
+type cvExperience struct {
+	Duration string `json:"duration"`
+}
+
+type cvSchema struct {
+	Experiences []cvExperience `json:"experiences"`
+}
+
+func calculateTotalExperienceYears(cvText string) int {
+	if cvText == "" {
+		return 0
+	}
+	var schema cvSchema
+	if err := json.Unmarshal([]byte(cvText), &schema); err != nil {
+		return 0
+	}
+	var earliestStart time.Time
+	var latestEnd time.Time
+	hasExperience := false
+	for _, exp := range schema.Experiences {
+		start, end, parsed := parseDurationSpan(exp.Duration)
+		if !parsed {
+			continue
+		}
+		if !hasExperience {
+			earliestStart = start
+			latestEnd = end
+			hasExperience = true
+			continue
+		}
+		if start.Before(earliestStart) {
+			earliestStart = start
+		}
+		if end.After(latestEnd) {
+			latestEnd = end
+		}
+	}
+	if !hasExperience {
+		return 0
+	}
+	durationSpan := latestEnd.Sub(earliestStart)
+	years := int(durationSpan.Hours() / 24 / 365)
+	if years < 0 {
+		return 0
+	}
+	return years
+}
+
+func parseDurationSpan(duration string) (time.Time, time.Time, bool) {
+	duration = strings.ReplaceAll(duration, "–", "-")
+	duration = strings.ReplaceAll(duration, "to", "-")
+	parts := strings.Split(duration, "-")
+	if len(parts) != 2 {
+		return time.Time{}, time.Time{}, false
+	}
+	start := parseDateString(parts[0])
+	end := parseDateString(parts[1])
+	if start.IsZero() || end.IsZero() {
+		return time.Time{}, time.Time{}, false
+	}
+	return start, end, true
+}
+
+func parseDateString(dateStr string) time.Time {
+	dateStr = strings.TrimSpace(strings.ToLower(dateStr))
+	if dateStr == "present" || dateStr == "current" || dateStr == "" {
+		return time.Now()
+	}
+	months := map[string]int{
+		"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+		"jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+		"january": 1, "february": 2, "march": 3, "april": 4, "june": 6,
+		"july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+	}
+	fields := strings.Fields(dateStr)
+	var monthVal int = 1
+	var yearVal int = 0
+	for _, field := range fields {
+		if val, exists := months[field]; exists {
+			monthVal = val
+			continue
+		}
+		var parsedYear int
+		if _, err := fmt.Sscanf(field, "%d", &parsedYear); err == nil {
+			if parsedYear < 100 {
+				if parsedYear > 50 {
+					yearVal = 1900 + parsedYear
+				} else {
+					yearVal = 2000 + parsedYear
+				}
+			} else {
+				yearVal = parsedYear
+			}
+		}
+	}
+	if yearVal == 0 {
+		return time.Time{}
+	}
+	return time.Date(yearVal, time.Month(monthVal), 1, 0, 0, 0, 0, time.UTC)
+}
+
+func CalculateTotalExperienceYearsForTest(cvText string) int {
+	return calculateTotalExperienceYears(cvText)
 }

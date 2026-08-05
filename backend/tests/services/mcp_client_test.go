@@ -162,3 +162,32 @@ func TestMCPClientGetProjectPDFSuccess(t *testing.T) {
 		t.Fatalf("unexpected pdf metadata: %+v", pdfResult)
 	}
 }
+
+func TestGenerateMCPToken(t *testing.T) {
+	token1 := services.GenerateMCPToken("my_secret", "hash123", "my_repo")
+	token2 := services.GenerateMCPToken("my_secret", "hash123", "my_repo")
+	if token1 == "" || len(token1) != 64 {
+		t.Fatalf("expected 64-char hex token, got %s", token1)
+	}
+	if token1 != token2 {
+		t.Fatalf("expected deterministic token derivation, got %s vs %s", token1, token2)
+	}
+
+	diffToken := services.GenerateMCPToken("other_secret", "hash123", "my_repo")
+	if token1 == diffToken {
+		t.Fatalf("different secret should yield different token")
+	}
+}
+
+func TestMCPClientUnauthorizedError(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.Error(writer, `{"error":"Unauthorized MCP access"}`, http.StatusUnauthorized)
+	}))
+	defer mockServer.Close()
+
+	client := services.NewMCPClient(mockServer.URL, "invalid-token")
+	_, err := client.ListProjects(context.Background())
+	if err == nil {
+		t.Fatalf("expected authorization error, got nil")
+	}
+}
