@@ -275,3 +275,39 @@ func TestSanitizeJSONResponseWithPreambleText(t *testing.T) {
 		t.Fatalf("expected clean unmarshal of sanitized JSON, got error: %v", errUnmarshal)
 	}
 }
+
+// TestCalculateTotalExperienceYears checks dynamic experience years estimation from the parsed CV text.
+func TestCalculateTotalExperienceYears(t *testing.T) {
+	testCases := []struct {
+		cvText       string
+		expectedYears int
+	}{
+		{
+			cvText:        `{"experiences": [{"duration": "Nov 2025 - Present"}]}`,
+			expectedYears: 0,
+		},
+		{
+			cvText:        `{"experiences": [{"duration": "June 2021 - Aug 2023"}]}`,
+			expectedYears: 2,
+		},
+		{
+			cvText:        `{"experiences": [{"duration": "Jan 2020 - Dec 2024"}]}`,
+			expectedYears: 4,
+		},
+		{
+			cvText:        `{"experiences": [{"duration": "2020 - 2022"}]}`,
+			expectedYears: 2,
+		},
+		{
+			cvText:        "",
+			expectedYears: 0,
+		},
+	}
+
+	for _, tc := range testCases {
+		calculated := services.CalculateTotalExperienceYearsForTest(tc.cvText)
+		if calculated != tc.expectedYears {
+			t.Errorf("Expected %d years of experience, got %d for input: %s", tc.expectedYears, calculated, tc.cvText)
+		}
+	}
+}

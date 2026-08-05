@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
@@ -105,7 +107,24 @@ func main() {
 	if overleafURL == "" {
 		overleafURL = "http://localhost:3202"
 	}
-	mcpClient := services.NewMCPClient(overleafURL, os.Getenv("OVERLEAF_MCP_TOKEN"))
+	mcpToken := os.Getenv("OVERLEAF_MCP_TOKEN")
+	if mcpToken == "" {
+		secretKey := os.Getenv("OVERLEAF_MCP_SECRET")
+		if secretKey == "" {
+			secretKey = os.Getenv("SESSION_SECRET")
+		}
+		ghTokenHash := os.Getenv("GITHUB_TOKEN_HASH")
+		if ghTokenHash == "" {
+			ghClientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
+			if ghClientSecret != "" {
+				sum := sha256.Sum256([]byte(ghClientSecret))
+				ghTokenHash = hex.EncodeToString(sum[:])
+			}
+		}
+		repoName := os.Getenv("GITHUB_SINGLE_REPO_NAME")
+		mcpToken = services.GenerateMCPToken(secretKey, ghTokenHash, repoName)
+	}
+	mcpClient := services.NewMCPClient(overleafURL, mcpToken)
 	tailorService := services.NewResumeTailorService("https://generativelanguage.googleapis.com", geminiAPIKey, mcpClient)
 	tailorHandler := handlers.NewTailorHandler(tailorService, databasePool)
 

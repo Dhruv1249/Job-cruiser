@@ -3,12 +3,31 @@ package services
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 )
+
+// GenerateMCPToken derives SHA-256 authorization token from secret, github token hash, and repository name.
+func GenerateMCPToken(secret string, ghTokenHash string, repoName string) string {
+	if secret == "" {
+		secret = "open_overleaf_mcp_secret"
+	}
+	if ghTokenHash == "" {
+		sum := sha256.Sum256([]byte("default_gh_token"))
+		ghTokenHash = hex.EncodeToString(sum[:])
+	}
+	if repoName == "" {
+		repoName = "overleaf-projects"
+	}
+	rawCombined := fmt.Sprintf("%s:%s:%s", secret, ghTokenHash, repoName)
+	hashBytes := sha256.Sum256([]byte(rawCombined))
+	return hex.EncodeToString(hashBytes[:])
+}
 
 // DiagnosticError represents an individual LaTeX compilation error or warning snippet.
 type DiagnosticError struct {
