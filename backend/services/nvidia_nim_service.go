@@ -66,11 +66,12 @@ type JobSnippetData struct {
 }
 
 type nvidiaMatchResult struct {
-	JobID          string `json:"job_id"`
-	UserID         string `json:"user_id"`
-	MatchScore     int    `json:"match_score"`
-	MatchReasoning string `json:"match_reasoning"`
-	IsMatched      bool   `json:"is_matched"`
+	JobID               string `json:"job_id"`
+	UserID              string `json:"user_id"`
+	MatchScore          int    `json:"match_score"`
+	MatchReasoning      string `json:"match_reasoning"`
+	InferredRequiredYoE int    `json:"inferred_required_yoe"`
+	IsMatched           bool   `json:"is_matched"`
 }
 
 type nvidiaBatchResponse struct {
@@ -108,13 +109,14 @@ func buildBatchJobMatchSchema(expectedCount int) map[string]any {
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"job_id":          map[string]any{"type": "string"},
-						"user_id":         map[string]any{"type": "string"},
-						"match_score":     map[string]any{"type": "integer"},
-						"match_reasoning": map[string]any{"type": "string"},
-						"is_matched":      map[string]any{"type": "boolean"},
+						"job_id":                map[string]any{"type": "string"},
+						"user_id":               map[string]any{"type": "string"},
+						"match_score":           map[string]any{"type": "integer"},
+						"match_reasoning":       map[string]any{"type": "string"},
+						"inferred_required_yoe": map[string]any{"type": "integer"},
+						"is_matched":            map[string]any{"type": "boolean"},
 					},
-					"required": []string{"job_id", "user_id", "match_score", "match_reasoning", "is_matched"},
+					"required": []string{"job_id", "user_id", "match_score", "match_reasoning", "inferred_required_yoe", "is_matched"},
 				},
 			},
 		},
@@ -625,6 +627,34 @@ func (s *NvidiaNimService) evaluateJobBatchWithBackoff(
 		if res.JobID == "" || res.UserID == "" || !isValidUUIDString(res.JobID) || !isValidUUIDString(res.UserID) {
 			continue
 		}
+
+		var matchedProfile *UserProfileData
+		for profileIndex := range userProfiles {
+			if userProfiles[profileIndex].UserID == res.UserID {
+				matchedProfile = &userProfiles[profileIndex]
+				break
+			}
+		}
+
+		if matchedProfile != nil {
+			candidateYears := matchedProfile.ExperienceYears
+			jobMinimumYears := res.InferredRequiredYoE
+
+			if jobMinimumYears > 0 {
+				if jobMinimumYears > (candidateYears + 2) {
+					if res.MatchScore > 25 {
+						res.MatchScore = 25
+						res.MatchReasoning = fmt.Sprintf("[Experience Gap Cap] Job requires %d+ YoE (AI inferred), but candidate has %d YoE. Tech stack fit originally scored %d%%. %s", jobMinimumYears, candidateYears, res.MatchScore, res.MatchReasoning)
+					}
+				} else if jobMinimumYears > candidateYears {
+					if res.MatchScore > 45 {
+						res.MatchScore = 45
+						res.MatchReasoning = fmt.Sprintf("[Stretch Role Cap] Job requires %d+ YoE (AI inferred), but candidate has %d YoE. Tech stack fit originally scored %d%%. %s", jobMinimumYears, candidateYears, res.MatchScore, res.MatchReasoning)
+					}
+				}
+			}
+		}
+
 		isMatch := res.MatchScore >= matchScoreMinThreshold
 		upsertErr := s.upsertUserMatch(ctx, res.UserID, res.JobID, res.MatchScore, res.MatchReasoning, isMatch)
 		if upsertErr != nil {
@@ -660,7 +690,8 @@ You MUST output exactly this structure:
       "job_id": "<uuid string>",
       "user_id": "<uuid string>",
       "match_score": <integer 0-100>,
-      "match_reasoning": "<one sentence>",
+      "match_reasoning": "<detailed 2-3 line description detailing location, tech stack, and experience comparison>",
+      "inferred_required_yoe": <integer: minimum required years of experience inferred from JD, title, or requirements>,
       "is_matched": <true|false>
     }
   ]
@@ -883,17 +914,19 @@ func (s *NvidiaNimService) buildMultiJobPrompt(userProfiles []UserProfileData, j
 	currentTimeText := time.Now().Format("January 2006")
 
 	builder.WriteString("Return ONLY a raw JSON object formatted as follows:\n")
-	builder.WriteString("{\n  \"results\": [\n    {\n      \"job_id\": \"<job_id string copied verbatim from JOB LISTINGS below>\",\n      \"user_id\": \"<user_id string copied verbatim from CANDIDATE PROFILES below>\",\n      \"match_score\": 85,\n      \"match_reasoning\": \"short bullet reasoning\",\n      \"is_matched\": true\n    }\n  ]\n}\n\n")
+	builder.WriteString("{\n  \"results\": [\n    {\n      \"job_id\": \"<job_id string copied verbatim from JOB LISTINGS below>\",\n      \"user_id\": \"<user_id string copied verbatim from CANDIDATE PROFILES below>\",\n      \"match_score\": 85,\n      \"match_reasoning\": \"Highly detailed 2-3 line reasoning specifying exact tech stack overlap, candidate base location vs job requirement, and YoE comparison details.\",\n      \"inferred_required_yoe\": 4,\n      \"is_matched\": true\n    }\n  ]\n}\n\n")
 	fmt.Fprintf(&builder, "IMPORTANT: You MUST return exactly %d entries in the \"results\" array — one for every (job × candidate) pair listed below. An empty array or partial array is invalid.\n\n", expectedResultCount)
 
 	builder.WriteString("SCORING RULES — apply in strict priority order; a higher-priority penalty overrides skill match entirely:\n")
 	builder.WriteString("1. LOCATION MISMATCH (HARD CAP): Candidate is India-based. Any job that is US Onsite, US Hybrid, or US-only Remote (explicitly excludes non-US applicants) → cap score at 0–15, regardless of any other signal.\n")
 	builder.WriteString("2. EXPERIENCE GAP (HARD CAP — highest priority penalty):\n")
-	fmt.Fprintf(&builder, "   - Use the provided Candidate Years of Experience (YoE) calculated from their resume, or infer it from the profile/resume relative to the current evaluation date: %s. Infer job's minimum required YoE from the JD (look for phrases like '4+ years', '5-7 years experience', 'Senior', 'Staff', 'Lead', 'Principal', etc.).\n", currentTimeText)
+	fmt.Fprintf(&builder, "   - Use the provided Candidate Years of Experience (YoE) calculated from their resume, or infer it from the profile/resume relative to the current evaluation date: %s. Infer job's minimum required YoE from the JD (look for phrases like '4+ years', '5-7 years experience', etc.).\n", currentTimeText)
+	builder.WriteString("   - If no explicit years of experience are mentioned, infer the required YoE based on the role level norms: Intern/Co-op/Apprentice = 0 YoE; Junior/Associate = 0-2 YoE; Mid-Level/SWE = 2-4 YoE; Senior/Lead/Manager = 4-6 YoE; Staff/Architect = 6-8 YoE; Principal/Director/VP = 8+ YoE.\n")
 	builder.WriteString("   - If the job's minimum required YoE > (candidate YoE + 2): cap score at 0–25. Skill match is IRRELEVANT — a candidate cannot overcome a 3+ year experience deficit.\n")
 	builder.WriteString("   - If the job's minimum required YoE is (candidate YoE + 1) to (candidate YoE + 2): cap score at 26–45. This is a stretch role the candidate cannot realistically get.\n")
-	builder.WriteString("   - Titles like Senior, Staff, Lead, Principal, Architect, Director implicitly require 4+ YoE minimum — treat them as requiring 4 YoE if no explicit number is given.\n")
-	builder.WriteString("3. HIGH MATCH (75–100): ONLY for Entry-Level / Junior / Associate / Mid-Level roles where candidate YoE meets or slightly exceeds the minimum, role is in India or Global Remote, and the tech stack matches the candidate profile.\n\n")
+	builder.WriteString("   - If candidate YoE is perfectly aligned with the required range (candidate YoE >= minimum required YoE), award a strong bonus (+15 to +20 points) to the match score if the tech stack matches.\n")
+	builder.WriteString("3. HIGH MATCH (75–100): ONLY for roles where candidate YoE meets or exceeds the minimum, role location matches, the candidate has a strong tech stack overlap, and they receive the experience range alignment bonus.\n")
+	builder.WriteString("4. DETAILED REASONING REQUIREMENT: The 'match_reasoning' must be a minimum of 2-3 lines of text explaining location verification, tech stack match, and YoE ranges.\n\n")
 
 	builder.WriteString("### CANDIDATE PROFILES\n")
 	for _, profile := range userProfiles {
@@ -1113,6 +1146,7 @@ type cvExperience struct {
 
 type cvSchema struct {
 	Experiences []cvExperience `json:"experiences"`
+	Experience  []cvExperience `json:"experience"`
 }
 
 func calculateTotalExperienceYears(cvText string) int {
@@ -1126,7 +1160,13 @@ func calculateTotalExperienceYears(cvText string) int {
 	var earliestStart time.Time
 	var latestEnd time.Time
 	hasExperience := false
-	for _, exp := range schema.Experiences {
+
+	experiencesList := schema.Experiences
+	if len(experiencesList) == 0 {
+		experiencesList = schema.Experience
+	}
+
+	for _, exp := range experiencesList {
 		start, end, parsed := parseDurationSpan(exp.Duration)
 		if !parsed {
 			continue
