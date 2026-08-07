@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,12 +24,17 @@ import (
 const (
 	defaultNvidiaNimEndpoint        = "https://integrate.api.nvidia.com/v1/chat/completions"
 	defaultNvidiaNimModel           = "minimaxai/minimax-m3"
-	backgroundWorkerBatchSize       = 10
+	backgroundWorkerBatchSize       = 8
 	backgroundTickerIntervalSeconds = 15
 	maxJobDescriptionLength         = 6000
 	matchScoreMinThreshold          = 50
-	maxTargetTokensPerPrompt        = 250000
+	maxTargetTokensPerPrompt        = 150000
 	maxJobsPerBatch                 = 100
+	tokenBucketRatePerMinute        = 30
+	retryBackoffBaseSeconds         = 15
+	retryBackoffMaxSeconds          = 120
+	retryBackoffJitterFraction      = 0.25
+	maxOutputTokensPerBatch         = 90000
 )
 
 // NvidiaNimService manages single-key AI job matching, CV parsing, and queue preemption for NVIDIA NIM API.
@@ -40,8 +47,7 @@ type NvidiaNimService struct {
 	queueMutex             sync.RWMutex
 	isQueuePaused          bool
 	isEvaluationInProgress bool
-	rateLimiterMutex       sync.Mutex
-	lastRequestTime        time.Time
+	tokenBucket            chan struct{}
 }
 
 // UserProfileData contains parsed candidate background data for job matching prompts.
@@ -250,7 +256,9 @@ type nvidiaStreamChunk struct {
 	} `json:"choices"`
 }
 
-// NewNvidiaNimService initializes the single-key NVIDIA NIM service using provided environment values.
+// NewNvidiaNimService initializes the single-key NVIDIA NIM service using provided environment values
+// and starts a background token-bucket goroutine that emits one token every (60/tokenBucketRatePerMinute)
+// seconds, enforcing the global outbound request rate across all concurrent workers.
 func NewNvidiaNimService(db *pgxpool.Pool, rawApiKey string) *NvidiaNimService {
 	apiKey := strings.TrimSpace(rawApiKey)
 	if apiKey == "" {
@@ -260,14 +268,33 @@ func NewNvidiaNimService(db *pgxpool.Pool, rawApiKey string) *NvidiaNimService {
 	if modelName == "" {
 		modelName = defaultNvidiaNimModel
 	}
-	log.Printf("[NvidiaNimService] Initialized with single NVIDIA API Key (Model: %s)", modelName)
-	return &NvidiaNimService{
-		DB:         db,
-		APIKey:     apiKey,
-		Endpoint:   defaultNvidiaNimEndpoint,
-		ModelName:  modelName,
-		HTTPClient: &http.Client{Timeout: 0},
+
+	tokenIntervalSeconds := 60.0 / float64(tokenBucketRatePerMinute)
+	tokenInterval := time.Duration(tokenIntervalSeconds * float64(time.Second))
+
+	service := &NvidiaNimService{
+		DB:          db,
+		APIKey:      apiKey,
+		Endpoint:    defaultNvidiaNimEndpoint,
+		ModelName:   modelName,
+		HTTPClient:  &http.Client{Timeout: 0},
+		tokenBucket: make(chan struct{}, 1),
 	}
+
+	go func() {
+		ticker := time.NewTicker(tokenInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			select {
+			case service.tokenBucket <- struct{}{}:
+			default:
+			}
+		}
+	}()
+
+	log.Printf("[NvidiaNimService] Initialized with single NVIDIA API Key (Model: %s, Rate: %d RPM / 1 token per %.1fs)",
+		modelName, tokenBucketRatePerMinute, tokenIntervalSeconds)
+	return service
 }
 
 // PauseQueue halts dispatching of new background worker batches during interactive MCP/Overleaf operations.
@@ -709,7 +736,7 @@ Violating this format — outputting any text before or after the JSON, using a 
 		Messages:    messages,
 		Temperature: 1.0,
 		TopP:        0.95,
-		MaxTokens:   500000,
+		MaxTokens:   maxOutputTokensPerBatch,
 		Stream:      true,
 		ChatTemplateKwargs: &nvidiaChatTemplateKwargs{
 			ThinkingMode: "disabled",
@@ -757,10 +784,14 @@ func (s *NvidiaNimService) executeNvidiaAPIWithRetry(ctx context.Context, payloa
 	}
 
 	maxAttempts := 3
-	backoffDuration := 3 * time.Second
+	backoffDuration := time.Duration(retryBackoffBaseSeconds) * time.Second
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		s.enforceMinimumRequestSpacing()
+		select {
+		case <-s.tokenBucket:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 
 		log.Printf("[Worker-%d] Posting request to %s (Model: %s, Payload: %d bytes, Attempt: %d/%d)...",
 			workerID, s.Endpoint, payload.Model, len(jsonBytes), attempt, maxAttempts)
@@ -785,8 +816,29 @@ func (s *NvidiaNimService) executeNvidiaAPIWithRetry(ctx context.Context, payloa
 			if attempt == maxAttempts {
 				return nil, fmt.Errorf("HTTP request failed after %d attempts: %w", maxAttempts, errDo)
 			}
-			time.Sleep(backoffDuration)
-			backoffDuration *= 2
+			sleepWithJitter(backoffDuration)
+			backoffDuration = capBackoff(backoffDuration * 2)
+			continue
+		}
+
+		if httpResponse.StatusCode == http.StatusTooManyRequests {
+			bodyBytes, _ := io.ReadAll(httpResponse.Body)
+			retryAfterHeader := httpResponse.Header.Get("Retry-After")
+			httpResponse.Body.Close()
+			log.Printf("[Worker-%d] API returned HTTP 429 (Attempt %d/%d): %s", workerID, attempt, maxAttempts, string(bodyBytes))
+			if attempt == maxAttempts {
+				return nil, fmt.Errorf("NVIDIA API error HTTP 429 after %d attempts: %s", maxAttempts, string(bodyBytes))
+			}
+			sleepDuration := backoffDuration
+			if retryAfterSeconds, parseErr := strconv.Atoi(retryAfterHeader); parseErr == nil && retryAfterSeconds > 0 {
+				retryAfterDuration := time.Duration(retryAfterSeconds) * time.Second
+				if retryAfterDuration > sleepDuration {
+					sleepDuration = retryAfterDuration
+				}
+			}
+			log.Printf("[Worker-%d] Backing off for %v before retry...", workerID, sleepDuration.Truncate(time.Millisecond))
+			sleepWithJitter(sleepDuration)
+			backoffDuration = capBackoff(backoffDuration * 2)
 			continue
 		}
 
@@ -797,8 +849,8 @@ func (s *NvidiaNimService) executeNvidiaAPIWithRetry(ctx context.Context, payloa
 			if attempt == maxAttempts {
 				return nil, fmt.Errorf("NVIDIA API error HTTP %d: %s", httpResponse.StatusCode, string(bodyBytes))
 			}
-			time.Sleep(backoffDuration)
-			backoffDuration *= 2
+			sleepWithJitter(backoffDuration)
+			backoffDuration = capBackoff(backoffDuration * 2)
 			continue
 		}
 
@@ -892,16 +944,21 @@ func (s *NvidiaNimService) executeNvidiaAPIWithRetry(ctx context.Context, payloa
 	return nil, fmt.Errorf("NVIDIA API call exceeded max retries")
 }
 
-func (s *NvidiaNimService) enforceMinimumRequestSpacing() {
-	s.rateLimiterMutex.Lock()
-	defer s.rateLimiterMutex.Unlock()
+// sleepWithJitter sleeps for the given duration scaled by a uniform random jitter in
+// [1 - retryBackoffJitterFraction, 1 + retryBackoffJitterFraction], so simultaneous
+// workers desynchronise their retries and avoid thundering-herd re-collisions.
+func sleepWithJitter(duration time.Duration) {
+	jitterMultiplier := 1.0 + (rand.Float64()*2-1)*retryBackoffJitterFraction
+	time.Sleep(time.Duration(float64(duration) * jitterMultiplier))
+}
 
-	minimumInterval := 500 * time.Millisecond
-	elapsed := time.Since(s.lastRequestTime)
-	if elapsed < minimumInterval {
-		time.Sleep(minimumInterval - elapsed)
+// capBackoff returns the given duration clamped to retryBackoffMaxSeconds.
+func capBackoff(duration time.Duration) time.Duration {
+	maximum := time.Duration(retryBackoffMaxSeconds) * time.Second
+	if duration > maximum {
+		return maximum
 	}
-	s.lastRequestTime = time.Now()
+	return duration
 }
 
 // buildMultiJobPrompt constructs the evaluation prompt for a batch of jobs against a set of
