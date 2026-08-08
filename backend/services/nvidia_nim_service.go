@@ -26,14 +26,14 @@ const (
 	defaultNvidiaNimModel           = "deepseek-ai/deepseek-v4-flash-0731"
 	backgroundWorkerBatchSize       = 8
 	backgroundTickerIntervalSeconds = 15
-	maxJobDescriptionLength         = 6000
-	matchScoreMinThreshold          = 50
+	maxJobDescriptionLength         = 10000
+	matchScoreMinThreshold          = 30
 	maxTargetTokensPerPrompt        = 250000
-	maxJobsPerBatch                 = 100
+	maxJobsPerBatch                 = 300
 	tokenBucketRatePerMinute        = 30
-	retryBackoffBaseSeconds         = 15
-	retryBackoffMaxSeconds          = 120
-	retryBackoffJitterFraction      = 0.25
+	retryBackoffBaseSeconds         = 120
+	retryBackoffMaxSeconds          = 300
+	retryBackoffJitterFraction      = 0.55
 	maxOutputTokensPerBatch         = 90000
 )
 
