@@ -23,12 +23,12 @@ import (
 
 const (
 	defaultNvidiaNimEndpoint        = "https://integrate.api.nvidia.com/v1/chat/completions"
-	defaultNvidiaNimModel           = "minimaxai/minimax-m3"
+	defaultNvidiaNimModel           = "deepseek-ai/deepseek-v4-flash-0731"
 	backgroundWorkerBatchSize       = 8
 	backgroundTickerIntervalSeconds = 15
 	maxJobDescriptionLength         = 6000
 	matchScoreMinThreshold          = 50
-	maxTargetTokensPerPrompt        = 150000
+	maxTargetTokensPerPrompt        = 250000
 	maxJobsPerBatch                 = 100
 	tokenBucketRatePerMinute        = 30
 	retryBackoffBaseSeconds         = 15
