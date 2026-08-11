@@ -27,6 +27,11 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Create Empty Env Asset File
+        run: |
+          cd client
+          touch .env
+
       - name: Install Client Dependencies
         run: |
           cd client
