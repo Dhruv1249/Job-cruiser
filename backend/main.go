@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -130,9 +131,16 @@ func main() {
 
 	// Initialize the default Gin web router with basic logging and crash-recovery built in.
 	webRouter := gin.Default()
+	webRouter.Use(middleware.CORSMiddleware())
 
 	public := webRouter.Group("/api")
 	{
+		public.GET("/health", func(ginContext *gin.Context) {
+			ginContext.JSON(http.StatusOK, gin.H{
+				"status": "ok",
+				"time":   time.Now().Format(time.RFC3339),
+			})
+		})
 		public.POST("/signup", authHandler.Signup)
 		public.POST("/login", authHandler.Login)
 		public.POST("/auth/google", authHandler.GoogleLogin)

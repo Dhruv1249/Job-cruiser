@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -12,7 +13,25 @@ class ApiService {
   final Logger _logger = Logger();
 
   static const String _tokenKey = 'jwt_token';
-  final String _baseUrl = dotenv.env['API_BASE_URL'] ?? "http://192.168.1.12:8080/api";
+  final String _baseUrl = _resolveBaseUrl();
+
+  static String _resolveBaseUrl() {
+    const compileTimeUrl = String.fromEnvironment('API_BASE_URL');
+    if (compileTimeUrl.isNotEmpty) {
+      return compileTimeUrl;
+    }
+    final envUrl = dotenv.env['API_BASE_URL'];
+    if (envUrl != null && envUrl.isNotEmpty) {
+      return envUrl;
+    }
+    if (kIsWeb) {
+      final origin = Uri.base.origin;
+      if (origin.isNotEmpty && !origin.startsWith('file://')) {
+        return '$origin/api';
+      }
+    }
+    return 'http://localhost:8080/api';
+  }
 
   ApiService() {
     _dio.options.baseUrl = _baseUrl;

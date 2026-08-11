@@ -21,9 +21,17 @@ class _AuthScreenState extends State<AuthScreen> {
 
   bool _isLoading = false;
 
+  static String _resolveGoogleClientId() {
+    const compileTimeId = String.fromEnvironment('GOOGLE_CLIENT_ID');
+    if (compileTimeId.isNotEmpty) {
+      return compileTimeId;
+    }
+    return dotenv.env['GOOGLE_CLIENT_ID'] ?? '';
+  }
+
   final GoogleSignIn _googleSignIn = GoogleSignIn(
-  serverClientId: dotenv.env['GOOGLE_CLIENT_ID'],
-);
+    serverClientId: _resolveGoogleClientId(),
+  );
   @override
   void dispose() {
     // Controllers must be disposed to prevent memory leaks
