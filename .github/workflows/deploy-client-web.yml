@@ -43,11 +43,14 @@ jobs:
           flutter test
 
       - name: Build Flutter Web Release
+        env:
+          RAW_API_URL: ${{ secrets.API_BASE_URL }}
+          RAW_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
         run: |
           cd client
-          flutter build web --release \
-            --dart-define=API_BASE_URL="${{ secrets.API_BASE_URL }}" \
-            --dart-define=GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}"
+          API_URL=$(echo "$RAW_API_URL" | tr -d '\r\n')
+          CLIENT_ID=$(echo "$RAW_CLIENT_ID" | tr -d '\r\n')
+          flutter build web --release --dart-define=API_BASE_URL="$API_URL" --dart-define=GOOGLE_CLIENT_ID="$CLIENT_ID"
 
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
