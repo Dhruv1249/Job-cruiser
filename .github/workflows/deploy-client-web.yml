@@ -58,5 +58,5 @@ jobs:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
           firebaseServiceAccount: '${{ secrets.GCP_SA_KEY }}'
           channelId: live
-          projectId: jobcruiser
+          projectId: '${{ secrets.GCP_PROJECT_ID }}'
           entryPoint: client
