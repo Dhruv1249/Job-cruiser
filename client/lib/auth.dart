@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'main.dart' show AppColors, JobCruiserShell;
 import 'services/api_service.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -30,7 +31,8 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(
-    serverClientId: _resolveGoogleClientId(),
+    clientId: _resolveGoogleClientId(),
+    serverClientId: kIsWeb ? null : _resolveGoogleClientId(),
   );
   @override
   void dispose() {
@@ -138,12 +140,6 @@ class _AuthScreenState extends State<AuthScreen> {
       );
     }
   }
-  Future<void> _handleGuestLogin() async {
-    // Completely bypass the API and jump straight into the app
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const JobCruiserShell()),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -237,16 +233,6 @@ class _AuthScreenState extends State<AuthScreen> {
                       side: const BorderSide(color: AppColors.outlineVariant),
                     ),
                   ),
-                ),
-                const SizedBox(height: 16),
-
-                // Guest Login Button
-                TextButton(
-                  onPressed: _isLoading ? null : _handleGuestLogin,
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.secondary,
-                  ),
-                  child: const Text('Continue as Guest'),
                 ),
               ],
             ),
