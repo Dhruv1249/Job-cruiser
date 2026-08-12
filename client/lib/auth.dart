@@ -94,13 +94,15 @@ class _AuthScreenState extends State<AuthScreen> {
       }
 
       final GoogleSignInAuthentication auth = await account.authentication;
-      final String? idToken = auth.idToken;
+      final String? token = (auth.idToken != null && auth.idToken!.isNotEmpty)
+          ? auth.idToken
+          : auth.accessToken;
 
-      if (idToken == null) {
-        throw Exception("No ID token received");
+      if (token == null || token.isEmpty) {
+        throw Exception("No authentication token received");
       }
 
-      final response = await _apiService.googleLogin(idToken);
+      final response = await _apiService.googleLogin(token);
 
       if (!mounted) return;
 

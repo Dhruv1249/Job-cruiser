@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
@@ -162,19 +163,50 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 	}
 
 	clientID := os.Getenv("GOOGLE_CLIENT_ID")
+	var email, name, googleID, avatar string
+
 	payload, err := idtoken.Validate(context.Background(), req.IDToken, clientID)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Google token"})
-		return
-	}
+	if err == nil {
+		email = payload.Claims["email"].(string)
+		if n, ok := payload.Claims["name"].(string); ok {
+			name = n
+		}
+		googleID = payload.Claims["sub"].(string)
+		if val, ok := payload.Claims["picture"]; ok {
+			avatar = val.(string)
+		}
+	} else {
+		// Fallback for access_token (common on Flutter Web GIS)
+		userInfoURL := "https://www.googleapis.com/oauth2/v3/userinfo"
+		httpReq, httpErr := http.NewRequestWithContext(context.Background(), "GET", userInfoURL, nil)
+		if httpErr != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Google token"})
+			return
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+req.IDToken)
 
-	email := payload.Claims["email"].(string)
-	name := payload.Claims["name"].(string)
-	googleID := payload.Claims["sub"].(string)
+		resp, respErr := http.DefaultClient.Do(httpReq)
+		if respErr != nil || resp.StatusCode != http.StatusOK {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Google token"})
+			return
+		}
+		defer resp.Body.Close()
 
-	var avatar string
-	if val, ok := payload.Claims["picture"]; ok {
-		avatar = val.(string)
+		var userInfo struct {
+			Sub     string `json:"sub"`
+			Name    string `json:"name"`
+			Email   string `json:"email"`
+			Picture string `json:"picture"`
+		}
+		if jsonErr := json.NewDecoder(resp.Body).Decode(&userInfo); jsonErr != nil || userInfo.Email == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Google token response"})
+			return
+		}
+
+		email = userInfo.Email
+		name = userInfo.Name
+		googleID = userInfo.Sub
+		avatar = userInfo.Picture
 	}
 
 	var userID string
