@@ -17,9 +17,12 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
 
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
+  final TextEditingController _manualKeywordController = TextEditingController();
+  final TextEditingController _manualCategoryController = TextEditingController();
 
   List<Map<String, dynamic>> _whitelistedEmails = [];
   List<Map<String, dynamic>> _pendingKeywords = [];
+  List<Map<String, dynamic>> _masterKeywords = [];
   List<Map<String, dynamic>> _registeredUsers = [];
   Map<String, dynamic>? _scraperStats;
   bool _isLoading = true;
@@ -36,6 +39,8 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
     _tabController.dispose();
     _emailController.dispose();
     _notesController.dispose();
+    _manualKeywordController.dispose();
+    _manualCategoryController.dispose();
     super.dispose();
   }
 
@@ -46,6 +51,7 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
 
     final emails = await _apiService.fetchWhitelistedEmails();
     final keywords = await _apiService.fetchPendingKeywords();
+    final masterKw = await _apiService.fetchMasterKeywordsForAdmin();
     final users = await _apiService.fetchUsersForAdmin();
     final stats = await _apiService.fetchScraperStats();
 
@@ -54,10 +60,47 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
     setState(() {
       _whitelistedEmails = emails;
       _pendingKeywords = keywords;
+      _masterKeywords = masterKw;
       _registeredUsers = users;
       _scraperStats = stats;
       _isLoading = false;
     });
+  }
+
+  Future<void> _addManualMasterKeyword() async {
+    final kw = _manualKeywordController.text.trim();
+    if (kw.isEmpty) return;
+
+    final cat = _manualCategoryController.text.trim();
+    final success = await _apiService.addMasterKeyword(kw, cat.isEmpty ? 'manual' : cat);
+
+    if (!mounted) return;
+
+    if (success) {
+      _manualKeywordController.clear();
+      _manualCategoryController.clear();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Added keyword "$kw" to master dictionary')),
+      );
+      _loadAdminData();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to add keyword (it may already exist)')),
+      );
+    }
+  }
+
+  Future<void> _deleteMasterKeyword(int id, String keyword) async {
+    final success = await _apiService.deleteMasterKeyword(id);
+
+    if (!mounted) return;
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Deleted keyword "$keyword"')),
+      );
+      _loadAdminData();
+    }
   }
 
   Future<void> _toggleUserAIMatching(String userId, bool enabled) async {
@@ -293,6 +336,74 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Section 1: Manual Keyword Creation Form
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.outlineVariant),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Add Master Keyword Manually',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primary,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: _manualKeywordController,
+                        decoration: const InputDecoration(
+                          labelText: 'Keyword (e.g. rust, Kubernetes)',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 1,
+                      child: TextField(
+                        controller: _manualCategoryController,
+                        decoration: const InputDecoration(
+                          labelText: 'Category (Optional)',
+                          hintText: 'general',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _addManualMasterKeyword,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add Master Keyword'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Section 2: Pending Recommendations
           const Text(
             'Pending Keyword Recommendations from Gemini Flash',
             style: TextStyle(
@@ -301,20 +412,21 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
               color: AppColors.primary,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           const Text(
-            'Extracted from new candidate CVs and bio text boxes. Approved keywords update the master dictionary.',
+            'Extracted from candidate CVs and bio text. Approving adds them to the master dictionary.',
             style: TextStyle(
               fontSize: 13,
               color: AppColors.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           _pendingKeywords.isEmpty
               ? const Padding(
-                  padding: EdgeInsets.all(32),
-                  child: Center(
-                    child: Text('No pending keyword suggestions for review.'),
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    'No pending keyword suggestions for review.',
+                    style: TextStyle(color: AppColors.onSurfaceVariant, fontStyle: FontStyle.italic),
                   ),
                 )
               : ListView.builder(
@@ -353,6 +465,72 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
                               ),
                             ),
                           ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+          const SizedBox(height: 24),
+
+          // Section 3: Active Master Keywords
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Current Master Keywords (${_masterKeywords.length})',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.primary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Keywords used by the scraper orchestrator and AI match engine.',
+            style: TextStyle(
+              fontSize: 13,
+              color: AppColors.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _masterKeywords.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    'No active master keywords.',
+                    style: TextStyle(color: AppColors.onSurfaceVariant, fontStyle: FontStyle.italic),
+                  ),
+                )
+              : ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _masterKeywords.length,
+                  itemBuilder: (context, index) {
+                    final item = _masterKeywords[index];
+                    final int id = (item['id'] as num?)?.toInt() ?? 0;
+                    final String kw = item['keyword'] as String? ?? '';
+                    final String cat = item['category'] as String? ?? 'general';
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: const BorderSide(color: AppColors.outlineVariant),
+                      ),
+                      child: ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.label_outline, size: 20, color: AppColors.primary),
+                        title: Text(
+                          kw,
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                        ),
+                        subtitle: Text('Category: $cat', style: const TextStyle(fontSize: 11)),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
+                          onPressed: () => _deleteMasterKeyword(id, kw),
                         ),
                       ),
                     );

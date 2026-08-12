@@ -251,6 +251,8 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _isLoading = true;
   bool _isFetchingMore = false;
   bool _hasMore = true;
+  bool _isMatchEngineRunning = false;
+  int _pendingMatchCount = 0;
   int _minScoreFilter = 0;
   String _viewFilterMode = 'all'; // 'all', 'unviewed', 'viewed'
   String _searchQuery = '';
@@ -290,7 +292,8 @@ class _MyHomePageState extends State<MyHomePage> {
       _hasMore = true;
     });
 
-    final jobs = await _apiService.fetchMatchedJobs(
+    final statusFuture = _apiService.fetchMatchStatus();
+    final jobsFuture = _apiService.fetchMatchedJobs(
       minScore: _minScoreFilter,
       viewedOnly: _viewFilterMode == 'viewed',
       unviewedOnly: _viewFilterMode == 'unviewed',
@@ -298,10 +301,16 @@ class _MyHomePageState extends State<MyHomePage> {
       limit: 50,
     );
 
+    final results = await Future.wait([statusFuture, jobsFuture]);
+    final status = results[0] as Map<String, dynamic>;
+    final jobs = results[1] as List<MatchedJob>;
+
     if (!mounted) return;
 
     setState(() {
       _matchedJobs = jobs;
+      _isMatchEngineRunning = status['is_evaluating'] == true;
+      _pendingMatchCount = (status['pending_count'] as num?)?.toInt() ?? 0;
       _isLoading = false;
     });
   }
@@ -384,7 +393,7 @@ class _MyHomePageState extends State<MyHomePage> {
         color: AppColors.primary,
         child: Column(
           children: [
-            _buildBackgroundStatusBanner(),
+            if (_isMatchEngineRunning) _buildBackgroundStatusBanner(),
             _buildSearchBar(),
             _buildScoreFilterChips(),
             Expanded(
@@ -459,22 +468,26 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Widget _buildBackgroundStatusBanner() {
+    final message = _pendingMatchCount > 0
+        ? 'AI Match Engine is processing $_pendingMatchCount pending jobs against your profile. Pull down to refresh.'
+        : 'AI Match Engine is processing jobs against your profile. Pull down to refresh.';
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       color: AppColors.primaryContainer.withValues(alpha: 0.15),
-      child: const Row(
+      child: Row(
         children: [
-          SizedBox(
+          const SizedBox(
             width: 14,
             height: 14,
             child: CircularProgressIndicator(strokeWidth: 2),
           ),
-          SizedBox(width: 10),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'AI Match Engine is processing 10,000+ jobs against your profile. Pull down to refresh.',
-              style: TextStyle(
+              message,
+              style: const TextStyle(
                 fontSize: 12,
                 color: AppColors.primary,
                 fontWeight: FontWeight.w500,
@@ -825,7 +838,17 @@ class _MyHomePageState extends State<MyHomePage> {
                     ),
                   ),
                 ],
-                if (job.postedDate.isNotEmpty) ...[
+                if (job.scrapedAgoText.isNotEmpty) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    '• Scraped ${job.scrapedAgoText}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.onSurfaceVariant,
+                    ),
+                  ),
+                ] else if (job.postedDate.isNotEmpty) ...[
                   const SizedBox(width: 6),
                   Text(
                     '• ${job.postedDate}',

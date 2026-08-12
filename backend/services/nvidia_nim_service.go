@@ -1055,6 +1055,7 @@ func (s *NvidiaNimService) fetchUnevaluatedJobs(ctx context.Context) ([]JobSnipp
 		FROM jobs j
 		LEFT JOIN companies c ON j.company_id = c.id
 		WHERE j.ai_evaluated = false
+		  AND j.scraped_at >= NOW() - INTERVAL '14 days'
 		ORDER BY j.scraped_at DESC;
 	`
 	rows, errQuery := s.DB.Query(ctx, sqlQuery)
@@ -1080,6 +1081,7 @@ func (s *NvidiaNimService) fetchJobsUnmatchedForUser(ctx context.Context, target
 		FROM jobs j
 		LEFT JOIN companies c ON j.company_id = c.id
 		WHERE j.ai_evaluated = true
+		  AND j.scraped_at >= NOW() - INTERVAL '14 days'
 		  AND NOT EXISTS (
 			SELECT 1 FROM user_job_matches ujm
 			WHERE ujm.job_id = j.id AND ujm.user_id = $1

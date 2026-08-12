@@ -11,6 +11,7 @@ class MatchedJob {
     required this.source,
     required this.url,
     required this.postedDate,
+    this.scrapedAt = '',
     required this.seniority,
     required this.summary,
     this.rawDescription = '',
@@ -34,6 +35,7 @@ class MatchedJob {
   final String source;
   final String url;
   final String postedDate;
+  final String scrapedAt;
   final String seniority;
   final String summary;
   final String rawDescription;
@@ -63,6 +65,7 @@ class MatchedJob {
       source: source,
       url: url,
       postedDate: postedDate,
+      scrapedAt: scrapedAt,
       seniority: seniority,
       summary: summary,
       rawDescription: rawDescription,
@@ -110,6 +113,7 @@ class MatchedJob {
       source: json['source'] as String? ?? '',
       url: json['url'] as String? ?? '',
       postedDate: json['posted_date'] as String? ?? '',
+      scrapedAt: json['scraped_at'] as String? ?? '',
       seniority: json['seniority'] as String? ?? '',
       summary: json['summary'] as String? ?? '',
       rawDescription: json['raw_description'] as String? ?? json['raw_desc'] as String? ?? '',
@@ -136,5 +140,28 @@ class MatchedJob {
       return 'Up to \$$salaryMax';
     }
     return '';
+  }
+
+  /// Relative human-readable string indicating when the job listing was scraped.
+  String get scrapedAgoText {
+    if (scrapedAt.isEmpty) return '';
+    try {
+      final parsedDate = DateTime.tryParse(scrapedAt.replaceAll(' ', 'T'));
+      if (parsedDate == null) return scrapedAt;
+
+      final diff = DateTime.now().difference(parsedDate);
+      if (diff.inMinutes < 60) {
+        final mins = diff.inMinutes <= 0 ? 1 : diff.inMinutes;
+        return '$mins m ago';
+      } else if (diff.inHours < 24) {
+        return '${diff.inHours}h ago';
+      } else if (diff.inDays == 1) {
+        return 'Yesterday';
+      } else {
+        return '${diff.inDays}d ago';
+      }
+    } catch (_) {
+      return scrapedAt;
+    }
   }
 }

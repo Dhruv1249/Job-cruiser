@@ -411,6 +411,60 @@ class ApiService {
     }
   }
 
+  /// Fetches current AI match engine status (whether background processing is active).
+  Future<Map<String, dynamic>> fetchMatchStatus() async {
+    try {
+      final response = await _dio.get('/jobs/match-status');
+      if (response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return {'is_evaluating': false, 'pending_count': 0};
+    } catch (e) {
+      _logger.e(e);
+      return {'is_evaluating': false, 'pending_count': 0};
+    }
+  }
+
+  /// Fetches active master keywords dictionary for Master Admin.
+  Future<List<Map<String, dynamic>>> fetchMasterKeywordsForAdmin() async {
+    try {
+      final response = await _dio.get('/admin/keywords/master');
+      final data = response.data;
+      if (data != null && data['data'] is List) {
+        return List<Map<String, dynamic>>.from(data['data'] as List);
+      }
+      return [];
+    } catch (e) {
+      _logger.e(e);
+      return [];
+    }
+  }
+
+  /// Manually adds a new keyword to the master dictionary.
+  Future<bool> addMasterKeyword(String keyword, String category) async {
+    try {
+      final response = await _dio.post('/admin/keywords/manual', data: {
+        'keyword': keyword,
+        'category': category,
+      });
+      return response.statusCode == 201 || response.statusCode == 200;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
+
+  /// Deletes a master keyword by ID.
+  Future<bool> deleteMasterKeyword(int id) async {
+    try {
+      final response = await _dio.delete('/admin/keywords/master/$id');
+      return response.statusCode == 200;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
+
   /// Saves self-hosted open-overleaf configuration.
   Future<bool> saveOverleafConfig({
     required String deploymentUrl,
