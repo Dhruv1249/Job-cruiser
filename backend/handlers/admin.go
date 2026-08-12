@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Dhruv1249/Job-cruiser/backend/services"
@@ -206,6 +207,115 @@ func (h *AdminHandler) ApproveKeyword(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Keyword recommendation updated"})
+}
+
+type AddMasterKeywordRequest struct {
+	Keyword  string `json:"keyword" binding:"required"`
+	Category string `json:"category"`
+}
+
+/*
+GetMasterKeywordsForAdmin retrieves all current master keywords from the dictionary.
+*/
+func (h *AdminHandler) GetMasterKeywordsForAdmin(c *gin.Context) {
+	if !h.EnsureMasterAdmin(c) {
+		return
+	}
+
+	query := `
+		SELECT id, keyword, category, created_at
+		FROM master_keywords
+		ORDER BY keyword ASC;
+	`
+	rows, err := h.DB.Query(c.Request.Context(), query)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch master keywords"})
+		return
+	}
+	defer rows.Close()
+
+	var list []gin.H
+	for rows.Next() {
+		var id int
+		var kw, category, createdAt string
+		if err := rows.Scan(&id, &kw, &category, &createdAt); err == nil {
+			list = append(list, gin.H{
+				"id":         id,
+				"keyword":    kw,
+				"category":   category,
+				"created_at": createdAt,
+			})
+		}
+	}
+	if list == nil {
+		list = []gin.H{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": list})
+}
+
+/*
+AddMasterKeyword manually inserts a new keyword into the master dictionary.
+*/
+func (h *AdminHandler) AddMasterKeyword(c *gin.Context) {
+	if !h.EnsureMasterAdmin(c) {
+		return
+	}
+
+	var req AddMasterKeywordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Keyword required"})
+		return
+	}
+
+	cleanKeyword := strings.TrimSpace(req.Keyword)
+	if cleanKeyword == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Keyword cannot be empty"})
+		return
+	}
+
+	cat := strings.TrimSpace(req.Category)
+	if cat == "" {
+		cat = "manual"
+	}
+
+	query := `
+		INSERT INTO master_keywords (keyword, category)
+		VALUES (LOWER($1), $2)
+		ON CONFLICT (keyword) DO NOTHING
+		RETURNING id;
+	`
+	var id int
+	err := h.DB.QueryRow(c.Request.Context(), query, cleanKeyword, cat).Scan(&id)
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Keyword already exists in master dictionary"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Master keyword added successfully",
+		"id":      id,
+		"keyword": cleanKeyword,
+	})
+}
+
+/*
+DeleteMasterKeyword removes a keyword from the master dictionary by ID.
+*/
+func (h *AdminHandler) DeleteMasterKeyword(c *gin.Context) {
+	if !h.EnsureMasterAdmin(c) {
+		return
+	}
+
+	id := c.Param("id")
+	query := `DELETE FROM master_keywords WHERE id = $1;`
+	_, err := h.DB.Exec(c.Request.Context(), query, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete keyword"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Master keyword deleted"})
 }
 
 type ToggleAIMatchingRequest struct {

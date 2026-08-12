@@ -334,6 +334,8 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
                   _buildInfoBadge(Icons.workspace_premium_outlined, job.seniority),
                 if (job.salaryText.isNotEmpty)
                   _buildInfoBadge(Icons.attach_money, job.salaryText),
+                if (job.scrapedAgoText.isNotEmpty)
+                  _buildInfoBadge(Icons.schedule_outlined, 'Scraped ${job.scrapedAgoText}'),
                 if (job.source.isNotEmpty)
                   _buildInfoBadge(Icons.source_outlined, 'Source: ${job.source}'),
               ],

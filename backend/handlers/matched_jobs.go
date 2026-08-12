@@ -32,6 +32,7 @@ type MatchedJobResponse struct {
 	Source            string   `json:"source"`
 	URL               string   `json:"url"`
 	PostedDate        string   `json:"posted_date"`
+	ScrapedAt         string   `json:"scraped_at"`
 	Seniority         string   `json:"seniority"`
 	Summary           string   `json:"summary"`
 	RawDescription    string   `json:"raw_description"`
@@ -49,7 +50,7 @@ type MatchedJobResponse struct {
 }
 
 /*
-GetMatchedJobs returns jobs evaluated for the authenticated user.
+GetMatchedJobs returns jobs evaluated for the authenticated user within the 14-day retention window.
 When viewed_only=true, orders strictly by ujv.viewed_at DESC (latest viewed first).
 Otherwise, orders by match_score DESC, unviewed first, and scraped date DESC.
 */
@@ -84,6 +85,9 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 	var conditions []string
 	var args []interface{}
 	args = append(args, userID)
+
+	// Enforce 14-day retention policy window
+	conditions = append(conditions, "j.scraped_at >= NOW() - INTERVAL '14 days'")
 
 	if unviewedOnly {
 		conditions = append(conditions, "ujv.viewed_at IS NULL")
@@ -131,6 +135,7 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 			COALESCE(j.source, ''),
 			j.url,
 			COALESCE(j.posted_date, ''),
+			COALESCE(j.scraped_at::text, ''),
 			COALESCE(ujm.seniority, ''),
 			COALESCE(j.summary, ''),
 			COALESCE(j.raw_desc, ''),
@@ -174,6 +179,7 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 			&job.Source,
 			&job.URL,
 			&job.PostedDate,
+			&job.ScrapedAt,
 			&job.Seniority,
 			&job.Summary,
 			&job.RawDescription,
@@ -217,3 +223,32 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 		"count": len(matchedJobs),
 	})
 }
+
+/*
+GetMatchStatus checks whether AI matching evaluations are pending or active for recent jobs.
+*/
+func (h *MatchedJobsHandler) GetMatchStatus(c *gin.Context) {
+	var count int
+	query := `
+		SELECT COUNT(*) 
+		FROM jobs 
+		WHERE ai_evaluated = false 
+		  AND scraped_at >= NOW() - INTERVAL '14 days';
+	`
+	err := h.DB.QueryRow(c.Request.Context(), query).Scan(&count)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"is_evaluating": false,
+			"pending_count": 0,
+			"error":         "Failed to query match engine status",
+		})
+		return
+	}
+
+	isEvaluating := count > 0
+	c.JSON(http.StatusOK, gin.H{
+		"is_evaluating": isEvaluating,
+		"pending_count": count,
+	})
+}
+

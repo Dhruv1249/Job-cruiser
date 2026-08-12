@@ -30,13 +30,14 @@ func (h *JobHandler) GetJobs(c *gin.Context) {
 
 	offset := (page - 1) * limit
 
-	// Updated query: Replaced salary and score with salary_min, salary_max, currency
+	// Fetch latest scraped jobs within the 14-day retention window
 	query := `
 		SELECT j.id, j.company_id, COALESCE(comp.name, ''), j.title, j.location, j.salary_min, j.salary_max, j.currency, 
 		       j.experience_required, j.job_type, j.is_easy_apply, j.is_remote, j.source, 
 		       j.url, j.posted_date, j.tags, COALESCE(j.summary, ''), COALESCE(j.raw_desc, ''), j.scraped_at 
 		FROM jobs j
 		LEFT JOIN companies comp ON j.company_id = comp.id
+		WHERE j.scraped_at >= NOW() - INTERVAL '14 days'
 		ORDER BY j.scraped_at DESC 
 		LIMIT $1 OFFSET $2;
 	`
