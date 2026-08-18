@@ -348,8 +348,13 @@ func InitSchema(databasePool *pgxpool.Pool) error {
 		"kubernetes engineer junior", "aws backend engineer", "software engineer cloud",
 		"software engineer infrastructure", "software engineer",
 	}
-	for _, kw := range scraperKeywords {
-		_, _ = databasePool.Exec(ctx, "INSERT INTO master_keywords (keyword, category) VALUES ($1, 'scraper') ON CONFLICT (keyword) DO NOTHING;", kw)
+
+	var existingCount int
+	_ = databasePool.QueryRow(ctx, "SELECT COUNT(*) FROM master_keywords;").Scan(&existingCount)
+	if existingCount == 0 {
+		for _, kw := range scraperKeywords {
+			_, _ = databasePool.Exec(ctx, "INSERT INTO master_keywords (keyword, category) VALUES ($1, 'scraper') ON CONFLICT (keyword) DO NOTHING;", kw)
+		}
 	}
 
 	return nil

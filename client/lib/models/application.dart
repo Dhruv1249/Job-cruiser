@@ -10,6 +10,9 @@ class JobApplication {
     this.appliedAt,
     this.companyName,
     this.matchScore,
+    this.url,
+    this.isRemote = false,
+    this.seniority,
   });
 
   final String applicationId;
@@ -21,6 +24,9 @@ class JobApplication {
   final String? appliedAt;
   final String? companyName;
   final int? matchScore;
+  final String? url;
+  final bool isRemote;
+  final String? seniority;
 
   /// Creates a [JobApplication] instance from a JSON map.
   factory JobApplication.fromJson(Map<String, dynamic> json) {
@@ -34,6 +40,9 @@ class JobApplication {
       appliedAt: json['applied_at'] as String?,
       companyName: json['company_name'] as String? ?? json['company'] as String?,
       matchScore: (json['match_score'] as num?)?.toInt(),
+      url: json['url'] as String?,
+      isRemote: json['is_remote'] as bool? ?? false,
+      seniority: json['seniority'] as String?,
     );
   }
 

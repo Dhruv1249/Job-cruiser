@@ -92,6 +92,64 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
     );
   }
 
+  Future<void> _handleDismissJob() async {
+    final activeJob = _activeJob;
+    if (activeJob == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hide this job?'),
+        content: Text(
+          'Hide "${activeJob.title}" at "${activeJob.company}" from your feed? It will stay safely stored in the database, but won\'t appear in your matches.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Hide Job'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final success = await _apiService.dismissJob(activeJob.jobId);
+    if (!mounted) return;
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Job "${activeJob.title}" hidden from feed'),
+          action: SnackBarAction(
+            label: 'Undo',
+            textColor: Colors.amber,
+            onPressed: () {
+              _apiService.undismissJob(activeJob.jobId);
+            },
+          ),
+        ),
+      );
+      if (widget.onBackToInbox != null) {
+        widget.onBackToInbox!();
+      } else {
+        Navigator.maybePop(context);
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to hide job. Please try again.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final job = _activeJob;
@@ -174,6 +232,14 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
           fontWeight: FontWeight.w700,
         ),
       ),
+      actions: [
+        if (_activeJob != null)
+          IconButton(
+            icon: const Icon(Icons.visibility_off_outlined, color: AppColors.onSurfaceVariant),
+            tooltip: 'Hide / Dismiss this Job',
+            onPressed: _handleDismissJob,
+          ),
+      ],
     );
   }
 

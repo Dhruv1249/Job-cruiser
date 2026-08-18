@@ -49,7 +49,7 @@ func (h *AdminHandler) GetWhitelistedEmails(c *gin.Context) {
 		return
 	}
 
-	query := `SELECT id, email, COALESCE(notes, ''), created_at FROM whitelisted_emails ORDER BY created_at DESC;`
+	query := `SELECT id, email, COALESCE(notes, ''), created_at::text FROM whitelisted_emails ORDER BY created_at DESC;`
 	rows, err := h.DB.Query(context.Background(), query)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch whitelisted emails"})
@@ -142,7 +142,7 @@ func (h *AdminHandler) GetPendingKeywords(c *gin.Context) {
 	}
 
 	query := `
-		SELECT id, keyword, status, created_at
+		SELECT id, keyword, status, created_at::text
 		FROM pending_keyword_suggestions
 		WHERE status = 'pending'
 		ORDER BY created_at DESC;
@@ -223,7 +223,7 @@ func (h *AdminHandler) GetMasterKeywordsForAdmin(c *gin.Context) {
 	}
 
 	query := `
-		SELECT id, keyword, category, created_at
+		SELECT id, keyword, category, created_at::text
 		FROM master_keywords
 		ORDER BY keyword ASC;
 	`
@@ -268,7 +268,7 @@ func (h *AdminHandler) AddMasterKeyword(c *gin.Context) {
 		return
 	}
 
-	cleanKeyword := strings.TrimSpace(req.Keyword)
+	cleanKeyword := strings.ToLower(strings.TrimSpace(req.Keyword))
 	if cleanKeyword == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Keyword cannot be empty"})
 		return
@@ -276,12 +276,19 @@ func (h *AdminHandler) AddMasterKeyword(c *gin.Context) {
 
 	cat := strings.TrimSpace(req.Category)
 	if cat == "" {
-		cat = "manual"
+		cat = "scraper"
+	}
+
+	var existingID int
+	checkErr := h.DB.QueryRow(c.Request.Context(), "SELECT id FROM master_keywords WHERE LOWER(keyword) = $1 LIMIT 1;", cleanKeyword).Scan(&existingID)
+	if checkErr == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Keyword already exists in master dictionary"})
+		return
 	}
 
 	query := `
 		INSERT INTO master_keywords (keyword, category)
-		VALUES (LOWER($1), $2)
+		VALUES ($1, $2)
 		ON CONFLICT (keyword) DO NOTHING
 		RETURNING id;
 	`
