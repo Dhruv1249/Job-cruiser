@@ -165,7 +165,10 @@ func main() {
 		protected.GET("/jobs", jobHandler.GetJobs)
 		protected.GET("/jobs/matched", matchedJobsHandler.GetMatchedJobs)
 		protected.GET("/jobs/match-status", matchedJobsHandler.GetMatchStatus)
+		protected.GET("/jobs/:id", matchedJobsHandler.GetMatchedJobByID)
 		protected.POST("/jobs/:id/view", jobHandler.MarkJobViewed)
+		protected.POST("/jobs/:id/dismiss", jobHandler.DismissJob)
+		protected.POST("/jobs/:id/undismiss", jobHandler.UndismissJob)
 		protected.POST("/preferences", prefHandler.UpdatePreferences)
 		protected.GET("/preferences", prefHandler.GetPreferences)
 		protected.POST("/user/parse-cv", prefHandler.ParseCV)
@@ -178,6 +181,7 @@ func main() {
 		protected.POST("/applications", appHandler.CreateApplication)
 		protected.GET("/applications", appHandler.GetUserApplications)
 		protected.PUT("/applications/:id/status", appHandler.UpdateApplicationStatus)
+		protected.DELETE("/applications/:id", appHandler.DeleteApplication)
 		protected.POST("/jobs/match", matchHandler.EvaluateJobMatch)
 		protected.POST("/user/reset-matches", adminHandler.ResetUserMatches)
 

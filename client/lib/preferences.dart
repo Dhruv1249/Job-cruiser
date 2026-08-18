@@ -1070,12 +1070,14 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             children: [
               Icon(icon, color: AppColors.secondary, size: 24),
               const SizedBox(width: 8),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.onSurface,
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.onSurface,
+                  ),
                 ),
               ),
             ],

@@ -86,8 +86,9 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 	var args []interface{}
 	args = append(args, userID)
 
-	// Enforce 14-day retention policy window
+	// Enforce 14-day retention policy window and exclude dismissed jobs
 	conditions = append(conditions, "j.scraped_at >= NOW() - INTERVAL '14 days'")
+	conditions = append(conditions, "COALESCE(ujm.is_dismissed, false) = false")
 
 	if unviewedOnly {
 		conditions = append(conditions, "ujv.viewed_at IS NULL")
@@ -250,5 +251,92 @@ func (h *MatchedJobsHandler) GetMatchStatus(c *gin.Context) {
 		"is_evaluating": isEvaluating,
 		"pending_count": count,
 	})
+}
+
+/*
+GetMatchedJobByID retrieves full details and match metadata for a single specific job.
+*/
+func (h *MatchedJobsHandler) GetMatchedJobByID(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+	jobID := c.Param("id")
+
+	query := `
+		SELECT
+			j.id,
+			j.title,
+			COALESCE(comp.name, ''),
+			COALESCE(j.location, ''),
+			j.is_remote,
+			COALESCE(j.source, ''),
+			j.url,
+			COALESCE(j.posted_date, ''),
+			COALESCE(j.scraped_at::text, ''),
+			COALESCE(ujm.seniority, ''),
+			COALESCE(j.summary, ''),
+			COALESCE(j.raw_desc, ''),
+			COALESCE(ujm.match_score, 0) AS match_score,
+			COALESCE(ujm.match_reasoning, ''),
+			COALESCE(ujm.tech_stack::text, '[]'),
+			COALESCE(ujm.is_ai_matched, false) AS is_matched,
+			j.salary_min,
+			j.salary_max,
+			COALESCE(j.currency, 'USD'),
+			(ujv.viewed_at IS NOT NULL) AS is_viewed,
+			COALESCE(app.status, 'unapplied') AS application_status,
+			ujv.viewed_at::text AS viewed_at,
+			(j.scraped_at >= NOW() - INTERVAL '24 hours' AND ujv.viewed_at IS NULL) AS is_new
+		FROM jobs j
+		LEFT JOIN user_job_matches ujm ON ujm.job_id = j.id AND ujm.user_id = $1
+		LEFT JOIN companies comp ON j.company_id = comp.id
+		LEFT JOIN user_job_views ujv ON ujv.user_id = $1 AND ujv.job_id = j.id
+		LEFT JOIN applications app ON app.user_id = $1 AND app.job_id = j.id
+		WHERE j.id = $2
+		LIMIT 1;
+	`
+
+	var job MatchedJobResponse
+	var techStackRaw string
+	err := h.DB.QueryRow(c.Request.Context(), query, userID, jobID).Scan(
+		&job.JobID,
+		&job.Title,
+		&job.Company,
+		&job.Location,
+		&job.IsRemote,
+		&job.Source,
+		&job.URL,
+		&job.PostedDate,
+		&job.ScrapedAt,
+		&job.Seniority,
+		&job.Summary,
+		&job.RawDescription,
+		&job.MatchScore,
+		&job.MatchReasoning,
+		&techStackRaw,
+		&job.IsMatched,
+		&job.SalaryMin,
+		&job.SalaryMax,
+		&job.Currency,
+		&job.IsViewed,
+		&job.ApplicationStatus,
+		&job.ViewedAt,
+		&job.IsNew,
+	)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		return
+	}
+
+	if techStackRaw != "" {
+		_ = unmarshalStringJSON(techStackRaw, &job.TechStack)
+	}
+	if job.TechStack == nil {
+		job.TechStack = []string{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": job})
 }
 

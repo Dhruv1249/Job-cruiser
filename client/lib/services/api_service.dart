@@ -288,6 +288,66 @@ class ApiService {
     }
   }
 
+  /// Removes an application from the tracking pipeline.
+  Future<bool> deleteApplication(String applicationId) async {
+    try {
+      final response = await _dio.delete('/applications/$applicationId');
+      return response.statusCode == 200;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return false;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
+
+  /// Fetches a single job by its ID with full details and match metadata.
+  Future<MatchedJob?> fetchJobById(String jobId) async {
+    try {
+      final response = await _dio.get('/jobs/$jobId');
+      final data = response.data;
+      if (data != null && data['data'] != null) {
+        return MatchedJob.fromJson(data['data'] as Map<String, dynamic>);
+      }
+      return null;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return null;
+    } catch (e) {
+      _logger.e(e);
+      return null;
+    }
+  }
+
+  /// Dismisses / hides a job from the user's feed while keeping it in the database.
+  Future<bool> dismissJob(String jobId) async {
+    try {
+      final response = await _dio.post('/jobs/$jobId/dismiss');
+      return response.statusCode == 200;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return false;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
+
+  /// Restores a previously dismissed job back to the user's feed.
+  Future<bool> undismissJob(String jobId) async {
+    try {
+      final response = await _dio.post('/jobs/$jobId/undismiss');
+      return response.statusCode == 200;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return false;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
+
   /// Fetches saved user preferences.
   Future<Map<String, dynamic>?> fetchPreferences() async {
     try {

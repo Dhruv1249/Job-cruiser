@@ -54,35 +54,40 @@ func (h *ApplicationHandler) CreateApplication(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "Job saved successfully", "application_id": appID})
 }
 
-// GetUserApplications fetches all jobs the user has interacted with
+/*
+GetUserApplications fetches all job applications tracked by the authenticated user with company details.
+*/
 func (h *ApplicationHandler) GetUserApplications(c *gin.Context) {
 	userID, _ := c.Get("user_id")
 
-	// We use a JOIN here to get the actual job details alongside the application status
 	query := `
-		SELECT a.id, a.job_id, a.status, a.applied_at, 
-		       j.title, j.company_id, j.location 
+		SELECT a.id, a.job_id, a.status, a.applied_at::text, 
+		       j.title, COALESCE(comp.name, 'Unknown Company') as company_name, j.company_id, j.location,
+		       COALESCE(m.match_score, 0), COALESCE(j.url, ''), COALESCE(j.is_remote, false), COALESCE(j.seniority, '')
 		FROM applications a
 		JOIN jobs j ON a.job_id = j.id
+		LEFT JOIN companies comp ON j.company_id = comp.id
+		LEFT JOIN user_job_matches m ON m.job_id = j.id AND m.user_id = $1
 		WHERE a.user_id = $1
 		ORDER BY a.created_at DESC;
 	`
 
-	rows, err := h.DB.Query(context.Background(), query, userID)
+	rows, err := h.DB.Query(c.Request.Context(), query, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch applications"})
 		return
 	}
 	defer rows.Close()
 
-	// Using a slice of maps (gin.H) for a quick, flexible JSON response
 	var applications []gin.H
 	for rows.Next() {
-		var id, jobID, status, title, companyID string
-		var location *string
-		var appliedAt *string
+		var id, jobID, status, title, companyName, companyID string
+		var location, appliedAt *string
+		var matchScore int
+		var jobURL, seniority string
+		var isRemote bool
 
-		if err := rows.Scan(&id, &jobID, &status, &appliedAt, &title, &companyID, &location); err != nil {
+		if err := rows.Scan(&id, &jobID, &status, &appliedAt, &title, &companyName, &companyID, &location, &matchScore, &jobURL, &isRemote, &seniority); err != nil {
 			continue
 		}
 
@@ -91,9 +96,14 @@ func (h *ApplicationHandler) GetUserApplications(c *gin.Context) {
 			"job_id":         jobID,
 			"status":         status,
 			"title":          title,
+			"company_name":   companyName,
 			"company_id":     companyID,
 			"location":       location,
 			"applied_at":     appliedAt,
+			"match_score":    matchScore,
+			"url":            jobURL,
+			"is_remote":      isRemote,
+			"seniority":      seniority,
 		})
 	}
 
@@ -108,10 +118,12 @@ type UpdateStatusRequest struct {
 	Status string `json:"status" binding:"required"`
 }
 
-// UpdateApplicationStatus moves a job across the Kanban board
+/*
+UpdateApplicationStatus updates the lifecycle stage status for a tracked application.
+*/
 func (h *ApplicationHandler) UpdateApplicationStatus(c *gin.Context) {
 	userID, _ := c.Get("user_id")
-	applicationID := c.Param("id") // Get the ID from the URL: /applications/:id/status
+	applicationID := c.Param("id")
 
 	var req UpdateStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -127,11 +139,38 @@ func (h *ApplicationHandler) UpdateApplicationStatus(c *gin.Context) {
 	`
 
 	var updatedID string
-	err := h.DB.QueryRow(context.Background(), query, req.Status, applicationID, userID).Scan(&updatedID)
+	err := h.DB.QueryRow(c.Request.Context(), query, req.Status, applicationID, userID).Scan(&updatedID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Application not found or unauthorized"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Status updated successfully"})
+}
+
+/*
+DeleteApplication removes an application from the user's CRM pipeline.
+*/
+func (h *ApplicationHandler) DeleteApplication(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	applicationID := c.Param("id")
+
+	query := `
+		DELETE FROM applications 
+		WHERE id = $1 AND user_id = $2
+		RETURNING id;
+	`
+
+	var deletedID string
+	err := h.DB.QueryRow(c.Request.Context(), query, applicationID, userID).Scan(&deletedID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Application not found or unauthorized"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Application removed successfully", "id": deletedID})
 }

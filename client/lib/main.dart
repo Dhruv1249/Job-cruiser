@@ -343,6 +343,65 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  Future<void> _dismissJobFromFeed(MatchedJob job) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.visibility_off_outlined, color: AppColors.error),
+            SizedBox(width: 8),
+            Text('Hide this Job?'),
+          ],
+        ),
+        content: Text(
+          'Hide "${job.title}" at "${job.company}" from your feed? It will stay safely stored in the database, but won\'t appear in your matches.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Hide Job'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _matchedJobs.removeWhere((j) => j.jobId == job.jobId);
+    });
+
+    final success = await _apiService.dismissJob(job.jobId);
+    if (!mounted) return;
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Job "${job.title}" hidden from feed'),
+          action: SnackBarAction(
+            label: 'Undo',
+            textColor: Colors.amber,
+            onPressed: () async {
+              await _apiService.undismissJob(job.jobId);
+              _loadMatchedJobs();
+            },
+          ),
+        ),
+      );
+    }
+  }
+
   List<MatchedJob> get _filteredJobs {
     List<MatchedJob> list = List.from(_matchedJobs);
 
@@ -790,6 +849,45 @@ class _MyHomePageState extends State<MyHomePage> {
                         ),
                       ),
                     ],
+                  ],
+                ),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 18, color: AppColors.outline),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  onSelected: (action) {
+                    if (action == 'details') {
+                      widget.onSelectJob(job);
+                    } else if (action == 'dismiss') {
+                      _dismissJobFromFeed(job);
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'details',
+                      child: Row(
+                        children: [
+                          Icon(Icons.open_in_new, size: 16, color: AppColors.primary),
+                          SizedBox(width: 8),
+                          Text('Open Details'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuDivider(),
+                    const PopupMenuItem(
+                      value: 'dismiss',
+                      child: Row(
+                        children: [
+                          Icon(Icons.visibility_off_outlined, size: 16, color: AppColors.error),
+                          SizedBox(width: 8),
+                          Text(
+                            'Hide Job',
+                            style: TextStyle(color: AppColors.error),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ],

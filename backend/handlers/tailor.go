@@ -45,7 +45,7 @@ func (handler *TailorHandler) TailorResume(context *gin.Context) {
 
 	if payload.JobID != "" && handler.DB != nil {
 		var fetchedDesc string
-		queryError := handler.DB.QueryRow(context.Request.Context(), "SELECT raw_description FROM jobs WHERE id = $1", payload.JobID).Scan(&fetchedDesc)
+		queryError := handler.DB.QueryRow(context.Request.Context(), "SELECT raw_desc FROM jobs WHERE id = $1", payload.JobID).Scan(&fetchedDesc)
 		if queryError == nil && fetchedDesc != "" {
 			jobDescText = fetchedDesc
 		}
@@ -54,8 +54,8 @@ func (handler *TailorHandler) TailorResume(context *gin.Context) {
 	userIDValue, exists := context.Get("user_id")
 	if exists && userBioText == "" && handler.DB != nil {
 		var fetchedBio string
-		queryError := handler.DB.QueryRow(context.Request.Context(), "SELECT bio_summary FROM user_preferences WHERE user_id = $1", userIDValue).Scan(&fetchedBio)
-		if queryError == nil {
+		queryError := handler.DB.QueryRow(context.Request.Context(), "SELECT COALESCE(NULLIF(bio_experience_text, ''), master_cv_text, '') FROM user_preferences WHERE user_id = $1", userIDValue).Scan(&fetchedBio)
+		if queryError == nil && fetchedBio != "" {
 			userBioText = fetchedBio
 		}
 	}
@@ -113,7 +113,7 @@ func (handler *TailorHandler) GenerateCoverLetter(context *gin.Context) {
 
 	if payload.JobID != "" && handler.DB != nil {
 		var fetchedDesc string
-		queryError := handler.DB.QueryRow(context.Request.Context(), "SELECT raw_description FROM jobs WHERE id = $1", payload.JobID).Scan(&fetchedDesc)
+		queryError := handler.DB.QueryRow(context.Request.Context(), "SELECT raw_desc FROM jobs WHERE id = $1", payload.JobID).Scan(&fetchedDesc)
 		if queryError == nil && fetchedDesc != "" {
 			jobDescText = fetchedDesc
 		}
@@ -122,8 +122,8 @@ func (handler *TailorHandler) GenerateCoverLetter(context *gin.Context) {
 	userIDValue, exists := context.Get("user_id")
 	if exists && userBioText == "" && handler.DB != nil {
 		var fetchedBio string
-		queryError := handler.DB.QueryRow(context.Request.Context(), "SELECT bio_summary FROM user_preferences WHERE user_id = $1", userIDValue).Scan(&fetchedBio)
-		if queryError == nil {
+		queryError := handler.DB.QueryRow(context.Request.Context(), "SELECT COALESCE(NULLIF(bio_experience_text, ''), master_cv_text, '') FROM user_preferences WHERE user_id = $1", userIDValue).Scan(&fetchedBio)
+		if queryError == nil && fetchedBio != "" {
 			userBioText = fetchedBio
 		}
 	}

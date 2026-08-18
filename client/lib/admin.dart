@@ -18,7 +18,6 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
   final TextEditingController _manualKeywordController = TextEditingController();
-  final TextEditingController _manualCategoryController = TextEditingController();
 
   List<Map<String, dynamic>> _whitelistedEmails = [];
   List<Map<String, dynamic>> _pendingKeywords = [];
@@ -40,7 +39,6 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
     _emailController.dispose();
     _notesController.dispose();
     _manualKeywordController.dispose();
-    _manualCategoryController.dispose();
     super.dispose();
   }
 
@@ -71,14 +69,12 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
     final kw = _manualKeywordController.text.trim();
     if (kw.isEmpty) return;
 
-    final cat = _manualCategoryController.text.trim();
-    final success = await _apiService.addMasterKeyword(kw, cat.isEmpty ? 'manual' : cat);
+    final success = await _apiService.addMasterKeyword(kw, 'scraper');
 
     if (!mounted) return;
 
     if (success) {
       _manualKeywordController.clear();
-      _manualCategoryController.clear();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Added keyword "$kw" to master dictionary')),
       );
@@ -356,33 +352,13 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
                   ),
                 ),
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      flex: 2,
-                      child: TextField(
-                        controller: _manualKeywordController,
-                        decoration: const InputDecoration(
-                          labelText: 'Keyword (e.g. rust, Kubernetes)',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      flex: 1,
-                      child: TextField(
-                        controller: _manualCategoryController,
-                        decoration: const InputDecoration(
-                          labelText: 'Category (Optional)',
-                          hintText: 'general',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
-                      ),
-                    ),
-                  ],
+                TextField(
+                  controller: _manualKeywordController,
+                  decoration: const InputDecoration(
+                    labelText: 'Keyword (e.g. rust, Kubernetes, fastapi)',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
                 ),
                 const SizedBox(height: 14),
                 SizedBox(

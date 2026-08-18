@@ -132,3 +132,66 @@ func (h *JobHandler) MarkJobViewed(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Job marked as viewed", "job_id": jobID})
 }
 
+/*
+DismissJob hides a single job from the user's feed while preserving it in the database.
+*/
+func (h *JobHandler) DismissJob(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	jobID := c.Param("id")
+	if jobID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Job ID required"})
+		return
+	}
+
+	query := `
+		INSERT INTO user_job_matches (user_id, job_id, is_dismissed)
+		VALUES ($1, $2, true)
+		ON CONFLICT (user_id, job_id)
+		DO UPDATE SET is_dismissed = true;
+	`
+	_, err := h.DB.Exec(c.Request.Context(), query, userID, jobID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to dismiss job"})
+		return
+	}
+
+	_, _ = h.DB.Exec(c.Request.Context(), "DELETE FROM applications WHERE user_id = $1 AND job_id = $2;", userID, jobID)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Job dismissed successfully", "job_id": jobID})
+}
+
+/*
+UndismissJob restores a previously dismissed job to the user's feed.
+*/
+func (h *JobHandler) UndismissJob(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	jobID := c.Param("id")
+	if jobID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Job ID required"})
+		return
+	}
+
+	query := `
+		UPDATE user_job_matches
+		SET is_dismissed = false
+		WHERE user_id = $1 AND job_id = $2;
+	`
+	_, err := h.DB.Exec(c.Request.Context(), query, userID, jobID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to restore job"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Job restored successfully", "job_id": jobID})
+}
+
