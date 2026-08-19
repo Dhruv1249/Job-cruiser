@@ -775,7 +775,7 @@ class _MyHomePageState extends State<MyHomePage> {
         widget.onSelectJob(job);
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
         decoration: const BoxDecoration(
           color: AppColors.surface,
           border: Border(
@@ -786,8 +786,7 @@ class _MyHomePageState extends State<MyHomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Expanded(
                   child: Text(
@@ -802,9 +801,10 @@ class _MyHomePageState extends State<MyHomePage> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                const SizedBox(width: 8),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -831,7 +831,7 @@ class _MyHomePageState extends State<MyHomePage> {
                       ),
                     ),
                     if (job.isNew) ...[
-                      const SizedBox(height: 4),
+                      const SizedBox(width: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
@@ -849,41 +849,45 @@ class _MyHomePageState extends State<MyHomePage> {
                         ),
                       ),
                     ],
-                  ],
-                ),
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert, size: 18, color: AppColors.outline),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  onSelected: (action) {
-                    if (action == 'details') {
-                      widget.onSelectJob(job);
-                    } else if (action == 'dismiss') {
-                      _dismissJobFromFeed(job);
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: 'details',
-                      child: Row(
-                        children: [
-                          Icon(Icons.open_in_new, size: 16, color: AppColors.primary),
-                          SizedBox(width: 8),
-                          Text('Open Details'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuDivider(),
-                    const PopupMenuItem(
-                      value: 'dismiss',
-                      child: Row(
-                        children: [
-                          Icon(Icons.visibility_off_outlined, size: 16, color: AppColors.error),
-                          SizedBox(width: 8),
-                          Text(
-                            'Hide Job',
-                            style: TextStyle(color: AppColors.error),
+                    const SizedBox(width: 2),
+                    SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert, size: 18, color: AppColors.outline),
+                        padding: EdgeInsets.zero,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        onSelected: (action) {
+                          if (action == 'details') {
+                            widget.onSelectJob(job);
+                          } else if (action == 'dismiss') {
+                            _dismissJobFromFeed(job);
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(
+                            value: 'details',
+                            child: Row(
+                              children: [
+                                Icon(Icons.open_in_new, size: 16, color: AppColors.primary),
+                                SizedBox(width: 8),
+                                Text('Open Details'),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuDivider(),
+                          const PopupMenuItem(
+                            value: 'dismiss',
+                            child: Row(
+                              children: [
+                                Icon(Icons.visibility_off_outlined, size: 16, color: AppColors.error),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Hide Job',
+                                  style: TextStyle(color: AppColors.error),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),

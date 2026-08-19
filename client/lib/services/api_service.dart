@@ -528,16 +528,10 @@ class ApiService {
   /// Saves self-hosted open-overleaf configuration.
   Future<bool> saveOverleafConfig({
     required String deploymentUrl,
-    required String githubUsername,
-    required String githubRepoName,
-    required String accessToken,
   }) async {
     try {
       final response = await _dio.post('/overleaf/config', data: {
         'deployment_url': deploymentUrl,
-        'github_username': githubUsername,
-        'github_repo_name': githubRepoName,
-        'access_token': accessToken,
       });
       return response.statusCode == 200;
     } catch (e) {
@@ -601,4 +595,183 @@ class ApiService {
       return null;
     }
   }
+
+  /// Triggers AI resume tailoring for the given job and compiles via the user's open-overleaf instance.
+  /// Returns the response map containing pdf_base64, version_id, pdf_web_url, and compile_result.
+  Future<Map<String, dynamic>?> tailorResume({
+    required String jobId,
+    int targetPages = 1,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/tailor/resume',
+        data: {
+          'job_id': jobId,
+          'target_pages': targetPages,
+        },
+        options: Options(receiveTimeout: const Duration(seconds: 120)),
+      );
+      if (response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return null;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      if (e.response?.data is Map<String, dynamic>) {
+        final data = Map<String, dynamic>.from(e.response!.data as Map);
+        data['status_code'] = e.response?.statusCode;
+        return data;
+      }
+      return {'error': e.message ?? 'Network error', 'status_code': e.response?.statusCode};
+    } catch (e) {
+      _logger.e(e);
+      return {'error': e.toString()};
+    }
+  }
+
+  /// Triggers AI cover letter generation for the given job and compiles via the user's open-overleaf instance.
+  /// Returns the response map containing pdf_base64, cover_letter_id, pdf_web_url, and compile_result.
+  Future<Map<String, dynamic>?> generateCoverLetter({required String jobId}) async {
+    try {
+      final response = await _dio.post(
+        '/tailor/cover-letter',
+        data: {'job_id': jobId},
+        options: Options(receiveTimeout: const Duration(seconds: 120)),
+      );
+      if (response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return null;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      if (e.response?.data is Map<String, dynamic>) {
+        final data = Map<String, dynamic>.from(e.response!.data as Map);
+        data['status_code'] = e.response?.statusCode;
+        return data;
+      }
+      return {'error': e.message ?? 'Network error', 'status_code': e.response?.statusCode};
+    } catch (e) {
+      _logger.e(e);
+      return {'error': e.toString()};
+    }
+  }
+
+  /// Fetches the list of saved resume versions for the current user, ordered newest first.
+  Future<List<Map<String, dynamic>>> fetchResumeVersions() async {
+    try {
+      final response = await _dio.get('/resume-versions');
+      final data = response.data;
+      if (data != null && data['data'] is List) {
+        return List<Map<String, dynamic>>.from(data['data'] as List);
+      }
+      return [];
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return [];
+    } catch (e) {
+      _logger.e(e);
+      return [];
+    }
+  }
+
+  /// Re-fetches the PDF base64 for a saved resume version by re-reading it from open-overleaf via MCP.
+  Future<Map<String, dynamic>?> fetchResumeVersionPDF(String versionId) async {
+    try {
+      final response = await _dio.get(
+        '/resume-versions/$versionId/pdf',
+        options: Options(receiveTimeout: const Duration(seconds: 60)),
+      );
+      if (response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return null;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return null;
+    } catch (e) {
+      _logger.e(e);
+      return null;
+    }
+  }
+
+  /// Deletes a resume version reference from Postgres. The LaTeX in open-overleaf is retained.
+  Future<bool> deleteResumeVersion(String versionId) async {
+    try {
+      final response = await _dio.delete('/resume-versions/$versionId');
+      return response.statusCode == 200;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return false;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
+
+  /// Marks a resume version as the user's default, clearing the flag on all other versions.
+  Future<bool> setDefaultResumeVersion(String versionId) async {
+    try {
+      final response = await _dio.put('/resume-versions/$versionId/default');
+      return response.statusCode == 200;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return false;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
+
+  /// Fetches the list of saved cover letter versions for the current user, ordered newest first.
+  Future<List<Map<String, dynamic>>> fetchCoverLetterVersions() async {
+    try {
+      final response = await _dio.get('/cover-letters');
+      final data = response.data;
+      if (data != null && data['data'] is List) {
+        return List<Map<String, dynamic>>.from(data['data'] as List);
+      }
+      return [];
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return [];
+    } catch (e) {
+      _logger.e(e);
+      return [];
+    }
+  }
+
+  /// Re-fetches the PDF base64 for a saved cover letter version from open-overleaf.
+  Future<Map<String, dynamic>?> fetchCoverLetterPDF(String coverLetterId) async {
+    try {
+      final response = await _dio.get(
+        '/cover-letters/$coverLetterId/pdf',
+        options: Options(receiveTimeout: const Duration(seconds: 60)),
+      );
+      if (response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return null;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return null;
+    } catch (e) {
+      _logger.e(e);
+      return null;
+    }
+  }
+
+  /// Deletes a cover letter version reference from Postgres.
+  Future<bool> deleteCoverLetterVersion(String coverLetterId) async {
+    try {
+      final response = await _dio.delete('/cover-letters/$coverLetterId');
+      return response.statusCode == 200;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return false;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
 }
+

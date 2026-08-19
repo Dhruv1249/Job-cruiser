@@ -12,94 +12,107 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func TestTailorHandlerTailorResumeSuccess(t *testing.T) {
+func TestTailorResumeRequiresJobID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
 
-	geminiServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		responsePayload := map[string]interface{}{
-			"candidates": []map[string]interface{}{
-				{
-					"content": map[string]interface{}{
-						"parts": []map[string]string{
-							{"text": "\\documentclass{article}\n\\begin{document}\nTailored CV\n\\end{document}"},
-						},
-					},
-				},
-			},
-		}
-		json.NewEncoder(writer).Encode(responsePayload)
-	}))
-	defer geminiServer.Close()
+	router := gin.New()
+	router.POST("/api/tailor/resume", func(ginContext *gin.Context) {
+		ginContext.Set("user_id", "test-user")
+		tailorHandler.TailorResume(ginContext)
+	})
 
-	mcpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		var body map[string]interface{}
-		json.NewDecoder(request.Body).Decode(&body)
-		tool := body["tool"].(string)
+	requestBody := map[string]interface{}{}
+	jsonBytes, _ := json.Marshal(requestBody)
+	httpRequest, _ := http.NewRequest(http.MethodPost, "/api/tailor/resume", bytes.NewBuffer(jsonBytes))
+	httpRequest.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httpRequest)
 
-		if tool == "write_project_file" {
-			json.NewEncoder(writer).Encode(map[string]interface{}{
-				"success": true,
-				"result":  map[string]interface{}{"message": "wrote file"},
-			})
-			return
-		}
-		if tool == "compile_project" {
-			json.NewEncoder(writer).Encode(map[string]interface{}{
-				"success": true,
-				"result": map[string]interface{}{
-					"status":    "compiled",
-					"engine":    "xelatex",
-					"outputLog": "PDF written",
-					"errors":    "",
-					"pdfPath":   "/projects/my_project/main.pdf",
-				},
-			})
-			return
-		}
-		if tool == "get_project_pdf" {
-			json.NewEncoder(writer).Encode(map[string]interface{}{
-				"success": true,
-				"result": map[string]interface{}{
-					"fileName":   "main.pdf",
-					"mimeType":   "application/pdf",
-					"base64Data": "JVBERi0x...",
-					"sizeBytes":  1024,
-				},
-			})
-			return
-		}
-	}))
-	defer mcpServer.Close()
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing job_id, got %d. Body: %s", recorder.Code, recorder.Body.String())
+	}
+}
 
-	mcpClient := services.NewMCPClient(mcpServer.URL, "test-mcp-token")
-	tailorService := services.NewResumeTailorService(geminiServer.URL, "test-gemini-key", mcpClient)
-	tailorHandler := handlers.NewTailorHandler(tailorService, nil)
+func TestTailorResumeRequiresAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
 
 	router := gin.New()
 	router.POST("/api/tailor/resume", tailorHandler.TailorResume)
 
-	requestBody := map[string]string{
-		"user_bio":        "Senior Engineer with Go and AWS experience.",
-		"job_description": "We are seeking a Go Engineer for backend microservices.",
-		"project_name":    "my_project",
-		"file_path":       "main.tex",
+	requestBody := map[string]interface{}{
+		"job_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
 	}
 	jsonBytes, _ := json.Marshal(requestBody)
-
 	httpRequest, _ := http.NewRequest(http.MethodPost, "/api/tailor/resume", bytes.NewBuffer(jsonBytes))
 	httpRequest.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-
 	router.ServeHTTP(recorder, httpRequest)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d. Body: %s", recorder.Code, recorder.Body.String())
-	}
-
-	var responseMap map[string]interface{}
-	json.Unmarshal(recorder.Body.Bytes(), &responseMap)
-
-	if responseMap["project_name"] != "my_project" {
-		t.Fatalf("unexpected project name in response: %v", responseMap)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for unauthenticated request, got %d", recorder.Code)
 	}
 }
+
+func TestGenerateCoverLetterRequiresJobID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
+
+	router := gin.New()
+	router.POST("/api/tailor/cover-letter", func(ginContext *gin.Context) {
+		ginContext.Set("user_id", "test-user")
+		tailorHandler.GenerateCoverLetter(ginContext)
+	})
+
+	requestBody := map[string]interface{}{}
+	jsonBytes, _ := json.Marshal(requestBody)
+	httpRequest, _ := http.NewRequest(http.MethodPost, "/api/tailor/cover-letter", bytes.NewBuffer(jsonBytes))
+	httpRequest.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httpRequest)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing job_id, got %d. Body: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestGenerateCoverLetterRequiresAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
+
+	router := gin.New()
+	router.POST("/api/tailor/cover-letter", tailorHandler.GenerateCoverLetter)
+
+	requestBody := map[string]interface{}{
+		"job_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+	}
+	jsonBytes, _ := json.Marshal(requestBody)
+	httpRequest, _ := http.NewRequest(http.MethodPost, "/api/tailor/cover-letter", bytes.NewBuffer(jsonBytes))
+	httpRequest.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httpRequest)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for unauthenticated request, got %d", recorder.Code)
+	}
+}
+
+func TestTailorHandlerNewConstructor(t *testing.T) {
+	aesKey := make([]byte, 32)
+	for index := range aesKey {
+		aesKey[index] = byte(index + 1)
+	}
+	tailorService := services.NewResumeTailorService("http://gemini.test", "key", nil)
+	tailorHandler := handlers.NewTailorHandler(tailorService, nil, aesKey, "mcp-secret")
+	if tailorHandler == nil {
+		t.Fatal("expected non-nil tailorHandler")
+	}
+	if len(tailorHandler.AESKey) != 32 {
+		t.Fatalf("expected 32 byte AES key, got %d", len(tailorHandler.AESKey))
+	}
+	if tailorHandler.MCPSecret != "mcp-secret" {
+		t.Fatalf("expected mcp-secret, got %s", tailorHandler.MCPSecret)
+	}
+}
+

@@ -100,9 +100,6 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   late final TextEditingController _roleController;
   late final TextEditingController _locationController;
   late final TextEditingController _overleafUrlController;
-  late final TextEditingController _githubUsernameController;
-  late final TextEditingController _githubRepoController;
-  late final TextEditingController _overleafTokenController;
   late final TextEditingController _bioTextController;
 
   bool _isParsingCV = false;
@@ -171,9 +168,6 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     _roleController = TextEditingController();
     _locationController = TextEditingController();
     _overleafUrlController = TextEditingController();
-    _githubUsernameController = TextEditingController();
-    _githubRepoController = TextEditingController();
-    _overleafTokenController = TextEditingController();
     _bioTextController = TextEditingController();
     _baseSalary = widget.initialPreferences?.baseSalary ?? 120.0;
     _equityExpectation =
@@ -233,9 +227,6 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     if (overleaf != null && mounted) {
       setState(() {
         _overleafUrlController.text = overleaf['deployment_url'] ?? '';
-        _githubUsernameController.text = overleaf['github_username'] ?? '';
-        _githubRepoController.text = overleaf['github_repo_name'] ?? '';
-        _overleafTokenController.text = overleaf['access_token'] ?? '';
       });
     }
   }
@@ -245,9 +236,6 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     _roleController.dispose();
     _locationController.dispose();
     _overleafUrlController.dispose();
-    _githubUsernameController.dispose();
-    _githubRepoController.dispose();
-    _overleafTokenController.dispose();
     _bioTextController.dispose();
     super.dispose();
   }
@@ -411,12 +399,12 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   Widget _buildOverleafCard() {
     return _buildSectionCard(
       icon: Icons.description,
-      title: 'Open-Overleaf & GitHub TeX Sync',
+      title: 'Open-Overleaf TeX Sync',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Self-hosted Open-Overleaf engine URL and GitHub repository for automated LaTeX resume compilation.',
+            'Self-hosted Open-Overleaf server URL for automated LaTeX resume & cover letter compilation.',
             style: TextStyle(fontSize: 13, color: AppColors.onSurfaceVariant),
           ),
           const SizedBox(height: 16),
@@ -424,54 +412,21 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             controller: _overleafUrlController,
             decoration: const InputDecoration(
               labelText: 'Open-Overleaf Server URL',
-              hintText: 'e.g. http://92.4.68.154:3201',
+              hintText: 'e.g. https://overleaf.yourdomain.com',
               border: OutlineInputBorder(),
             ),
           ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _githubUsernameController,
-            decoration: const InputDecoration(
-              labelText: 'GitHub Username',
-              hintText: 'e.g. Dhruv1249',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _githubRepoController,
-            decoration: const InputDecoration(
-              labelText: 'GitHub Repository Name',
-              hintText: 'e.g. job-resumes',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _overleafTokenController,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'Access Token / Personal Token',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
               icon: const Icon(Icons.save, size: 18),
-              label: const Text('Save Overleaf TeX Integration'),
+              label: const Text('Save Overleaf Integration'),
               onPressed: () async {
                 final url = _overleafUrlController.text.trim();
-                final username = _githubUsernameController.text.trim();
-                final repo = _githubRepoController.text.trim();
-                final token = _overleafTokenController.text.trim();
 
                 final ok = await ApiService().saveOverleafConfig(
                   deploymentUrl: url,
-                  githubUsername: username,
-                  githubRepoName: repo,
-                  accessToken: token,
                 );
 
                 if (!mounted) return;

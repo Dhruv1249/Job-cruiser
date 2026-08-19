@@ -23,12 +23,8 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
 
   late TextEditingController _nameController;
   late TextEditingController _bioTextController;
-
   late TextEditingController _overleafUrlController;
-  late TextEditingController _githubUsernameController;
-  late TextEditingController _githubRepoController;
   late TextEditingController _locationController;
-  late TextEditingController _overleafTokenController;
 
   bool _anyRole = true;
   bool _anyIndustry = true;
@@ -102,9 +98,6 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
     _locationController = TextEditingController();
     _bioTextController = TextEditingController();
     _overleafUrlController = TextEditingController();
-    _githubUsernameController = TextEditingController();
-    _githubRepoController = TextEditingController();
-    _overleafTokenController = TextEditingController();
   }
 
   @override
@@ -113,9 +106,6 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
     _locationController.dispose();
     _bioTextController.dispose();
     _overleafUrlController.dispose();
-    _githubUsernameController.dispose();
-    _githubRepoController.dispose();
-    _overleafTokenController.dispose();
     super.dispose();
   }
 
@@ -305,9 +295,6 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
     if (_overleafUrlController.text.trim().isNotEmpty) {
       await _apiService.saveOverleafConfig(
         deploymentUrl: _overleafUrlController.text.trim(),
-        githubUsername: _githubUsernameController.text.trim(),
-        githubRepoName: _githubRepoController.text.trim(),
-        accessToken: _overleafTokenController.text.trim(),
       );
     }
 
@@ -454,7 +441,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
         ),
         const SizedBox(height: 24),
         const Text(
-          'Self-Hosted open-overleaf Configuration (Optional)',
+          'Self-Hosted Open-Overleaf Integration (Optional)',
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.bold,
@@ -465,43 +452,8 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
         TextField(
           controller: _overleafUrlController,
           decoration: const InputDecoration(
-            labelText: 'Deployment Base URL (e.g. https://overleaf.domain.com)',
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _githubUsernameController,
-                decoration: const InputDecoration(
-                  labelText: 'GitHub Username',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _githubRepoController,
-                decoration: const InputDecoration(
-                  labelText: 'GitHub Repo Name',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _overleafTokenController,
-          obscureText: true,
-          decoration: const InputDecoration(
-            labelText: 'GitHub Personal Access Token / Overleaf API Key',
+            labelText: 'Server Base URL (e.g. https://overleaf.yourdomain.com)',
+            hintText: 'https://overleaf.yourdomain.com',
             border: OutlineInputBorder(),
             isDense: true,
           ),

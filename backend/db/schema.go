@@ -299,6 +299,27 @@ var schemaQueries = []string{
 	`CREATE INDEX IF NOT EXISTS idx_jobs_scraped_at ON jobs(scraped_at DESC);`,
 	`CREATE INDEX IF NOT EXISTS idx_user_job_matches_score ON user_job_matches(user_id, match_score DESC);`,
 
+	`ALTER TABLE resume_versions ALTER COLUMN latex_source DROP NOT NULL;`,
+	`ALTER TABLE resume_versions ADD COLUMN IF NOT EXISTS job_id UUID REFERENCES jobs(id) ON DELETE SET NULL;`,
+	`ALTER TABLE resume_versions ADD COLUMN IF NOT EXISTS overleaf_project_name TEXT;`,
+	`ALTER TABLE resume_versions ADD COLUMN IF NOT EXISTS overleaf_folder_path TEXT;`,
+	`ALTER TABLE resume_versions ADD COLUMN IF NOT EXISTS pdf_url TEXT;`,
+	`ALTER TABLE resume_versions ADD COLUMN IF NOT EXISTS page_count INTEGER DEFAULT 1;`,
+
+	`CREATE TABLE IF NOT EXISTS cover_letter_versions (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+		job_id UUID REFERENCES jobs(id) ON DELETE SET NULL,
+		application_id UUID REFERENCES applications(id) ON DELETE SET NULL,
+		label TEXT NOT NULL,
+		overleaf_project_name TEXT NOT NULL DEFAULT 'job_applications',
+		overleaf_folder_path TEXT NOT NULL,
+		pdf_url TEXT,
+		page_count INTEGER DEFAULT 1,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);`,
+
+	`ALTER TABLE user_overleaf_config ADD COLUMN IF NOT EXISTS token_encrypted BOOLEAN DEFAULT false;`,
 }
 
 // InitSchema executes the queries in sequence.

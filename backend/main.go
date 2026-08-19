@@ -83,12 +83,30 @@ func main() {
 		DB: databasePool,
 	}
 
+	overleafAESKeyHex := os.Getenv("OVERLEAF_AES_KEY")
+	overleafAESKey := make([]byte, 32)
+	if overleafAESKeyHex != "" {
+		decodedKey, hexError := hex.DecodeString(overleafAESKeyHex)
+		if hexError == nil && len(decodedKey) == 32 {
+			overleafAESKey = decodedKey
+		} else {
+			log.Println("WARNING: OVERLEAF_AES_KEY is invalid. Token encryption will be disabled.")
+		}
+	} else {
+		log.Println("WARNING: OVERLEAF_AES_KEY not set. Token encryption will be disabled.")
+	}
+	overleafMCPSecret := os.Getenv("OVERLEAF_MCP_SECRET")
+	if overleafMCPSecret == "" {
+		overleafMCPSecret = os.Getenv("SESSION_SECRET")
+	}
+
 	authHandler := &handlers.AuthHandler{DB: databasePool}
 	jobHandler := &handlers.JobHandler{DB: databasePool}
 	prefHandler := &handlers.PreferencesHandler{
 		DB:           databasePool,
 		MatchService: hybridMatchService,
 		NimService:   nvidiaNimService,
+		AESKey:       overleafAESKey,
 	}
 	appHandler := &handlers.ApplicationHandler{DB: databasePool}
 	ingestHandler := &handlers.IngestHandler{
@@ -126,8 +144,10 @@ func main() {
 		mcpToken = services.GenerateMCPToken(secretKey, ghTokenHash, repoName)
 	}
 	mcpClient := services.NewMCPClient(overleafURL, mcpToken)
+
 	tailorService := services.NewResumeTailorService("https://generativelanguage.googleapis.com", geminiAPIKey, mcpClient)
-	tailorHandler := handlers.NewTailorHandler(tailorService, databasePool)
+	tailorHandler := handlers.NewTailorHandler(tailorService, databasePool, overleafAESKey, overleafMCPSecret)
+	versionsHandler := handlers.NewVersionsHandler(databasePool, overleafAESKey, overleafMCPSecret)
 
 	// Initialize the default Gin web router with basic logging and crash-recovery built in.
 	webRouter := gin.Default()
@@ -177,6 +197,13 @@ func main() {
 
 		protected.POST("/tailor/resume", tailorHandler.TailorResume)
 		protected.POST("/tailor/cover-letter", tailorHandler.GenerateCoverLetter)
+		protected.GET("/resume-versions", versionsHandler.ListResumeVersions)
+		protected.GET("/resume-versions/:id/pdf", versionsHandler.GetResumeVersionPDF)
+		protected.DELETE("/resume-versions/:id", versionsHandler.DeleteResumeVersion)
+		protected.PUT("/resume-versions/:id/default", versionsHandler.SetDefaultResumeVersion)
+		protected.GET("/cover-letters", versionsHandler.ListCoverLetterVersions)
+		protected.GET("/cover-letters/:id/pdf", versionsHandler.GetCoverLetterPDF)
+		protected.DELETE("/cover-letters/:id", versionsHandler.DeleteCoverLetterVersion)
 
 		protected.POST("/applications", appHandler.CreateApplication)
 		protected.GET("/applications", appHandler.GetUserApplications)
