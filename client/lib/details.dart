@@ -5,6 +5,8 @@ import 'models/job.dart';
 import 'services/api_service.dart';
 import 'widgets/job_description_renderer.dart';
 import 'widgets/company_logo_avatar.dart';
+import 'widgets/tailoring_result_sheet.dart';
+import 'preferences.dart' as preferences_page;
 
 void main() {
   runApp(const CompanyDetailsApp());
@@ -45,6 +47,8 @@ class CompanyDetailsPage extends StatefulWidget {
 class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
   final ApiService _apiService = ApiService();
   bool _isSaving = false;
+  bool _isTailoring = false;
+  bool _isGeneratingCoverLetter = false;
   late String _currentStatus;
 
   MatchedJob? get _activeJob => widget.job;
@@ -591,9 +595,143 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
     );
   }
 
+  void _showOverleafUnconfiguredDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.tune, color: AppColors.primary, size: 22),
+            SizedBox(width: 10),
+            Text(
+              'Overleaf Setup Required',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+        content: const Text(
+          'To compile LaTeX resumes and cover letters, please configure your self-hosted Open-Overleaf deployment URL and GitHub repository credentials in Preferences.',
+          style: TextStyle(fontSize: 14, color: AppColors.onSurfaceVariant, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const preferences_page.SetPreferencesScreen(),
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Configure in Preferences'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleTailorResume() async {
+    final job = _activeJob;
+    if (job == null) return;
+    setState(() => _isTailoring = true);
+    try {
+      final result = await _apiService.tailorResume(jobId: job.jobId, targetPages: 1);
+      if (!mounted) return;
+      if (result != null && result['pdf_base64'] != null) {
+        await showTailoringResultSheet(
+          context: context,
+          sessionType: 'resume',
+          tailoringResponse: result,
+        );
+      } else {
+        final errorMessage = result?['error'] as String? ?? '';
+        final statusCode = result?['status_code'] as int? ?? 0;
+        if (statusCode == 422 || errorMessage.toLowerCase().contains('overleaf') || errorMessage.toLowerCase().contains('preferences')) {
+          _showOverleafUnconfiguredDialog();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorMessage.isNotEmpty ? errorMessage : 'Tailoring failed. Please try again.'),
+              backgroundColor: Colors.redAccent,
+              action: SnackBarAction(
+                label: 'Setup',
+                textColor: Colors.white,
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const preferences_page.SetPreferencesScreen(),
+                    ),
+                  );
+                },
+              ),
+            ),
+          );
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _isTailoring = false);
+    }
+  }
+
+  Future<void> _handleGenerateCoverLetter() async {
+    final job = _activeJob;
+    if (job == null) return;
+    setState(() => _isGeneratingCoverLetter = true);
+    try {
+      final result = await _apiService.generateCoverLetter(jobId: job.jobId);
+      if (!mounted) return;
+      if (result != null && result['pdf_base64'] != null) {
+        await showTailoringResultSheet(
+          context: context,
+          sessionType: 'cover_letter',
+          tailoringResponse: result,
+        );
+      } else {
+        final errorMessage = result?['error'] as String? ?? '';
+        final statusCode = result?['status_code'] as int? ?? 0;
+        if (statusCode == 422 || errorMessage.toLowerCase().contains('overleaf') || errorMessage.toLowerCase().contains('preferences')) {
+          _showOverleafUnconfiguredDialog();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorMessage.isNotEmpty ? errorMessage : 'Cover letter generation failed. Please try again.'),
+              backgroundColor: Colors.redAccent,
+              action: SnackBarAction(
+                label: 'Setup',
+                textColor: Colors.white,
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const preferences_page.SetPreferencesScreen(),
+                    ),
+                  );
+                },
+              ),
+            ),
+          );
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _isGeneratingCoverLetter = false);
+    }
+  }
+
   Widget _buildBottomActionBar() {
+    final isBookmarked = _currentStatus == 'bookmarked';
+    final isApplied = _currentStatus == 'applied';
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
         color: AppColors.surfaceContainerLowest,
         border: const Border(
@@ -601,44 +739,85 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, -4),
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -3),
           )
         ],
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: _isSaving
-                  ? null
-                  : () => _handleSaveStatus('bookmarked'),
-              icon: const Icon(Icons.bookmark_border, size: 18),
-              label: const Text('Save Job'),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            IconButton.outlined(
+              onPressed: _isSaving ? null : () => _handleSaveStatus(isBookmarked ? 'unbookmarked' : 'bookmarked'),
+              icon: Icon(
+                isBookmarked ? Icons.bookmark : Icons.bookmark_border,
+                color: isBookmarked ? AppColors.matchGreen : AppColors.primary,
+                size: 20,
+              ),
+              style: IconButton.styleFrom(
+                side: BorderSide(
+                  color: isBookmarked ? AppColors.matchGreen : AppColors.outlineVariant,
+                ),
+                padding: const EdgeInsets.all(10),
+              ),
+              tooltip: isBookmarked ? 'Saved' : 'Save Job',
+            ),
+            const SizedBox(width: 8),
+            IconButton.outlined(
+              onPressed: _isSaving ? null : () => _handleSaveStatus(isApplied ? 'not_applied' : 'applied'),
+              icon: Icon(
+                isApplied ? Icons.check_circle : Icons.send_outlined,
+                color: isApplied ? AppColors.matchGreen : AppColors.primary,
+                size: 20,
+              ),
+              style: IconButton.styleFrom(
+                side: BorderSide(
+                  color: isApplied ? AppColors.matchGreen : AppColors.outlineVariant,
+                ),
+                padding: const EdgeInsets.all(10),
+              ),
+              tooltip: isApplied ? 'Applied' : 'Track as Applied',
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: _isGeneratingCoverLetter ? null : _handleGenerateCoverLetter,
+              icon: _isGeneratingCoverLetter
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                    )
+                  : const Icon(Icons.mail_outline, size: 16),
+              label: Text(_isGeneratingCoverLetter ? 'Generating...' : 'Cover Letter'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.primary,
                 side: const BorderSide(color: AppColors.outlineVariant),
-                padding: const EdgeInsets.symmetric(vertical: 14),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: _isSaving
-                  ? null
-                  : () => _handleSaveStatus('applied'),
-              icon: const Icon(Icons.send, size: 18),
-              label: const Text('Track as Applied'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
+            const SizedBox(width: 8),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _isTailoring ? null : _handleTailorResume,
+                icon: _isTailoring
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.auto_fix_high, size: 16),
+                label: Text(_isTailoring ? 'Tailoring...' : 'Tailor Resume'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -98,9 +98,10 @@ type MCPToolResponse struct {
 
 // MCPClient handles programmatic RPC communication with the self-hosted open-overleaf MCP server.
 type MCPClient struct {
-	BaseURL    string
-	Token      string
-	HTTPClient *http.Client
+	BaseURL     string
+	Token       string
+	GitHubToken string
+	HTTPClient  *http.Client
 }
 
 // NewMCPClient constructs a thread-safe MCP HTTP client targeting open-overleaf.
@@ -347,6 +348,12 @@ func (client *MCPClient) GetProjectPreviewImage(ctx context.Context, projectName
 }
 
 func (client *MCPClient) executeTool(ctx context.Context, toolName string, arguments map[string]interface{}) (map[string]interface{}, error) {
+	if client.GitHubToken != "" {
+		if _, exists := arguments["githubToken"]; !exists {
+			arguments["githubToken"] = client.GitHubToken
+		}
+	}
+
 	requestPayload := map[string]interface{}{
 		"tool":      toolName,
 		"arguments": arguments,

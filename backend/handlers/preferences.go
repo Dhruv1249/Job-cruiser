@@ -22,6 +22,7 @@ type PreferencesHandler struct {
 	APIKey       string
 	MatchService services.BatchMatchEvaluator
 	NimService   *services.NvidiaNimService
+	AESKey       []byte
 }
 
 type PreferencesRequest struct {
@@ -178,9 +179,6 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 
 type OverleafConfigRequest struct {
 	DeploymentURL string `json:"deployment_url" binding:"required"`
-	GitHubUsername string `json:"github_username" binding:"required"`
-	GitHubRepoName string `json:"github_repo_name" binding:"required"`
-	AccessToken    string `json:"access_token" binding:"required"`
 }
 
 /*
@@ -200,18 +198,15 @@ func (h *PreferencesHandler) UpdateOverleafConfig(c *gin.Context) {
 	}
 
 	query := `
-		INSERT INTO user_overleaf_config (user_id, deployment_url, github_username, github_repo_name, encrypted_access_token)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO user_overleaf_config (user_id, deployment_url)
+		VALUES ($1, $2)
 		ON CONFLICT (user_id)
 		DO UPDATE SET
 			deployment_url = EXCLUDED.deployment_url,
-			github_username = EXCLUDED.github_username,
-			github_repo_name = EXCLUDED.github_repo_name,
-			encrypted_access_token = EXCLUDED.encrypted_access_token,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 
-	_, err := h.DB.Exec(context.Background(), query, userID, req.DeploymentURL, req.GitHubUsername, req.GitHubRepoName, req.AccessToken)
+	_, err := h.DB.Exec(context.Background(), query, userID, req.DeploymentURL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save open-overleaf configuration"})
 		return
@@ -231,13 +226,13 @@ func (h *PreferencesHandler) GetOverleafConfig(c *gin.Context) {
 	}
 
 	query := `
-		SELECT deployment_url, github_username, github_repo_name
+		SELECT deployment_url
 		FROM user_overleaf_config
 		WHERE user_id = $1;
 	`
 
-	var url, username, repo string
-	err := h.DB.QueryRow(context.Background(), query, userID).Scan(&url, &username, &repo)
+	var url string
+	err := h.DB.QueryRow(context.Background(), query, userID).Scan(&url)
 	if err != nil {
 		if err.Error() == "no rows in result set" {
 			c.JSON(http.StatusOK, gin.H{"data": nil})
@@ -249,9 +244,7 @@ func (h *PreferencesHandler) GetOverleafConfig(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"deployment_url":  url,
-			"github_username": username,
-			"github_repo_name": repo,
+			"deployment_url": url,
 		},
 	})
 }

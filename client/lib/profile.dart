@@ -5,6 +5,8 @@ import 'preferences.dart' as preferences_page;
 import 'main.dart' show AppColors;
 import 'auth.dart';
 import 'admin.dart';
+import 'screens/resume_versions_screen.dart';
+import 'screens/cover_letters_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -113,6 +115,10 @@ class _ProfilePageState extends State<ProfilePage> {
                 _buildSectionTitle('JOB PREFERENCES & TARGETS'),
                 const SizedBox(height: 8),
                 _buildPreferencesSection(context),
+                const SizedBox(height: 24),
+                _buildSectionTitle('DOCUMENTS & TAILORING'),
+                const SizedBox(height: 8),
+                _buildDocumentsSection(),
                 const SizedBox(height: 24),
                 _buildSectionTitle('ACCOUNT & SECURITY'),
                 const SizedBox(height: 8),
@@ -386,6 +392,51 @@ class _ProfilePageState extends State<ProfilePage> {
     if (!mounted) return;
     await _loadSavedPreferences();
     await _loadUserProfile();
+  }
+
+  Widget _buildDocumentsSection() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          _buildActionTile(
+            icon: Icons.description_outlined,
+            title: 'Tailored Resumes',
+            hasBorder: true,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const ResumeVersionsScreen(),
+                ),
+              );
+            },
+          ),
+          _buildActionTile(
+            icon: Icons.mail_outline,
+            title: 'Generated Cover Letters',
+            hasBorder: false,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const CoverLettersScreen(),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
   }
 
 
