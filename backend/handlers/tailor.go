@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -136,11 +135,10 @@ func (handler *TailorHandler) TailorResume(ginContext *gin.Context) {
 		handler.MCPSecret,
 	)
 	if mcpError != nil {
-		if errors.Is(mcpError, services.ErrNoOverleafConfig) {
-			ginContext.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Configure open-overleaf first in Preferences"})
-			return
-		}
-		ginContext.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load open-overleaf config"})
+		ginContext.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error": "Open-Overleaf is not configured. Please set your Open-Overleaf Server URL in Preferences.",
+			"unconfigured": true,
+		})
 		return
 	}
 
@@ -242,11 +240,10 @@ func (handler *TailorHandler) GenerateCoverLetter(ginContext *gin.Context) {
 		handler.MCPSecret,
 	)
 	if mcpError != nil {
-		if errors.Is(mcpError, services.ErrNoOverleafConfig) {
-			ginContext.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Configure open-overleaf first in Preferences"})
-			return
-		}
-		ginContext.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load open-overleaf config"})
+		ginContext.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error": "Open-Overleaf is not configured. Please set your Open-Overleaf Server URL in Preferences.",
+			"unconfigured": true,
+		})
 		return
 	}
 

@@ -611,7 +611,7 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
           ],
         ),
         content: const Text(
-          'To compile LaTeX resumes and cover letters, please configure your self-hosted Open-Overleaf deployment URL and GitHub repository credentials in Preferences.',
+          'To generate and compile LaTeX resumes and cover letters with AI, please configure your Open-Overleaf Server URL in Preferences.',
           style: TextStyle(fontSize: 14, color: AppColors.onSurfaceVariant, height: 1.4),
         ),
         actions: [
@@ -656,7 +656,8 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
       } else {
         final errorMessage = result?['error'] as String? ?? '';
         final statusCode = result?['status_code'] as int? ?? 0;
-        if (statusCode == 422 || errorMessage.toLowerCase().contains('overleaf') || errorMessage.toLowerCase().contains('preferences')) {
+        final isUnconfigured = result?['unconfigured'] == true || statusCode == 422;
+        if (isUnconfigured || errorMessage.toLowerCase().contains('overleaf') || errorMessage.toLowerCase().contains('preferences') || errorMessage.toLowerCase().contains('unconfigured')) {
           _showOverleafUnconfiguredDialog();
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -699,7 +700,8 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
       } else {
         final errorMessage = result?['error'] as String? ?? '';
         final statusCode = result?['status_code'] as int? ?? 0;
-        if (statusCode == 422 || errorMessage.toLowerCase().contains('overleaf') || errorMessage.toLowerCase().contains('preferences')) {
+        final isUnconfigured = result?['unconfigured'] == true || statusCode == 422;
+        if (isUnconfigured || errorMessage.toLowerCase().contains('overleaf') || errorMessage.toLowerCase().contains('preferences') || errorMessage.toLowerCase().contains('unconfigured')) {
           _showOverleafUnconfiguredDialog();
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -727,11 +729,12 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
   }
 
   Widget _buildBottomActionBar() {
+    final job = _activeJob;
     final isBookmarked = _currentStatus == 'bookmarked';
     final isApplied = _currentStatus == 'applied';
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: AppColors.surfaceContainerLowest,
         border: const Border(
@@ -760,15 +763,15 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
                 side: BorderSide(
                   color: isBookmarked ? AppColors.matchGreen : AppColors.outlineVariant,
                 ),
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.all(9),
               ),
               tooltip: isBookmarked ? 'Saved' : 'Save Job',
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
             IconButton.outlined(
               onPressed: _isSaving ? null : () => _handleSaveStatus(isApplied ? 'not_applied' : 'applied'),
               icon: Icon(
-                isApplied ? Icons.check_circle : Icons.send_outlined,
+                isApplied ? Icons.check_circle : Icons.check_circle_outline,
                 color: isApplied ? AppColors.matchGreen : AppColors.primary,
                 size: 20,
               ),
@@ -776,10 +779,26 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
                 side: BorderSide(
                   color: isApplied ? AppColors.matchGreen : AppColors.outlineVariant,
                 ),
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.all(9),
               ),
-              tooltip: isApplied ? 'Applied' : 'Track as Applied',
+              tooltip: isApplied ? 'Applied' : 'Mark as Applied',
             ),
+            if (job != null && job.url.isNotEmpty) ...[
+              const SizedBox(width: 6),
+              IconButton.outlined(
+                onPressed: () => _openJobUrl(job.url),
+                icon: const Icon(
+                  Icons.open_in_new,
+                  color: AppColors.primary,
+                  size: 19,
+                ),
+                style: IconButton.styleFrom(
+                  side: const BorderSide(color: AppColors.outlineVariant),
+                  padding: const EdgeInsets.all(9),
+                ),
+                tooltip: 'Open ATS Job Listing',
+              ),
+            ],
             const SizedBox(width: 8),
             OutlinedButton.icon(
               onPressed: _isGeneratingCoverLetter ? null : _handleGenerateCoverLetter,
@@ -789,12 +808,12 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
                       height: 14,
                       child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
                     )
-                  : const Icon(Icons.mail_outline, size: 16),
-              label: Text(_isGeneratingCoverLetter ? 'Generating...' : 'Cover Letter'),
+                  : const Icon(Icons.auto_awesome, size: 15, color: AppColors.primary),
+              label: Text(_isGeneratingCoverLetter ? 'Generating...' : 'AI Letter'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.primary,
                 side: const BorderSide(color: AppColors.outlineVariant),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
               ),
             ),
             const SizedBox(width: 8),
@@ -807,8 +826,8 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
                         height: 14,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
-                    : const Icon(Icons.auto_fix_high, size: 16),
-                label: Text(_isTailoring ? 'Tailoring...' : 'Tailor Resume'),
+                    : const Icon(Icons.auto_awesome, size: 15, color: Colors.white),
+                label: Text(_isTailoring ? 'Tailoring...' : 'AI Resume'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
