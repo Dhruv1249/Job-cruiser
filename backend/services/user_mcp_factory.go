@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -27,7 +29,7 @@ func LoadUserOverleafCredentials(
 		return nil, errors.New("database pool unavailable")
 	}
 
-	var deploymentURL string
+	var deploymentURL *string
 
 	queryError := databasePool.QueryRow(
 		ctx,
@@ -36,18 +38,18 @@ func LoadUserOverleafCredentials(
 	).Scan(&deploymentURL)
 
 	if queryError != nil {
-		if queryError.Error() == "no rows in result set" {
+		if errors.Is(queryError, pgx.ErrNoRows) || strings.Contains(queryError.Error(), "no rows") {
 			return nil, ErrNoOverleafConfig
 		}
 		return nil, fmt.Errorf("failed querying overleaf config for user %s: %w", userID, queryError)
 	}
 
-	if deploymentURL == "" {
+	if deploymentURL == nil || strings.TrimSpace(*deploymentURL) == "" {
 		return nil, ErrNoOverleafConfig
 	}
 
 	return &UserOverleafCredentials{
-		DeploymentURL: deploymentURL,
+		DeploymentURL: strings.TrimSpace(*deploymentURL),
 	}, nil
 }
 
