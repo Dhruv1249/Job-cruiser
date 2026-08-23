@@ -23,14 +23,16 @@ func TestPreferencesRequestBinding(t *testing.T) {
 		{
 			name: "valid request with explicit AI matching disabled",
 			body: map[string]interface{}{
-				"full_name":           "Jane Doe",
-				"target_roles":        []string{"Backend Engineer", "DevOps SRE"},
-				"work_models":         []string{"remote"},
-				"min_salary":          150000,
-				"currency":            "USD",
-				"master_cv_text":      "Experienced Go developer",
-				"bio_experience_text": "5 years building microservices",
-				"ai_matching_enabled": false,
+				"full_name":                  "Jane Doe",
+				"target_roles":               []string{"Backend Engineer", "DevOps SRE"},
+				"work_models":                []string{"remote"},
+				"min_salary":                 150000,
+				"currency":                   "USD",
+				"master_cv_text":             "Experienced Go developer",
+				"bio_experience_text":        "5 years building microservices",
+				"ai_matching_enabled":        false,
+				"target_resume_pages":        2,
+				"target_cover_letter_pages":  1,
 			},
 			expectedStatus: http.StatusOK,
 			expectError:    false,
@@ -38,14 +40,16 @@ func TestPreferencesRequestBinding(t *testing.T) {
 		{
 			name: "valid request with AI matching enabled",
 			body: map[string]interface{}{
-				"full_name":           "John Smith",
-				"target_roles":        []string{"Fullstack SDE"},
-				"work_models":         []string{"hybrid"},
-				"min_salary":          120000,
-				"currency":            "USD",
-				"master_cv_text":      "Fullstack engineer",
-				"bio_experience_text": "React and Node expert",
-				"ai_matching_enabled": true,
+				"full_name":                  "John Smith",
+				"target_roles":               []string{"Fullstack SDE"},
+				"work_models":                []string{"hybrid"},
+				"min_salary":                 120000,
+				"currency":                   "USD",
+				"master_cv_text":             "Fullstack engineer",
+				"bio_experience_text":        "React and Node expert",
+				"ai_matching_enabled":        true,
+				"target_resume_pages":        1,
+				"target_cover_letter_pages":  2,
 			},
 			expectedStatus: http.StatusOK,
 			expectError:    false,
@@ -77,8 +81,10 @@ func TestPreferencesRequestBinding(t *testing.T) {
 				}
 
 				c.JSON(http.StatusOK, gin.H{
-					"full_name":           req.FullName,
-					"ai_matching_enabled": req.AIMatchingEnabled,
+					"full_name":                  req.FullName,
+					"ai_matching_enabled":        req.AIMatchingEnabled,
+					"target_resume_pages":        req.TargetResumePages,
+					"target_cover_letter_pages":  req.TargetCoverLetterPages,
 				})
 			})
 
@@ -142,3 +148,60 @@ func TestParseCVRequestBinding(t *testing.T) {
 		})
 	}
 }
+
+func TestOverleafConfigRequestBinding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	testCases := []struct {
+		name           string
+		body           map[string]interface{}
+		expectedStatus int
+	}{
+		{
+			name: "valid request with full fields",
+			body: map[string]interface{}{
+				"deployment_url": "https://overleaf.example.com",
+				"mcp_secret":     "custom_secret_123",
+				"project_name":   "my_cvs",
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name: "valid request with url only",
+			body: map[string]interface{}{
+				"deployment_url": "https://overleaf.example.com",
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "invalid request missing url",
+			body:           map[string]interface{}{},
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			jsonBytes, _ := json.Marshal(tc.body)
+			router := gin.New()
+			router.POST("/preferences/overleaf", func(c *gin.Context) {
+				var req handlers.OverleafConfigRequest
+				if err := c.ShouldBindJSON(&req); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"status": "ok"})
+			})
+
+			recorder := httptest.NewRecorder()
+			request, _ := http.NewRequest(http.MethodPost, "/preferences/overleaf", bytes.NewBuffer(jsonBytes))
+			request.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, request)
+
+			if recorder.Code != tc.expectedStatus {
+				t.Errorf("expected status %d, got %d", tc.expectedStatus, recorder.Code)
+			}
+		})
+	}
+}
+

@@ -116,3 +116,46 @@ func TestTailorHandlerNewConstructor(t *testing.T) {
 	}
 }
 
+func TestTailorApplicationAsyncRequiresJobID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
+
+	router := gin.New()
+	router.POST("/api/tailor/application", func(ginContext *gin.Context) {
+		ginContext.Set("user_id", "test-user")
+		tailorHandler.TailorApplicationAsync(ginContext)
+	})
+
+	requestBody := map[string]interface{}{}
+	jsonBytes, _ := json.Marshal(requestBody)
+	httpRequest, _ := http.NewRequest(http.MethodPost, "/api/tailor/application", bytes.NewBuffer(jsonBytes))
+	httpRequest.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httpRequest)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing job_id, got %d", recorder.Code)
+	}
+}
+
+func TestTailorApplicationAsyncRequiresAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
+
+	router := gin.New()
+	router.POST("/api/tailor/application", tailorHandler.TailorApplicationAsync)
+
+	requestBody := map[string]interface{}{
+		"job_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+	}
+	jsonBytes, _ := json.Marshal(requestBody)
+	httpRequest, _ := http.NewRequest(http.MethodPost, "/api/tailor/application", bytes.NewBuffer(jsonBytes))
+	httpRequest.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httpRequest)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized, got %d", recorder.Code)
+	}
+}
+

@@ -6,19 +6,25 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Dhruv1249/Job-cruiser/backend/utils"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrNoOverleafConfig = errors.New("user has not configured open-overleaf")
 
+var ErrNoOverleafSecret = errors.New("open-overleaf access token or secret is not configured")
+
 // UserOverleafCredentials holds open-overleaf connection details for a single user.
 type UserOverleafCredentials struct {
 	DeploymentURL string
+	CustomSecret  string
+	ProjectName   string
 }
 
 // LoadUserOverleafCredentials reads user_overleaf_config from Postgres for the given userID.
-// Returns ErrNoOverleafConfig when the user has no stored open-overleaf configuration.
+// Returns ErrNoOverleafConfig when the user has no stored open-overleaf configuration,
+// or ErrNoOverleafSecret when the access token/secret is missing.
 func LoadUserOverleafCredentials(
 	ctx context.Context,
 	databasePool *pgxpool.Pool,
@@ -29,13 +35,15 @@ func LoadUserOverleafCredentials(
 		return nil, errors.New("database pool unavailable")
 	}
 
-	var deploymentURL *string
+	var deploymentURL, projectName, encryptedToken *string
+	var tokenEncrypted bool
 
 	queryError := databasePool.QueryRow(
 		ctx,
-		`SELECT deployment_url FROM user_overleaf_config WHERE user_id = $1`,
+		`SELECT deployment_url, COALESCE(project_name, 'job_applications'), encrypted_access_token, COALESCE(token_encrypted, false)
+		 FROM user_overleaf_config WHERE user_id = $1`,
 		userID,
-	).Scan(&deploymentURL)
+	).Scan(&deploymentURL, &projectName, &encryptedToken, &tokenEncrypted)
 
 	if queryError != nil {
 		if errors.Is(queryError, pgx.ErrNoRows) || strings.Contains(queryError.Error(), "no rows") {
@@ -48,17 +56,42 @@ func LoadUserOverleafCredentials(
 		return nil, ErrNoOverleafConfig
 	}
 
+	cleanProject := "job_applications"
+	if projectName != nil && strings.TrimSpace(*projectName) != "" {
+		cleanProject = strings.TrimSpace(*projectName)
+	}
+
+	customSecret := ""
+	if encryptedToken != nil && *encryptedToken != "" {
+		if tokenEncrypted && len(aesKey) == 32 {
+			decrypted, decryptError := utils.DecryptToken(*encryptedToken, aesKey)
+			if decryptError == nil {
+				customSecret = decrypted
+			} else {
+				customSecret = *encryptedToken
+			}
+		} else {
+			customSecret = *encryptedToken
+		}
+	}
+
+	if customSecret == "" {
+		return nil, ErrNoOverleafSecret
+	}
+
 	return &UserOverleafCredentials{
 		DeploymentURL: strings.TrimSpace(*deploymentURL),
+		CustomSecret:  customSecret,
+		ProjectName:   cleanProject,
 	}, nil
 }
 
 // BuildMCPClientForUser constructs an MCPClient using the user's overleaf deployment URL
-// and the shared MCP secret as the bearer token.
+// and the per-user secret as the bearer token.
 func BuildMCPClientForUser(credentials *UserOverleafCredentials, mcpSecret string) *MCPClient {
-	bearerToken := mcpSecret
+	bearerToken := credentials.CustomSecret
 	if bearerToken == "" {
-		bearerToken = "open_overleaf_mcp_secret"
+		bearerToken = mcpSecret
 	}
 	return NewMCPClient(credentials.DeploymentURL, bearerToken)
 }

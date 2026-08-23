@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'details.dart' as details_page;
 import 'profile.dart';
@@ -7,12 +8,15 @@ import 'onboarding.dart';
 import 'tracker.dart';
 import 'models/job.dart';
 import 'services/api_service.dart';
+import 'services/notification_service.dart';
 import 'widgets/company_logo_avatar.dart';
+import 'widgets/notifications_sheet.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
+  await NotificationService.instance.initialize();
   runApp(const MyApp());
 }
 
@@ -256,17 +260,58 @@ class _MyHomePageState extends State<MyHomePage> {
   int _minScoreFilter = 0;
   String _viewFilterMode = 'all'; // 'all', 'unviewed', 'viewed'
   String _searchQuery = '';
+  int _unreadNotificationCount = 0;
+  Timer? _notificationPollingTimer;
+  final Set<String> _seenNotificationIds = {};
+  bool _hasInitialNotificationSync = false;
 
   @override
   void initState() {
     super.initState();
     _loadMatchedJobs();
+    _loadUnreadNotificationsCount();
+    _notificationPollingTimer = Timer.periodic(
+      const Duration(seconds: 8),
+      (_) => _loadUnreadNotificationsCount(),
+    );
     _searchController.addListener(() {
       setState(() {
         _searchQuery = _searchController.text.toLowerCase();
       });
     });
     _scrollController.addListener(_onScroll);
+  }
+
+  Future<void> _loadUnreadNotificationsCount() async {
+    final count = await _apiService.fetchUnreadNotificationsCount();
+
+    if (!_hasInitialNotificationSync) {
+      _hasInitialNotificationSync = true;
+      final initialNotifications = await _apiService.fetchNotifications();
+      for (final item in initialNotifications) {
+        final id = item['id']?.toString() ?? '';
+        if (id.isNotEmpty) _seenNotificationIds.add(id);
+      }
+    } else if (count > _unreadNotificationCount) {
+      final notifications = await _apiService.fetchNotifications();
+      for (final item in notifications) {
+        final id = item['id']?.toString() ?? '';
+        final isRead = item['is_read'] == true;
+        if (!isRead && !_seenNotificationIds.contains(id) && id.isNotEmpty) {
+          _seenNotificationIds.add(id);
+          final title = item['title']?.toString() ?? 'Job Cruiser';
+          final message = item['message']?.toString() ?? '';
+          NotificationService.instance.showLocalNotification(
+            id: id.hashCode,
+            title: title,
+            body: message,
+          );
+        }
+      }
+    }
+
+    if (!mounted) return;
+    setState(() => _unreadNotificationCount = count);
   }
 
   void _onScroll() {
@@ -281,6 +326,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   void dispose() {
+    _notificationPollingTimer?.cancel();
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -291,6 +337,8 @@ class _MyHomePageState extends State<MyHomePage> {
       _isLoading = true;
       _hasMore = true;
     });
+
+    _loadUnreadNotificationsCount();
 
     final statusFuture = _apiService.fetchMatchStatus();
     final jobsFuture = _apiService.fetchMatchedJobs(
@@ -523,6 +571,47 @@ class _MyHomePageState extends State<MyHomePage> {
           ),
         ],
       ),
+      actions: [
+        Stack(
+          alignment: Alignment.center,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.notifications_outlined, color: AppColors.primary),
+              tooltip: 'Notifications',
+              onPressed: () async {
+                await showNotificationsSheet(context);
+                _loadUnreadNotificationsCount();
+              },
+            ),
+            if (_unreadNotificationCount > 0)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: const BoxDecoration(
+                    color: Colors.redAccent,
+                    shape: BoxShape.circle,
+                  ),
+                  constraints: const BoxConstraints(
+                    minWidth: 16,
+                    minHeight: 16,
+                  ),
+                  child: Text(
+                    '$_unreadNotificationCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(width: 8),
+      ],
     );
   }
 

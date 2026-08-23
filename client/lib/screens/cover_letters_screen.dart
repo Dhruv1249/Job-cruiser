@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../main.dart' show AppColors;
 import '../services/api_service.dart';
@@ -17,11 +18,39 @@ class _CoverLettersScreenState extends State<CoverLettersScreen> {
   List<Map<String, dynamic>> _versions = [];
   bool _isLoading = true;
   String? _loadingVersionId;
+  Timer? _pollingTimer;
 
   @override
   void initState() {
     super.initState();
     _loadCoverLetters();
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
+
+  void _checkAndStartPolling() {
+    final hasGenerating = _versions.any((v) => v['status'] == 'generating' || v['status'] == 'processing');
+    if (hasGenerating && _pollingTimer == null) {
+      _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) async {
+        final versions = await _apiService.fetchCoverLetterVersions();
+        if (!mounted) return;
+        setState(() {
+          _versions = versions;
+        });
+        final stillGenerating = versions.any((v) => v['status'] == 'generating' || v['status'] == 'processing');
+        if (!stillGenerating) {
+          _pollingTimer?.cancel();
+          _pollingTimer = null;
+        }
+      });
+    } else if (!hasGenerating && _pollingTimer != null) {
+      _pollingTimer?.cancel();
+      _pollingTimer = null;
+    }
   }
 
   Future<void> _loadCoverLetters() async {
@@ -32,11 +61,35 @@ class _CoverLettersScreenState extends State<CoverLettersScreen> {
         _versions = versions;
         _isLoading = false;
       });
+      _checkAndStartPolling();
     }
   }
 
   Future<void> _handleViewCoverLetter(Map<String, dynamic> item) async {
     final coverLetterId = item['id'] as String? ?? '';
+    final status = item['status'] as String? ?? 'ready';
+    final errorMessage = item['error_message'] as String? ?? '';
+
+    if (status == 'generating' || status == 'processing') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('AI is generating this cover letter in the background. It will be ready in a moment.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    if (status == 'failed') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Generation failed: ${errorMessage.isNotEmpty ? errorMessage : "Unknown error"}'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
     if (coverLetterId.isEmpty) return;
 
     setState(() => _loadingVersionId = coverLetterId);
@@ -196,8 +249,12 @@ class _CoverLettersScreenState extends State<CoverLettersScreen> {
     final label = item['label'] as String? ?? 'Untitled Cover Letter';
     final folderPath = item['overleaf_folder_path'] as String? ?? '';
     final pageCount = item['page_count'] as int? ?? 1;
+    final status = item['status'] as String? ?? 'ready';
+    final errorMessage = item['error_message'] as String? ?? '';
     final createdAt = item['created_at'] as String? ?? '';
     final isCardLoading = _loadingVersionId == coverLetterId;
+    final isGenerating = status == 'generating' || status == 'processing';
+    final isFailed = status == 'failed';
 
     final formattedDate = createdAt.length >= 10 ? createdAt.substring(0, 10) : createdAt;
 
@@ -205,7 +262,14 @@ class _CoverLettersScreenState extends State<CoverLettersScreen> {
       decoration: BoxDecoration(
         color: AppColors.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.outlineVariant, width: 1.0),
+        border: Border.all(
+          color: isGenerating
+              ? Colors.orange.withValues(alpha: 0.5)
+              : isFailed
+                  ? Colors.redAccent.withValues(alpha: 0.5)
+                  : AppColors.outlineVariant,
+          width: (isGenerating || isFailed) ? 1.5 : 1.0,
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.03),
@@ -228,49 +292,118 @@ class _CoverLettersScreenState extends State<CoverLettersScreen> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppColors.surfaceContainerHigh,
+                    color: isGenerating
+                        ? Colors.orange.withValues(alpha: 0.1)
+                        : isFailed
+                            ? Colors.redAccent.withValues(alpha: 0.1)
+                            : AppColors.surfaceContainerHigh,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(
-                    Icons.mail,
-                    color: AppColors.primary,
-                    size: 24,
-                  ),
+                  child: isGenerating
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.orange),
+                        )
+                      : Icon(
+                          isFailed ? Icons.error_outline : Icons.mail,
+                          color: isFailed ? Colors.redAccent : AppColors.primary,
+                          size: 24,
+                        ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        label,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              label,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.primary,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (isGenerating)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Text(
+                                'Generating...',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.orange,
+                                ),
+                              ),
+                            )
+                          else if (isFailed)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.redAccent.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Text(
+                                'Failed',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.redAccent,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                       const SizedBox(height: 6),
-                      Text(
-                        'Folder: $folderPath',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.onSurfaceVariant,
-                          fontFamily: 'monospace',
+                      if (isGenerating)
+                        const Text(
+                          'AI is drafting and compiling Cover Letter in Open-Overleaf...',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.orange,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        )
+                      else if (isFailed)
+                        Text(
+                          errorMessage.isNotEmpty ? errorMessage : 'Generation failed.',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.redAccent,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        )
+                      else ...[
+                        Text(
+                          'Folder: $folderPath',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.onSurfaceVariant,
+                            fontFamily: 'monospace',
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '$pageCount page(s) · $formattedDate',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.outline,
+                        const SizedBox(height: 4),
+                        Text(
+                          '$pageCount page(s) · $formattedDate',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.outline,
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),

@@ -528,11 +528,20 @@ class ApiService {
   /// Saves self-hosted open-overleaf configuration.
   Future<bool> saveOverleafConfig({
     required String deploymentUrl,
+    String? mcpSecret,
+    String? projectName,
   }) async {
     try {
-      final response = await _dio.post('/overleaf/config', data: {
+      final payload = <String, dynamic>{
         'deployment_url': deploymentUrl,
-      });
+      };
+      if (mcpSecret != null && mcpSecret.isNotEmpty) {
+        payload['mcp_secret'] = mcpSecret;
+      }
+      if (projectName != null && projectName.isNotEmpty) {
+        payload['project_name'] = projectName;
+      }
+      final response = await _dio.post('/overleaf/config', data: payload);
       return response.statusCode == 200;
     } catch (e) {
       _logger.e(e);
@@ -771,6 +780,107 @@ class ApiService {
     } catch (e) {
       _logger.e(e);
       return false;
+    }
+  }
+
+  /// Triggers background asynchronous tailoring for both Resume and Cover Letter.
+  /// Returns immediately with 202 Accepted acknowledgement.
+  Future<Map<String, dynamic>?> tailorApplicationAsync({
+    required String jobId,
+    int? targetResumePages,
+    int? targetCoverLetterPages,
+  }) async {
+    try {
+      final payload = <String, dynamic>{'job_id': jobId};
+      if (targetResumePages != null && targetResumePages > 0) {
+        payload['target_resume_pages'] = targetResumePages;
+      }
+      if (targetCoverLetterPages != null && targetCoverLetterPages > 0) {
+        payload['target_cover_letter_pages'] = targetCoverLetterPages;
+      }
+      final response = await _dio.post(
+        '/tailor/application',
+        data: payload,
+      );
+      if (response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return null;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      if (e.response?.data is Map<String, dynamic>) {
+        final data = Map<String, dynamic>.from(e.response!.data as Map);
+        data['status_code'] = e.response?.statusCode;
+        return data;
+      }
+      return {'error': e.message ?? 'Network error', 'status_code': e.response?.statusCode};
+    } catch (e) {
+      _logger.e(e);
+      return {'error': e.toString()};
+    }
+  }
+
+  /// Fetches user notifications.
+  Future<List<Map<String, dynamic>>> fetchNotifications() async {
+    try {
+      final response = await _dio.get('/notifications');
+      final data = response.data;
+      if (data != null && data['data'] is List) {
+        return List<Map<String, dynamic>>.from(data['data'] as List);
+      }
+      return [];
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return [];
+    } catch (e) {
+      _logger.e(e);
+      return [];
+    }
+  }
+
+  /// Marks a specific notification as read.
+  Future<bool> markNotificationRead(String id) async {
+    try {
+      final response = await _dio.post('/notifications/$id/read');
+      return response.statusCode == 200;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return false;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
+
+  /// Marks all user notifications as read.
+  Future<bool> markAllNotificationsRead() async {
+    try {
+      final response = await _dio.post('/notifications/read-all');
+      return response.statusCode == 200;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return false;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
+
+  /// Fetches count of unread notifications.
+  Future<int> fetchUnreadNotificationsCount() async {
+    try {
+      final response = await _dio.get('/notifications/unread-count');
+      final data = response.data;
+      if (data != null && data['unread_count'] is int) {
+        return data['unread_count'] as int;
+      }
+      return 0;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return 0;
+    } catch (e) {
+      _logger.e(e);
+      return 0;
     }
   }
 }

@@ -11,22 +11,24 @@ import (
 func TestBuildMCPClientForUserProducesValidClient(t *testing.T) {
 	credentials := &services.UserOverleafCredentials{
 		DeploymentURL: "https://overleaf.example.com",
+		CustomSecret:  "user-encrypted-mcp-secret",
 	}
-	mcpClient := services.BuildMCPClientForUser(credentials, "test-mcp-secret")
+	mcpClient := services.BuildMCPClientForUser(credentials, "")
 	if mcpClient == nil {
 		t.Fatal("expected non-nil MCPClient")
 	}
 	if mcpClient.BaseURL != "https://overleaf.example.com" {
 		t.Fatalf("unexpected base URL: %s", mcpClient.BaseURL)
 	}
-	if mcpClient.Token != "test-mcp-secret" {
-		t.Fatalf("expected bearer token 'test-mcp-secret', got %q", mcpClient.Token)
+	if mcpClient.Token != "user-encrypted-mcp-secret" {
+		t.Fatalf("expected bearer token 'user-encrypted-mcp-secret', got %q", mcpClient.Token)
 	}
 }
 
 func TestBuildMCPClientTokenIsDeterministic(t *testing.T) {
 	credentials := &services.UserOverleafCredentials{
 		DeploymentURL: "https://overleaf.example.com",
+		CustomSecret:  "shared-secret",
 	}
 	firstToken := services.BuildMCPClientForUser(credentials, "shared-secret").Token
 	secondToken := services.BuildMCPClientForUser(credentials, "shared-secret").Token
@@ -49,5 +51,8 @@ func TestErrNoOverleafConfigIsDistinctError(t *testing.T) {
 	}
 	if !errors.Is(services.ErrNoOverleafConfig, services.ErrNoOverleafConfig) {
 		t.Fatal("ErrNoOverleafConfig must satisfy errors.Is with itself")
+	}
+	if services.ErrNoOverleafSecret == nil {
+		t.Fatal("ErrNoOverleafSecret must be non-nil")
 	}
 }

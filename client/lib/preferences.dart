@@ -100,6 +100,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   late final TextEditingController _roleController;
   late final TextEditingController _locationController;
   late final TextEditingController _overleafUrlController;
+  late final TextEditingController _overleafSecretController;
+  late final TextEditingController _overleafProjectController;
   late final TextEditingController _bioTextController;
 
   bool _isParsingCV = false;
@@ -109,6 +111,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
 
   bool _anyWorkModel = false;
   bool _anyLocation = false;
+  bool _hasConfiguredSecret = false;
+  bool _obscureSecret = true;
 
   final List<String> _allIndustries = [
     'Fintech',
@@ -154,6 +158,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   ];
   late Set<String> _selectedLocations;
   String _currency = 'USD';
+  int _targetResumePages = 1;
+  int _targetCoverLetterPages = 1;
 
   @override
   void initState() {
@@ -168,6 +174,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     _roleController = TextEditingController();
     _locationController = TextEditingController();
     _overleafUrlController = TextEditingController();
+    _overleafSecretController = TextEditingController();
+    _overleafProjectController = TextEditingController(text: 'job_applications');
     _bioTextController = TextEditingController();
     _baseSalary = widget.initialPreferences?.baseSalary ?? 120.0;
     _equityExpectation =
@@ -220,6 +228,12 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
         } else if (apiPref['master_cv_text'] != null && (apiPref['master_cv_text'] as String).isNotEmpty) {
           _bioTextController.text = apiPref['master_cv_text'] as String;
         }
+        if (apiPref['target_resume_pages'] != null) {
+          _targetResumePages = (apiPref['target_resume_pages'] as num).toInt().clamp(1, 4);
+        }
+        if (apiPref['target_cover_letter_pages'] != null) {
+          _targetCoverLetterPages = (apiPref['target_cover_letter_pages'] as num).toInt().clamp(1, 4);
+        }
       });
     }
 
@@ -227,6 +241,11 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     if (overleaf != null && mounted) {
       setState(() {
         _overleafUrlController.text = overleaf['deployment_url'] ?? '';
+        _overleafProjectController.text = overleaf['project_name'] ?? 'job_applications';
+        _hasConfiguredSecret = overleaf['has_secret'] == true;
+        if (overleaf['mcp_secret'] != null && (overleaf['mcp_secret'] as String).isNotEmpty) {
+          _overleafSecretController.text = overleaf['mcp_secret'] as String;
+        }
       });
     }
   }
@@ -236,6 +255,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     _roleController.dispose();
     _locationController.dispose();
     _overleafUrlController.dispose();
+    _overleafSecretController.dispose();
+    _overleafProjectController.dispose();
     _bioTextController.dispose();
     super.dispose();
   }
@@ -264,6 +285,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             _buildCompensationTarget(),
             const SizedBox(height: 24),
             _buildOverleafCard(),
+            const SizedBox(height: 24),
+            _buildPageBudgetCard(),
             const SizedBox(height: 32),
             _buildSaveButton(),
             const SizedBox(height: 48),
@@ -404,7 +427,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Self-hosted Open-Overleaf server URL for automated LaTeX resume & cover letter compilation.',
+            'Self-hosted Open-Overleaf server for automated LaTeX resume & cover letter compilation.',
             style: TextStyle(fontSize: 13, color: AppColors.onSurfaceVariant),
           ),
           const SizedBox(height: 16),
@@ -412,11 +435,39 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             controller: _overleafUrlController,
             decoration: const InputDecoration(
               labelText: 'Open-Overleaf Server URL',
-              hintText: 'e.g. https://overleaf.yourdomain.com',
+              hintText: 'e.g. https://overleaf.example.com',
               border: OutlineInputBorder(),
+              helperText: 'Base URL of your running Open-Overleaf instance or MCP endpoint',
             ),
           ),
           const SizedBox(height: 14),
+          TextField(
+            controller: _overleafSecretController,
+            obscureText: _obscureSecret,
+            decoration: InputDecoration(
+              labelText: _hasConfiguredSecret ? 'MCP Secret / Access Token' : 'MCP Secret / Access Token (Required)',
+              hintText: _hasConfiguredSecret ? '•••••••••••••••• (Configured & Encrypted)' : 'e.g. OVERLEAF_MCP_SECRET or OVERLEAF_MCP_TOKEN',
+              border: const OutlineInputBorder(),
+              helperText: _hasConfiguredSecret
+                  ? 'Access token is securely encrypted (AES-256-GCM). Enter a new value to update.'
+                  : 'Required for private authentication. Encrypted with AES-256 at rest.',
+              suffixIcon: IconButton(
+                icon: Icon(_obscureSecret ? Icons.visibility_off : Icons.visibility),
+                onPressed: () => setState(() => _obscureSecret = !_obscureSecret),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _overleafProjectController,
+            decoration: const InputDecoration(
+              labelText: 'Project / Workspace Name',
+              hintText: 'job_applications',
+              border: OutlineInputBorder(),
+              helperText: 'Top-level folder or workspace in Open-Overleaf (defaults to job_applications)',
+            ),
+          ),
+          const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -424,12 +475,34 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
               label: const Text('Save Overleaf Integration'),
               onPressed: () async {
                 final url = _overleafUrlController.text.trim();
+                final secret = _overleafSecretController.text.trim();
+                final project = _overleafProjectController.text.trim();
+
+                if (url.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please enter your Open-Overleaf Server URL')),
+                  );
+                  return;
+                }
+
+                if (!_hasConfiguredSecret && secret.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please provide your MCP Secret / Access Token to secure your Open-Overleaf connection')),
+                  );
+                  return;
+                }
 
                 final ok = await ApiService().saveOverleafConfig(
                   deploymentUrl: url,
+                  mcpSecret: secret.isNotEmpty ? secret : null,
+                  projectName: project.isNotEmpty ? project : 'job_applications',
                 );
 
                 if (!mounted) return;
+                if (ok && secret.isNotEmpty) {
+                  setState(() => _hasConfiguredSecret = true);
+                  _overleafSecretController.clear();
+                }
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
@@ -441,6 +514,66 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
                 );
               },
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPageBudgetCard() {
+    return _buildSectionCard(
+      icon: Icons.auto_stories,
+      title: 'Target Page Limits',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Configure strict page budgets. The AI tailoring engine applies multi-pass tightening loops to fit your content cleanly across the full page without leaving empty white space.',
+            style: TextStyle(fontSize: 13, color: AppColors.onSurfaceVariant),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Resume Target Length',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.primary),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [1, 2, 3, 4].map((page) {
+              final isSelected = _targetResumePages == page;
+              return ChoiceChip(
+                label: Text('$page ${page == 1 ? 'Page' : 'Pages'}'),
+                selected: isSelected,
+                selectedColor: AppColors.primary.withValues(alpha: 0.15),
+                checkmarkColor: AppColors.primary,
+                onSelected: (selected) {
+                  if (selected) setState(() => _targetResumePages = page);
+                },
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Cover Letter Target Length',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.primary),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [1, 2, 3, 4].map((page) {
+              final isSelected = _targetCoverLetterPages == page;
+              return ChoiceChip(
+                label: Text('$page ${page == 1 ? 'Page' : 'Pages'}'),
+                selected: isSelected,
+                selectedColor: AppColors.primary.withValues(alpha: 0.15),
+                checkmarkColor: AppColors.primary,
+                onSelected: (selected) {
+                  if (selected) setState(() => _targetCoverLetterPages = page);
+                },
+              );
+            }).toList(),
           ),
         ],
       ),
@@ -1076,6 +1209,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             'currency': _currency,
             'bio_experience_text': _bioTextController.text,
             'master_cv_text': _bioTextController.text,
+            'target_resume_pages': _targetResumePages,
+            'target_cover_letter_pages': _targetCoverLetterPages,
           });
 
           if (!mounted) return;

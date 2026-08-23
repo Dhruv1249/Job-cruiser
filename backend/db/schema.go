@@ -75,9 +75,9 @@ var schemaQueries = []string{
 	`CREATE TABLE IF NOT EXISTS user_overleaf_config (
 		user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
 		deployment_url TEXT NOT NULL,
-		github_username TEXT NOT NULL,
-		github_repo_name TEXT NOT NULL,
-		encrypted_access_token TEXT NOT NULL,
+		project_name TEXT DEFAULT 'job_applications',
+		encrypted_access_token TEXT,
+		token_encrypted BOOLEAN DEFAULT false,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`,
 
@@ -320,6 +320,18 @@ var schemaQueries = []string{
 	);`,
 
 	`ALTER TABLE user_overleaf_config ADD COLUMN IF NOT EXISTS token_encrypted BOOLEAN DEFAULT false;`,
+	`ALTER TABLE user_overleaf_config ADD COLUMN IF NOT EXISTS project_name TEXT DEFAULT 'job_applications';`,
+	`ALTER TABLE user_overleaf_config DROP COLUMN IF EXISTS github_username;`,
+	`ALTER TABLE user_overleaf_config DROP COLUMN IF EXISTS github_repo_name;`,
+	`ALTER TABLE user_overleaf_config ALTER COLUMN encrypted_access_token DROP NOT NULL;`,
+
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS target_resume_pages INTEGER DEFAULT 1;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS target_cover_letter_pages INTEGER DEFAULT 1;`,
+	`CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);`,
+	`ALTER TABLE resume_versions ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'ready';`,
+	`ALTER TABLE resume_versions ADD COLUMN IF NOT EXISTS error_message TEXT;`,
+	`ALTER TABLE cover_letter_versions ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'ready';`,
+	`ALTER TABLE cover_letter_versions ADD COLUMN IF NOT EXISTS error_message TEXT;`,
 }
 
 // InitSchema executes the queries in sequence.

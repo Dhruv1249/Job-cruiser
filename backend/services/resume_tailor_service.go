@@ -16,10 +16,39 @@ import (
 )
 
 const defaultGeminiBaseURL = "https://generativelanguage.googleapis.com"
-const defaultGeminiModel = "gemini-2.5-flash-lite"
 const defaultTargetPages = 1
 const defaultMaxTighteningPasses = 3
 const jobApplicationsProjectName = "job_applications"
+
+var defaultGeminiModelsCascade = []string{
+	"gemini-3.5-flash-lite",
+	"gemini-3.1-flash-lite",
+	"gemini-2.5-flash-lite",
+}
+
+/*
+GetGeminiModelCascade parses GEMINI_MODELS or GEMINI_MODEL environment variables,
+falling back to the default ordered cascade list.
+*/
+func GetGeminiModelCascade() []string {
+	environmentModels := os.Getenv("GEMINI_MODELS")
+	if environmentModels == "" {
+		environmentModels = os.Getenv("GEMINI_MODEL")
+	}
+	if environmentModels != "" {
+		var parsedModels []string
+		for _, rawModel := range strings.Split(environmentModels, ",") {
+			cleanedModel := strings.TrimSpace(rawModel)
+			if cleanedModel != "" {
+				parsedModels = append(parsedModels, cleanedModel)
+			}
+		}
+		if len(parsedModels) > 0 {
+			return parsedModels
+		}
+	}
+	return defaultGeminiModelsCascade
+}
 
 var markdownLatexFenceRegexp = regexp.MustCompile("(?s)^\\s*`{3,}(latex|tex)?\\s*")
 var markdownClosingFenceRegexp = regexp.MustCompile("(?s)\\s*`{3,}\\s*$")
@@ -48,7 +77,7 @@ type ResumeTailorResult struct {
 type ResumeTailorService struct {
 	GeminiBaseURL       string
 	GeminiAPIKey        string
-	GeminiModel         string
+	GeminiModels        []string
 	MaxTighteningPasses int
 	HTTPClient          *http.Client
 	MCPClient           *MCPClient
@@ -59,10 +88,7 @@ func NewResumeTailorService(geminiBaseURL string, geminiAPIKey string, mcpClient
 	if geminiBaseURL == "" {
 		geminiBaseURL = defaultGeminiBaseURL
 	}
-	geminiModel := os.Getenv("GEMINI_MODEL")
-	if geminiModel == "" {
-		geminiModel = defaultGeminiModel
-	}
+	geminiModels := GetGeminiModelCascade()
 	maxPassesEnv := os.Getenv("TAILOR_MAX_TIGHTENING_PASSES")
 	maxPasses, parseError := strconv.Atoi(maxPassesEnv)
 	if parseError != nil || maxPasses <= 0 {
@@ -71,7 +97,7 @@ func NewResumeTailorService(geminiBaseURL string, geminiAPIKey string, mcpClient
 	return &ResumeTailorService{
 		GeminiBaseURL:       geminiBaseURL,
 		GeminiAPIKey:        geminiAPIKey,
-		GeminiModel:         geminiModel,
+		GeminiModels:        geminiModels,
 		MaxTighteningPasses: maxPasses,
 		MCPClient:           mcpClient,
 		HTTPClient: &http.Client{
@@ -112,7 +138,7 @@ func sanitizeGeminiLatex(rawOutput string) string {
 }
 
 // TailorResumeToFolder generates tailored LaTeX using Gemini based on the job context and user bio,
-// writes it to job_applications/{folderPath}/resume.tex via the provided mcpClient,
+// writes it to {projectName}/{folderPath}/resume.tex via the provided mcpClient,
 // compiles with xelatex (up to MaxTighteningPasses retry loops to hit the page budget),
 // and returns the result including base64 PDF bytes.
 func (service *ResumeTailorService) TailorResumeToFolder(
@@ -121,6 +147,7 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 	userBio string,
 	jobContext JobTailoringContext,
 	folderPath string,
+	projectName string,
 	targetPages int,
 ) (*ResumeTailorResult, error) {
 	if targetPages <= 0 {
@@ -129,6 +156,10 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 	effectiveMCPClient := mcpClient
 	if effectiveMCPClient == nil {
 		effectiveMCPClient = service.MCPClient
+	}
+	effectiveProjectName := strings.TrimSpace(projectName)
+	if effectiveProjectName == "" {
+		effectiveProjectName = jobApplicationsProjectName
 	}
 
 	techStackList := strings.Join(jobContext.TechStack, ", ")
@@ -142,9 +173,13 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 			"JOB DESCRIPTION\n%s\n\n"+
 			"CANDIDATE EXPERIENCE BANK\n%s\n\n"+
 			"STRICT RULES\n"+
-			"- Page budget: exactly %d page(s). Prune aggressively if needed.\n"+
-			"- Never invent experience. Reorder, reword, and emphasize real facts only.\n"+
-			"- Emphasize Tech keywords in bullets where factually accurate.\n"+
+			"- Page budget: exactly %d page(s). Ensure the resume fills the entire target page area completely without empty space or whitespace gaps at the bottom.\n"+
+			"- Standard Packages Only: Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
+			"- Escape Special Characters: ALWAYS properly escape special characters in text, company names, titles, and links: use \\& for &, \\%% for %%, \\_ for _, \\# for #, \\$ for $.\n"+
+			"- Relevant Details Selection: Compare the Job Description requirements with the candidate experience bank. If the candidate has multiple projects, select ONLY the top 2-3 most relevant projects and experiences that directly match the JD's tech stack and responsibilities. Do not include unrelated projects.\n"+
+			"- Truthfulness & No Fabrication: NEVER invent fake employment history, fake companies, or fake degrees. Reorder, rephrase, and emphasize authentic facts and real candidate skills from the experience bank.\n"+
+			"- Full Page Density (No Emptiness): If candidate details are brief, expand upon the depth of their actual technical implementation, architecture, databases, tools, APIs, testing, and achievements to produce a dense, impressive, fully-filled %d-page resume.\n"+
+			"- Emphasize matching tech keywords in bullets and skills sections.\n"+
 			"- Output MUST begin with \\documentclass and end with \\end{document}.",
 		jobContext.Title,
 		jobContext.Company,
@@ -152,6 +187,7 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 		techStackList,
 		jobContext.RawDesc,
 		userBio,
+		targetPages,
 		targetPages,
 	)
 
@@ -164,13 +200,57 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 	texFilePath := fmt.Sprintf("%s/resume.tex", folderPath)
 	pdfFileName := fmt.Sprintf("%s/resume.pdf", folderPath)
 
-	if writeError := effectiveMCPClient.WriteProjectFile(ctx, jobApplicationsProjectName, texFilePath, tailoredTeX); writeError != nil {
+	if writeError := effectiveMCPClient.WriteProjectFile(ctx, effectiveProjectName, texFilePath, tailoredTeX); writeError != nil {
 		return nil, fmt.Errorf("failed writing resume.tex to open-overleaf: %w", writeError)
 	}
 
-	compileResult, compileError := effectiveMCPClient.CompileProject(ctx, jobApplicationsProjectName, "xelatex", texFilePath)
+	compileResult, compileError := effectiveMCPClient.CompileProject(ctx, effectiveProjectName, "xelatex", texFilePath)
+
+	const maxHealingAttempts = 4
+	for healPass := 1; healPass <= maxHealingAttempts && (compileError != nil || (compileResult != nil && compileResult.Status == "failed")); healPass++ {
+		errorLog := ""
+		if compileResult != nil {
+			if compileResult.OutputLog != "" {
+				errorLog = compileResult.OutputLog
+			} else if compileResult.Errors != "" {
+				errorLog = compileResult.Errors
+			}
+		}
+		if errorLog == "" && compileError != nil {
+			errorLog = compileError.Error()
+		}
+
+		healingPrompt := fmt.Sprintf(
+			"You are an expert LaTeX debugging engine. The LaTeX resume document below failed to compile with the following compiler error log:\n\n"+
+				"--- COMPILER ERROR LOG ---\n%s\n--- END ERROR LOG ---\n\n"+
+				"--- FAILED LATEX SOURCE ---\n%s\n--- END LATEX SOURCE ---\n\n"+
+				"DEBUGGING & FIXING INSTRUCTIONS:\n"+
+				"1. Correct all syntax errors, undefined macros, and environment mismatches shown in the log.\n"+
+				"2. Escape all special characters in text: use \\& for &, \\%% for %%, \\_ for _, \\# for #, and \\$ for $.\n"+
+				"3. Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
+				"4. Output ONLY the complete, corrected, compilable LaTeX code with no markdown fences or commentary.",
+			errorLog,
+			tailoredTeX,
+		)
+		healedTeX, healErr := service.generateContentWithGemini(ctx, healingPrompt)
+		if healErr != nil {
+			break
+		}
+		healedTeX = sanitizeGeminiLatex(healedTeX)
+		if writeErr := effectiveMCPClient.WriteProjectFile(ctx, effectiveProjectName, texFilePath, healedTeX); writeErr != nil {
+			break
+		}
+		newResult, newErr := effectiveMCPClient.CompileProject(ctx, effectiveProjectName, "xelatex", texFilePath)
+		tailoredTeX = healedTeX
+		compileResult = newResult
+		compileError = newErr
+	}
+
 	if compileError != nil {
-		return nil, fmt.Errorf("failed compiling resume in open-overleaf: %w", compileError)
+		return nil, fmt.Errorf("failed compiling resume in open-overleaf after healing attempts: %w", compileError)
+	}
+	if compileResult != nil && compileResult.Status == "failed" {
+		return nil, fmt.Errorf("failed compiling resume in open-overleaf: %s", compileResult.Errors)
 	}
 
 	for passIndex := 1; passIndex <= service.MaxTighteningPasses && compileResult.PageCount > targetPages; passIndex++ {
@@ -190,10 +270,10 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 			break
 		}
 		refinedTeX = sanitizeGeminiLatex(refinedTeX)
-		if writeError := effectiveMCPClient.WriteProjectFile(ctx, jobApplicationsProjectName, texFilePath, refinedTeX); writeError != nil {
+		if writeError := effectiveMCPClient.WriteProjectFile(ctx, effectiveProjectName, texFilePath, refinedTeX); writeError != nil {
 			break
 		}
-		newCompileResult, newCompileError := effectiveMCPClient.CompileProject(ctx, jobApplicationsProjectName, "xelatex", texFilePath)
+		newCompileResult, newCompileError := effectiveMCPClient.CompileProject(ctx, effectiveProjectName, "xelatex", texFilePath)
 		if newCompileError != nil {
 			break
 		}
@@ -201,7 +281,7 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 		compileResult = newCompileResult
 	}
 
-	pdfResult, pdfError := effectiveMCPClient.GetProjectPDF(ctx, jobApplicationsProjectName, pdfFileName)
+	pdfResult, pdfError := effectiveMCPClient.GetProjectPDF(ctx, effectiveProjectName, pdfFileName)
 	if pdfError != nil {
 		pdfResult = &PDFResult{
 			FileName:  pdfFileName,
@@ -212,7 +292,7 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 	}
 
 	return &ResumeTailorResult{
-		ProjectName:   jobApplicationsProjectName,
+		ProjectName:   effectiveProjectName,
 		FolderPath:    folderPath,
 		FilePath:      texFilePath,
 		TargetPages:   targetPages,
@@ -222,7 +302,7 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 }
 
 // GenerateCoverLetterToFolder generates a personalized LaTeX cover letter using Gemini based on job context
-// and user bio, writes it to job_applications/{folderPath}/cover_letter.tex via mcpClient,
+// and user bio, writes it to {projectName}/{folderPath}/cover_letter.tex via mcpClient,
 // compiles with xelatex, and returns the result including base64 PDF bytes.
 func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 	ctx context.Context,
@@ -230,10 +310,19 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 	userBio string,
 	jobContext JobTailoringContext,
 	folderPath string,
+	projectName string,
+	targetPages int,
 ) (*ResumeTailorResult, error) {
+	if targetPages <= 0 {
+		targetPages = defaultTargetPages
+	}
 	effectiveMCPClient := mcpClient
 	if effectiveMCPClient == nil {
 		effectiveMCPClient = service.MCPClient
+	}
+	effectiveProjectName := strings.TrimSpace(projectName)
+	if effectiveProjectName == "" {
+		effectiveProjectName = jobApplicationsProjectName
 	}
 
 	techStackList := strings.Join(jobContext.TechStack, ", ")
@@ -245,10 +334,14 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 			"  Seniority: %s\n"+
 			"  Tech:      %s\n\n"+
 			"JOB DESCRIPTION\n%s\n\n"+
-			"CANDIDATE BIO\n%s\n\n"+
+			"CANDIDATE BIO & EXPERIENCE\n%s\n\n"+
 			"STRICT RULES\n"+
-			"- Exactly 1 page. Professional tone. Address the hiring team directly.\n"+
-			"- Reference specific company details and tech stack from the JD.\n"+
+			"- Page budget: exactly %d page(s). Professional tone. Address the hiring team directly.\n"+
+			"- Standard Packages Only: Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
+			"- Escape Special Characters: ALWAYS properly escape special characters in text, company names, titles, and links: use \\& for &, \\%% for %%, \\_ for _, \\# for #, \\$ for $.\n"+
+			"- Selection of Matching Details: Select and highlight ONLY the candidate's projects and skills that directly align with the job description's tech stack and mission.\n"+
+			"- Truthfulness: Never invent facts, companies, or experience.\n"+
+			"- Full Page Density: Structure the letter with a strong opening hook, 2-3 substantial technical body paragraphs explaining concrete relevant accomplishments, and a confident closing that neatly fills the %d page(s) without large empty gaps.\n"+
 			"- Output MUST begin with \\documentclass and end with \\end{document}.",
 		jobContext.Title,
 		jobContext.Company,
@@ -256,6 +349,8 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 		techStackList,
 		jobContext.RawDesc,
 		userBio,
+		targetPages,
+		targetPages,
 	)
 
 	coverLetterTeX, generateError := service.generateContentWithGemini(ctx, coverLetterPrompt)
@@ -267,16 +362,89 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 	texFilePath := fmt.Sprintf("%s/cover_letter.tex", folderPath)
 	pdfFileName := fmt.Sprintf("%s/cover_letter.pdf", folderPath)
 
-	if writeError := effectiveMCPClient.WriteProjectFile(ctx, jobApplicationsProjectName, texFilePath, coverLetterTeX); writeError != nil {
+	if writeError := effectiveMCPClient.WriteProjectFile(ctx, effectiveProjectName, texFilePath, coverLetterTeX); writeError != nil {
 		return nil, fmt.Errorf("failed writing cover_letter.tex to open-overleaf: %w", writeError)
 	}
 
-	compileResult, compileError := effectiveMCPClient.CompileProject(ctx, jobApplicationsProjectName, "xelatex", texFilePath)
-	if compileError != nil {
-		return nil, fmt.Errorf("failed compiling cover letter in open-overleaf: %w", compileError)
+	compileResult, compileError := effectiveMCPClient.CompileProject(ctx, effectiveProjectName, "xelatex", texFilePath)
+
+	const maxHealingAttempts = 4
+	for healPass := 1; healPass <= maxHealingAttempts && (compileError != nil || (compileResult != nil && compileResult.Status == "failed")); healPass++ {
+		errorLog := ""
+		if compileResult != nil {
+			if compileResult.OutputLog != "" {
+				errorLog = compileResult.OutputLog
+			} else if compileResult.Errors != "" {
+				errorLog = compileResult.Errors
+			}
+		}
+		if errorLog == "" && compileError != nil {
+			errorLog = compileError.Error()
+		}
+
+		healingPrompt := fmt.Sprintf(
+			"You are an expert LaTeX debugging engine. The LaTeX cover letter document below failed to compile with the following compiler error log:\n\n"+
+				"--- COMPILER ERROR LOG ---\n%s\n--- END ERROR LOG ---\n\n"+
+				"--- FAILED LATEX SOURCE ---\n%s\n--- END LATEX SOURCE ---\n\n"+
+				"DEBUGGING & FIXING INSTRUCTIONS:\n"+
+				"1. Correct all syntax errors, undefined macros, and environment mismatches shown in the log.\n"+
+				"2. Escape all special characters in text: use \\& for &, \\%% for %%, \\_ for _, \\# for #, and \\$ for $.\n"+
+				"3. Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
+				"4. Output ONLY the complete, corrected, compilable LaTeX code with no markdown fences or commentary.",
+			errorLog,
+			coverLetterTeX,
+		)
+		healedTeX, healErr := service.generateContentWithGemini(ctx, healingPrompt)
+		if healErr != nil {
+			break
+		}
+		healedTeX = sanitizeGeminiLatex(healedTeX)
+		if writeErr := effectiveMCPClient.WriteProjectFile(ctx, effectiveProjectName, texFilePath, healedTeX); writeErr != nil {
+			break
+		}
+		newResult, newErr := effectiveMCPClient.CompileProject(ctx, effectiveProjectName, "xelatex", texFilePath)
+		coverLetterTeX = healedTeX
+		compileResult = newResult
+		compileError = newErr
 	}
 
-	pdfResult, pdfError := effectiveMCPClient.GetProjectPDF(ctx, jobApplicationsProjectName, pdfFileName)
+	if compileError != nil {
+		return nil, fmt.Errorf("failed compiling cover letter in open-overleaf after healing attempts: %w", compileError)
+	}
+	if compileResult != nil && compileResult.Status == "failed" {
+		return nil, fmt.Errorf("failed compiling cover letter in open-overleaf: %s", compileResult.Errors)
+	}
+
+	for passIndex := 1; passIndex <= service.MaxTighteningPasses && compileResult.PageCount > targetPages; passIndex++ {
+		tighteningPrompt := fmt.Sprintf(
+			"The compiled LaTeX cover letter spans %d pages, exceeding the strict target of %d page(s).\n"+
+				"Tightening pass %d of %d: reduce paragraph lengths, adjust spacing/margins to fit neatly on %d page(s).\n\n"+
+				"Current LaTeX:\n%s\n\n"+
+				"Output ONLY the revised LaTeX — no markdown fences, no commentary.",
+			compileResult.PageCount,
+			targetPages,
+			passIndex,
+			service.MaxTighteningPasses,
+			targetPages,
+			coverLetterTeX,
+		)
+		refinedTeX, refinementError := service.generateContentWithGemini(ctx, tighteningPrompt)
+		if refinementError != nil {
+			break
+		}
+		refinedTeX = sanitizeGeminiLatex(refinedTeX)
+		if writeError := effectiveMCPClient.WriteProjectFile(ctx, effectiveProjectName, texFilePath, refinedTeX); writeError != nil {
+			break
+		}
+		newCompileResult, newCompileError := effectiveMCPClient.CompileProject(ctx, effectiveProjectName, "xelatex", texFilePath)
+		if newCompileError != nil {
+			break
+		}
+		coverLetterTeX = refinedTeX
+		compileResult = newCompileResult
+	}
+
+	pdfResult, pdfError := effectiveMCPClient.GetProjectPDF(ctx, effectiveProjectName, pdfFileName)
 	if pdfError != nil {
 		pdfResult = &PDFResult{
 			FileName:  pdfFileName,
@@ -287,10 +455,10 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 	}
 
 	return &ResumeTailorResult{
-		ProjectName:   jobApplicationsProjectName,
+		ProjectName:   effectiveProjectName,
 		FolderPath:    folderPath,
 		FilePath:      texFilePath,
-		TargetPages:   1,
+		TargetPages:   targetPages,
 		CompileResult: compileResult,
 		PDFResult:     pdfResult,
 	}, nil
@@ -432,12 +600,6 @@ func (service *ResumeTailorService) GenerateCoverLetterDirect(
 }
 
 func (service *ResumeTailorService) generateContentWithGemini(ctx context.Context, promptText string) (string, error) {
-	targetEndpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s",
-		service.GeminiBaseURL,
-		service.GeminiModel,
-		service.GeminiAPIKey,
-	)
-
 	payloadMap := map[string]interface{}{
 		"contents": []map[string]interface{}{
 			{
@@ -453,35 +615,54 @@ func (service *ResumeTailorService) generateContentWithGemini(ctx context.Contex
 		return "", fmt.Errorf("failed encoding gemini request: %w", marshalError)
 	}
 
-	const maxRetries = 3
-	for attemptIndex := 1; attemptIndex <= maxRetries; attemptIndex++ {
+	modelsToTry := service.GeminiModels
+	if len(modelsToTry) == 0 {
+		modelsToTry = defaultGeminiModelsCascade
+	}
+
+	var lastError error
+
+	for modelIndex, modelName := range modelsToTry {
+		targetEndpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s",
+			service.GeminiBaseURL,
+			modelName,
+			service.GeminiAPIKey,
+		)
+
 		httpRequest, requestError := http.NewRequestWithContext(ctx, http.MethodPost, targetEndpoint, bytes.NewBuffer(jsonBytes))
 		if requestError != nil {
-			return "", fmt.Errorf("failed creating gemini HTTP request: %w", requestError)
+			lastError = fmt.Errorf("failed creating gemini HTTP request for model %s: %w", modelName, requestError)
+			continue
 		}
 		httpRequest.Header.Set("Content-Type", "application/json")
 
 		httpResponse, responseError := service.HTTPClient.Do(httpRequest)
 		if responseError != nil {
-			return "", fmt.Errorf("gemini HTTP request failed: %w", responseError)
+			lastError = fmt.Errorf("gemini HTTP request failed for model %s: %w", modelName, responseError)
+			continue
 		}
 
 		responseBytes, readError := io.ReadAll(httpResponse.Body)
 		httpResponse.Body.Close()
 		if readError != nil {
-			return "", fmt.Errorf("failed reading gemini response: %w", readError)
+			lastError = fmt.Errorf("failed reading gemini response for model %s: %w", modelName, readError)
+			continue
 		}
 
 		if httpResponse.StatusCode == http.StatusTooManyRequests {
-			if attemptIndex < maxRetries {
-				time.Sleep(30 * time.Second)
+			lastError = fmt.Errorf("gemini model %s returned 429 rate limit", modelName)
+			if modelIndex < len(modelsToTry)-1 {
 				continue
 			}
-			return "", fmt.Errorf("gemini rate limit exceeded after %d retries", maxRetries)
+			return "", fmt.Errorf("all models in Gemini cascade returned 429 rate limit: %w", lastError)
 		}
 
 		if httpResponse.StatusCode != http.StatusOK {
-			return "", fmt.Errorf("gemini returned non-200 status %d: %s", httpResponse.StatusCode, string(responseBytes))
+			lastError = fmt.Errorf("gemini model %s returned status %d: %s", modelName, httpResponse.StatusCode, string(responseBytes))
+			if modelIndex < len(modelsToTry)-1 {
+				continue
+			}
+			return "", lastError
 		}
 
 		var responseEnvelope struct {
@@ -495,14 +676,20 @@ func (service *ResumeTailorService) generateContentWithGemini(ctx context.Contex
 		}
 
 		if unmarshalError := json.Unmarshal(responseBytes, &responseEnvelope); unmarshalError != nil {
-			return "", fmt.Errorf("failed unmarshaling gemini response: %w", unmarshalError)
+			lastError = fmt.Errorf("failed unmarshaling gemini response from model %s: %w", modelName, unmarshalError)
+			continue
 		}
 
 		if len(responseEnvelope.Candidates) == 0 || len(responseEnvelope.Candidates[0].Content.Parts) == 0 {
-			return "", fmt.Errorf("gemini returned empty response candidate")
+			lastError = fmt.Errorf("gemini model %s returned empty response candidate", modelName)
+			continue
 		}
 
 		return responseEnvelope.Candidates[0].Content.Parts[0].Text, nil
 	}
-	return "", fmt.Errorf("gemini generation failed after max retries")
+
+	if lastError != nil {
+		return "", fmt.Errorf("gemini generation failed across model cascade: %w", lastError)
+	}
+	return "", fmt.Errorf("gemini generation failed with no available models")
 }

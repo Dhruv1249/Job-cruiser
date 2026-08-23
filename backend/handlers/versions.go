@@ -36,6 +36,8 @@ type ResumeVersionItem struct {
 	PDFUrl              string    `json:"pdf_url"`
 	PageCount           int       `json:"page_count"`
 	IsDefault           bool      `json:"is_default"`
+	Status              string    `json:"status"`
+	ErrorMessage        string    `json:"error_message"`
 	CreatedAt           time.Time `json:"created_at"`
 }
 
@@ -49,6 +51,8 @@ type CoverLetterVersionItem struct {
 	OverleafFolderPath  string    `json:"overleaf_folder_path"`
 	PDFUrl              string    `json:"pdf_url"`
 	PageCount           int       `json:"page_count"`
+	Status              string    `json:"status"`
+	ErrorMessage        string    `json:"error_message"`
 	CreatedAt           time.Time `json:"created_at"`
 }
 
@@ -64,7 +68,8 @@ func (handler *VersionsHandler) ListResumeVersions(ginContext *gin.Context) {
 		ginContext.Request.Context(),
 		`SELECT id, job_id, label, COALESCE(overleaf_project_name, 'job_applications'),
 		        COALESCE(overleaf_folder_path, ''), COALESCE(pdf_url, ''),
-		        COALESCE(page_count, 1), COALESCE(is_default, false), created_at
+		        COALESCE(page_count, 1), COALESCE(is_default, false),
+		        COALESCE(status, 'ready'), COALESCE(error_message, ''), created_at
 		 FROM resume_versions
 		 WHERE user_id = $1
 		 ORDER BY created_at DESC`,
@@ -82,7 +87,8 @@ func (handler *VersionsHandler) ListResumeVersions(ginContext *gin.Context) {
 		scanError := rows.Scan(
 			&item.ID, &item.JobID, &item.Label,
 			&item.OverleafProjectName, &item.OverleafFolderPath,
-			&item.PDFUrl, &item.PageCount, &item.IsDefault, &item.CreatedAt,
+			&item.PDFUrl, &item.PageCount, &item.IsDefault,
+			&item.Status, &item.ErrorMessage, &item.CreatedAt,
 		)
 		if scanError != nil {
 			continue
@@ -218,7 +224,8 @@ func (handler *VersionsHandler) ListCoverLetterVersions(ginContext *gin.Context)
 		`SELECT id, job_id, application_id, label,
 		        COALESCE(overleaf_project_name, 'job_applications'),
 		        COALESCE(overleaf_folder_path, ''), COALESCE(pdf_url, ''),
-		        COALESCE(page_count, 1), created_at
+		        COALESCE(page_count, 1), COALESCE(status, 'ready'),
+		        COALESCE(error_message, ''), created_at
 		 FROM cover_letter_versions
 		 WHERE user_id = $1
 		 ORDER BY created_at DESC`,
@@ -236,7 +243,8 @@ func (handler *VersionsHandler) ListCoverLetterVersions(ginContext *gin.Context)
 		scanError := rows.Scan(
 			&item.ID, &item.JobID, &item.ApplicationID, &item.Label,
 			&item.OverleafProjectName, &item.OverleafFolderPath,
-			&item.PDFUrl, &item.PageCount, &item.CreatedAt,
+			&item.PDFUrl, &item.PageCount, &item.Status,
+			&item.ErrorMessage, &item.CreatedAt,
 		)
 		if scanError != nil {
 			continue

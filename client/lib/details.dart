@@ -5,7 +5,6 @@ import 'models/job.dart';
 import 'services/api_service.dart';
 import 'widgets/job_description_renderer.dart';
 import 'widgets/company_logo_avatar.dart';
-import 'widgets/tailoring_result_sheet.dart';
 import 'preferences.dart' as preferences_page;
 
 void main() {
@@ -48,7 +47,6 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
   final ApiService _apiService = ApiService();
   bool _isSaving = false;
   bool _isTailoring = false;
-  bool _isGeneratingCoverLetter = false;
   late String _currentStatus;
 
   MatchedJob? get _activeJob => widget.job;
@@ -640,18 +638,28 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
     );
   }
 
-  Future<void> _handleTailorResume() async {
+  Future<void> _handleTailorApplication() async {
     final job = _activeJob;
     if (job == null) return;
     setState(() => _isTailoring = true);
     try {
-      final result = await _apiService.tailorResume(jobId: job.jobId, targetPages: 1);
+      final result = await _apiService.tailorApplicationAsync(jobId: job.jobId);
       if (!mounted) return;
-      if (result != null && result['pdf_base64'] != null) {
-        await showTailoringResultSheet(
-          context: context,
-          sessionType: 'resume',
-          tailoringResponse: result,
+      if (result != null && (result['status'] == 'processing' || result['status_code'] == 202 || result['message'] != null)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: const [
+                Icon(Icons.check_circle, color: Colors.white, size: 20),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text('Tailoring started in background! Resume & Cover Letter will compile in Open-Overleaf and notify you once ready.'),
+                ),
+              ],
+            ),
+            backgroundColor: AppColors.primary,
+            duration: const Duration(seconds: 5),
+          ),
         );
       } else {
         final errorMessage = result?['error'] as String? ?? '';
@@ -662,7 +670,7 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(errorMessage.isNotEmpty ? errorMessage : 'Tailoring failed. Please try again.'),
+              content: Text(errorMessage.isNotEmpty ? errorMessage : 'Tailoring failed to start. Please try again.'),
               backgroundColor: Colors.redAccent,
               action: SnackBarAction(
                 label: 'Setup',
@@ -681,50 +689,6 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
       }
     } finally {
       if (mounted) setState(() => _isTailoring = false);
-    }
-  }
-
-  Future<void> _handleGenerateCoverLetter() async {
-    final job = _activeJob;
-    if (job == null) return;
-    setState(() => _isGeneratingCoverLetter = true);
-    try {
-      final result = await _apiService.generateCoverLetter(jobId: job.jobId);
-      if (!mounted) return;
-      if (result != null && result['pdf_base64'] != null) {
-        await showTailoringResultSheet(
-          context: context,
-          sessionType: 'cover_letter',
-          tailoringResponse: result,
-        );
-      } else {
-        final errorMessage = result?['error'] as String? ?? '';
-        final statusCode = result?['status_code'] as int? ?? 0;
-        final isUnconfigured = result?['unconfigured'] == true || statusCode == 422;
-        if (isUnconfigured || errorMessage.toLowerCase().contains('overleaf') || errorMessage.toLowerCase().contains('preferences') || errorMessage.toLowerCase().contains('unconfigured')) {
-          _showOverleafUnconfiguredDialog();
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(errorMessage.isNotEmpty ? errorMessage : 'Cover letter generation failed. Please try again.'),
-              backgroundColor: Colors.redAccent,
-              action: SnackBarAction(
-                label: 'Setup',
-                textColor: Colors.white,
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const preferences_page.SetPreferencesScreen(),
-                    ),
-                  );
-                },
-              ),
-            ),
-          );
-        }
-      }
-    } finally {
-      if (mounted) setState(() => _isGeneratingCoverLetter = false);
     }
   }
 
@@ -800,38 +764,26 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
               ),
             ],
             const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: _isGeneratingCoverLetter ? null : _handleGenerateCoverLetter,
-              icon: _isGeneratingCoverLetter
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
-                    )
-                  : const Icon(Icons.auto_awesome, size: 15, color: AppColors.primary),
-              label: Text(_isGeneratingCoverLetter ? 'Generating...' : 'AI Letter'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primary,
-                side: const BorderSide(color: AppColors.outlineVariant),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-              ),
-            ),
-            const SizedBox(width: 8),
             Expanded(
               child: ElevatedButton.icon(
-                onPressed: _isTailoring ? null : _handleTailorResume,
+                onPressed: _isTailoring ? null : _handleTailorApplication,
                 icon: _isTailoring
                     ? const SizedBox(
-                        width: 14,
-                        height: 14,
+                        width: 15,
+                        height: 15,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
-                    : const Icon(Icons.auto_awesome, size: 15, color: Colors.white),
-                label: Text(_isTailoring ? 'Tailoring...' : 'AI Resume'),
+                    : const Icon(Icons.auto_awesome, size: 16, color: Colors.white),
+                label: Text(
+                  _isTailoring ? 'Starting...' : 'Tailor Application (Resume & Cover Letter)',
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  overflow: TextOverflow.ellipsis,
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),
             ),

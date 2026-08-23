@@ -24,6 +24,8 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
   late TextEditingController _nameController;
   late TextEditingController _bioTextController;
   late TextEditingController _overleafUrlController;
+  late TextEditingController _overleafSecretController;
+  late TextEditingController _overleafProjectController;
   late TextEditingController _locationController;
 
   bool _anyRole = true;
@@ -98,6 +100,8 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
     _locationController = TextEditingController();
     _bioTextController = TextEditingController();
     _overleafUrlController = TextEditingController();
+    _overleafSecretController = TextEditingController();
+    _overleafProjectController = TextEditingController(text: 'job_applications');
   }
 
   @override
@@ -106,6 +110,8 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
     _locationController.dispose();
     _bioTextController.dispose();
     _overleafUrlController.dispose();
+    _overleafSecretController.dispose();
+    _overleafProjectController.dispose();
     super.dispose();
   }
 
@@ -290,11 +296,17 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
       'currency': 'USD',
       'bio_experience_text': _bioTextController.text.trim(),
       'master_cv_text': masterCvString,
+      'target_resume_pages': 1,
+      'target_cover_letter_pages': 1,
     });
 
     if (_overleafUrlController.text.trim().isNotEmpty) {
+      final secret = _overleafSecretController.text.trim();
+      final project = _overleafProjectController.text.trim();
       await _apiService.saveOverleafConfig(
         deploymentUrl: _overleafUrlController.text.trim(),
+        mcpSecret: secret.isNotEmpty ? secret : null,
+        projectName: project.isNotEmpty ? project : 'job_applications',
       );
     }
 
@@ -429,12 +441,25 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(height: 12),
+        const Text(
+          'Let\'s get your profile set up',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: AppColors.primary,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Enter your full name and basic preferences to get started with job recommendations.',
+          style: TextStyle(fontSize: 14, color: AppColors.onSurfaceVariant),
+        ),
+        const SizedBox(height: 24),
         TextField(
           controller: _nameController,
           decoration: const InputDecoration(
             labelText: 'Full Name',
-            hintText: 'Enter your full name',
+            hintText: 'e.g. Jane Doe',
             border: OutlineInputBorder(),
             contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           ),
@@ -452,8 +477,30 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
         TextField(
           controller: _overleafUrlController,
           decoration: const InputDecoration(
-            labelText: 'Server Base URL (e.g. https://overleaf.yourdomain.com)',
-            hintText: 'https://overleaf.yourdomain.com',
+            labelText: 'Server Base URL',
+            hintText: 'e.g. https://overleaf.example.com',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _overleafSecretController,
+          obscureText: true,
+          decoration: const InputDecoration(
+            labelText: 'MCP Secret / Access Token',
+            hintText: 'OVERLEAF_MCP_SECRET or OVERLEAF_MCP_TOKEN',
+            helperText: 'Required if connecting Open-Overleaf. Encrypted at rest (AES-256).',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _overleafProjectController,
+          decoration: const InputDecoration(
+            labelText: 'Project Name (Optional)',
+            hintText: 'job_applications',
             border: OutlineInputBorder(),
             isDense: true,
           ),

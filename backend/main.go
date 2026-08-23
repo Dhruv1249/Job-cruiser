@@ -90,15 +90,26 @@ func main() {
 		if hexError == nil && len(decodedKey) == 32 {
 			overleafAESKey = decodedKey
 		} else {
-			log.Println("WARNING: OVERLEAF_AES_KEY is invalid. Token encryption will be disabled.")
+			hash := sha256.Sum256([]byte(overleafAESKeyHex))
+			overleafAESKey = hash[:]
 		}
 	} else {
-		log.Println("WARNING: OVERLEAF_AES_KEY not set. Token encryption will be disabled.")
+		salt := os.Getenv("JWT_SECRET")
+		if salt == "" {
+			salt = os.Getenv("DATABASE_URL")
+		}
+		if salt == "" {
+			salt = "job_cruiser_aes_default_key_2026"
+		}
+		hash := sha256.Sum256([]byte("job_cruiser_overleaf_aes_key:" + salt))
+		overleafAESKey = hash[:]
 	}
 	overleafMCPSecret := os.Getenv("OVERLEAF_MCP_SECRET")
 	if overleafMCPSecret == "" {
 		overleafMCPSecret = os.Getenv("SESSION_SECRET")
 	}
+
+	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
 
 	authHandler := &handlers.AuthHandler{DB: databasePool}
 	jobHandler := &handlers.JobHandler{DB: databasePool}
@@ -107,6 +118,7 @@ func main() {
 		MatchService: hybridMatchService,
 		NimService:   nvidiaNimService,
 		AESKey:       overleafAESKey,
+		APIKey:       geminiAPIKey,
 	}
 	appHandler := &handlers.ApplicationHandler{DB: databasePool}
 	ingestHandler := &handlers.IngestHandler{
@@ -121,7 +133,6 @@ func main() {
 		BasicService: basicMatcherService,
 	}
 
-	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
 	overleafURL := os.Getenv("OVERLEAF_MCP_URL")
 	if overleafURL == "" {
 		overleafURL = "http://localhost:3202"
@@ -148,6 +159,7 @@ func main() {
 	tailorService := services.NewResumeTailorService("https://generativelanguage.googleapis.com", geminiAPIKey, mcpClient)
 	tailorHandler := handlers.NewTailorHandler(tailorService, databasePool, overleafAESKey, overleafMCPSecret)
 	versionsHandler := handlers.NewVersionsHandler(databasePool, overleafAESKey, overleafMCPSecret)
+	notificationsHandler := handlers.NewNotificationsHandler(databasePool)
 
 	// Initialize the default Gin web router with basic logging and crash-recovery built in.
 	webRouter := gin.Default()
@@ -197,6 +209,13 @@ func main() {
 
 		protected.POST("/tailor/resume", tailorHandler.TailorResume)
 		protected.POST("/tailor/cover-letter", tailorHandler.GenerateCoverLetter)
+		protected.POST("/tailor/application", tailorHandler.TailorApplicationAsync)
+		protected.POST("/tailor/application-async", tailorHandler.TailorApplicationAsync)
+		protected.GET("/notifications", notificationsHandler.GetNotifications)
+		protected.POST("/notifications/:id/read", notificationsHandler.MarkNotificationAsRead)
+		protected.POST("/notifications/read-all", notificationsHandler.MarkAllNotificationsAsRead)
+		protected.GET("/notifications/unread-count", notificationsHandler.GetUnreadNotificationsCount)
+
 		protected.GET("/resume-versions", versionsHandler.ListResumeVersions)
 		protected.GET("/resume-versions/:id/pdf", versionsHandler.GetResumeVersionPDF)
 		protected.DELETE("/resume-versions/:id", versionsHandler.DeleteResumeVersion)

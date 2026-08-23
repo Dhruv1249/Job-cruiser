@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Dhruv1249/Job-cruiser/backend/services"
+	"github.com/Dhruv1249/Job-cruiser/backend/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/genai"
@@ -19,23 +20,25 @@ PreferencesHandler manages user settings, bio text, master CV, and overleaf conf
 */
 type PreferencesHandler struct {
 	DB           *pgxpool.Pool
-	APIKey       string
 	MatchService services.BatchMatchEvaluator
 	NimService   *services.NvidiaNimService
 	AESKey       []byte
+	APIKey       string
 }
 
 type PreferencesRequest struct {
-	FullName          string   `json:"full_name" binding:"required"`
-	TargetRoles       []string `json:"target_roles" binding:"required"`
-	TargetIndustries  []string `json:"target_industries"`
-	TargetLocations   []string `json:"target_locations"`
-	WorkModels        []string `json:"work_models" binding:"required"`
-	MinSalary         int      `json:"min_salary"`
-	Currency          string   `json:"currency"`
-	MasterCVText      string   `json:"master_cv_text"`
-	BioExperienceText string   `json:"bio_experience_text"`
-	AIMatchingEnabled bool     `json:"ai_matching_enabled"`
+	FullName               string   `json:"full_name" binding:"required"`
+	TargetRoles            []string `json:"target_roles" binding:"required"`
+	TargetIndustries       []string `json:"target_industries"`
+	TargetLocations        []string `json:"target_locations"`
+	WorkModels             []string `json:"work_models" binding:"required"`
+	MinSalary              int      `json:"min_salary"`
+	Currency               string   `json:"currency"`
+	MasterCVText           string   `json:"master_cv_text"`
+	BioExperienceText      string   `json:"bio_experience_text"`
+	AIMatchingEnabled      bool     `json:"ai_matching_enabled"`
+	TargetResumePages      int      `json:"target_resume_pages"`
+	TargetCoverLetterPages int      `json:"target_cover_letter_pages"`
 }
 
 type ParseCVRequest struct {
@@ -102,9 +105,18 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 		return
 	}
 
+	targetResumePages := req.TargetResumePages
+	if targetResumePages <= 0 {
+		targetResumePages = 1
+	}
+	targetCoverLetterPages := req.TargetCoverLetterPages
+	if targetCoverLetterPages <= 0 {
+		targetCoverLetterPages = 1
+	}
+
 	query := `
-		INSERT INTO user_preferences (user_id, full_name, target_roles, target_industries, target_locations, work_models, min_salary, currency, master_cv_text, bio_experience_text)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO user_preferences (user_id, full_name, target_roles, target_industries, target_locations, work_models, min_salary, currency, master_cv_text, bio_experience_text, target_resume_pages, target_cover_letter_pages)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (user_id) 
 		DO UPDATE SET 
 			full_name = EXCLUDED.full_name,
@@ -116,10 +128,12 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 			currency = EXCLUDED.currency,
 			master_cv_text = EXCLUDED.master_cv_text,
 			bio_experience_text = EXCLUDED.bio_experience_text,
+			target_resume_pages = EXCLUDED.target_resume_pages,
+			target_cover_letter_pages = EXCLUDED.target_cover_letter_pages,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 
-	_, err := h.DB.Exec(context.Background(), query, userID, req.FullName, req.TargetRoles, req.TargetIndustries, req.TargetLocations, req.WorkModels, req.MinSalary, req.Currency, req.MasterCVText, req.BioExperienceText)
+	_, err := h.DB.Exec(context.Background(), query, userID, req.FullName, req.TargetRoles, req.TargetIndustries, req.TargetLocations, req.WorkModels, req.MinSalary, req.Currency, req.MasterCVText, req.BioExperienceText, targetResumePages, targetCoverLetterPages)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save preferences: " + err.Error()})
 		return
@@ -154,6 +168,8 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 			COALESCE(p.master_cv_text, ''), 
 			COALESCE(p.bio_experience_text, ''),
 			COALESCE(u.ai_matching_enabled, false),
+			COALESCE(p.target_resume_pages, 1),
+			COALESCE(p.target_cover_letter_pages, 1),
 			(p.user_id IS NOT NULL AND jsonb_array_length(COALESCE(p.target_roles, '[]'::jsonb)) > 0) AS has_preferences
 		FROM users u
 		LEFT JOIN user_preferences p ON u.id = p.user_id
@@ -163,7 +179,7 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 	var pref PreferencesRequest
 	var hasPreferences bool
 	err := h.DB.QueryRow(context.Background(), query, userID).Scan(
-		&pref.FullName, &pref.TargetRoles, &pref.TargetIndustries, &pref.TargetLocations, &pref.WorkModels, &pref.MinSalary, &pref.Currency, &pref.MasterCVText, &pref.BioExperienceText, &pref.AIMatchingEnabled, &hasPreferences,
+		&pref.FullName, &pref.TargetRoles, &pref.TargetIndustries, &pref.TargetLocations, &pref.WorkModels, &pref.MinSalary, &pref.Currency, &pref.MasterCVText, &pref.BioExperienceText, &pref.AIMatchingEnabled, &pref.TargetResumePages, &pref.TargetCoverLetterPages, &hasPreferences,
 	)
 
 	if err != nil {
@@ -179,6 +195,8 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 
 type OverleafConfigRequest struct {
 	DeploymentURL string `json:"deployment_url" binding:"required"`
+	MCPSecret     string `json:"mcp_secret"`
+	ProjectName   string `json:"project_name"`
 }
 
 /*
@@ -197,16 +215,51 @@ func (h *PreferencesHandler) UpdateOverleafConfig(c *gin.Context) {
 		return
 	}
 
+	projectName := strings.TrimSpace(req.ProjectName)
+	if projectName == "" {
+		projectName = "job_applications"
+	}
+
+	var encryptedToken *string
+	tokenEncrypted := false
+
+	cleanSecret := strings.TrimSpace(req.MCPSecret)
+	if cleanSecret == "" {
+		var existingSecret *string
+		_ = h.DB.QueryRow(context.Background(), `SELECT encrypted_access_token FROM user_overleaf_config WHERE user_id = $1`, userID).Scan(&existingSecret)
+		if existingSecret == nil || *existingSecret == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Open-Overleaf MCP Secret / Access Token is required to secure your instance"})
+			return
+		}
+	}
+
+	if cleanSecret != "" {
+		if len(h.AESKey) == 32 {
+			encrypted, encryptError := utils.EncryptToken(cleanSecret, h.AESKey)
+			if encryptError == nil {
+				encryptedToken = &encrypted
+				tokenEncrypted = true
+			} else {
+				encryptedToken = &cleanSecret
+			}
+		} else {
+			encryptedToken = &cleanSecret
+		}
+	}
+
 	query := `
-		INSERT INTO user_overleaf_config (user_id, deployment_url)
-		VALUES ($1, $2)
+		INSERT INTO user_overleaf_config (user_id, deployment_url, project_name, encrypted_access_token, token_encrypted)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (user_id)
 		DO UPDATE SET
 			deployment_url = EXCLUDED.deployment_url,
+			project_name = EXCLUDED.project_name,
+			encrypted_access_token = CASE WHEN EXCLUDED.encrypted_access_token IS NOT NULL THEN EXCLUDED.encrypted_access_token ELSE user_overleaf_config.encrypted_access_token END,
+			token_encrypted = CASE WHEN EXCLUDED.encrypted_access_token IS NOT NULL THEN EXCLUDED.token_encrypted ELSE user_overleaf_config.token_encrypted END,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 
-	_, err := h.DB.Exec(context.Background(), query, userID, req.DeploymentURL)
+	_, err := h.DB.Exec(context.Background(), query, userID, strings.TrimSpace(req.DeploymentURL), projectName, encryptedToken, tokenEncrypted)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save open-overleaf configuration"})
 		return
@@ -226,13 +279,14 @@ func (h *PreferencesHandler) GetOverleafConfig(c *gin.Context) {
 	}
 
 	query := `
-		SELECT deployment_url
+		SELECT deployment_url, COALESCE(project_name, 'job_applications'), COALESCE(encrypted_access_token, ''), COALESCE(token_encrypted, false)
 		FROM user_overleaf_config
 		WHERE user_id = $1;
 	`
 
-	var url string
-	err := h.DB.QueryRow(context.Background(), query, userID).Scan(&url)
+	var url, projectName, encryptedToken string
+	var tokenEncrypted bool
+	err := h.DB.QueryRow(context.Background(), query, userID).Scan(&url, &projectName, &encryptedToken, &tokenEncrypted)
 	if err != nil {
 		if err.Error() == "no rows in result set" {
 			c.JSON(http.StatusOK, gin.H{"data": nil})
@@ -242,9 +296,26 @@ func (h *PreferencesHandler) GetOverleafConfig(c *gin.Context) {
 		return
 	}
 
+	secret := ""
+	if encryptedToken != "" {
+		if tokenEncrypted && len(h.AESKey) == 32 {
+			decrypted, decErr := utils.DecryptToken(encryptedToken, h.AESKey)
+			if decErr == nil {
+				secret = decrypted
+			} else {
+				secret = encryptedToken
+			}
+		} else {
+			secret = encryptedToken
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
 			"deployment_url": url,
+			"project_name":   projectName,
+			"has_secret":     encryptedToken != "",
+			"mcp_secret":     secret,
 		},
 	})
 }
@@ -421,22 +492,27 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 			return
 		}
 
-		modelName := os.Getenv("GEMINI_MODEL")
-		if modelName == "" {
-			modelName = "gemini-2.5-flash"
-		}
-
 		config := &genai.GenerateContentConfig{
 			ResponseMIMEType: "application/json",
 			Temperature:      genai.Ptr[float32](0.0),
 		}
 
-		result, errGen := client.Models.GenerateContent(ctx, modelName, genai.Text(prompt), config)
-		if errGen != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gemini AI CV parsing failed: " + errGen.Error()})
+		modelsCascade := services.GetGeminiModelCascade()
+		var lastGenError error
+		for _, modelName := range modelsCascade {
+			result, errGen := client.Models.GenerateContent(ctx, modelName, genai.Text(prompt), config)
+			if errGen != nil {
+				lastGenError = errGen
+				continue
+			}
+			rawJSON = result.Text()
+			break
+		}
+
+		if rawJSON == "" && lastGenError != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gemini AI CV parsing failed: " + lastGenError.Error()})
 			return
 		}
-		rawJSON = result.Text()
 	}
 
 	var flexRes flexCVResponse

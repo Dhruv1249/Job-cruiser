@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../main.dart' show AppColors;
 import '../services/api_service.dart';
@@ -17,11 +18,39 @@ class _ResumeVersionsScreenState extends State<ResumeVersionsScreen> {
   List<Map<String, dynamic>> _versions = [];
   bool _isLoading = true;
   String? _loadingVersionId;
+  Timer? _pollingTimer;
 
   @override
   void initState() {
     super.initState();
     _loadResumeVersions();
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
+
+  void _checkAndStartPolling() {
+    final hasGenerating = _versions.any((v) => v['status'] == 'generating' || v['status'] == 'processing');
+    if (hasGenerating && _pollingTimer == null) {
+      _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) async {
+        final versions = await _apiService.fetchResumeVersions();
+        if (!mounted) return;
+        setState(() {
+          _versions = versions;
+        });
+        final stillGenerating = versions.any((v) => v['status'] == 'generating' || v['status'] == 'processing');
+        if (!stillGenerating) {
+          _pollingTimer?.cancel();
+          _pollingTimer = null;
+        }
+      });
+    } else if (!hasGenerating && _pollingTimer != null) {
+      _pollingTimer?.cancel();
+      _pollingTimer = null;
+    }
   }
 
   Future<void> _loadResumeVersions() async {
@@ -32,11 +61,35 @@ class _ResumeVersionsScreenState extends State<ResumeVersionsScreen> {
         _versions = versions;
         _isLoading = false;
       });
+      _checkAndStartPolling();
     }
   }
 
   Future<void> _handleViewVersion(Map<String, dynamic> version) async {
     final versionId = version['id'] as String? ?? '';
+    final status = version['status'] as String? ?? 'ready';
+    final errorMessage = version['error_message'] as String? ?? '';
+
+    if (status == 'generating' || status == 'processing') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('AI is tailoring this resume in the background. It will be ready in a moment.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    if (status == 'failed') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Generation failed: ${errorMessage.isNotEmpty ? errorMessage : "Unknown error"}'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
     if (versionId.isEmpty) return;
 
     setState(() => _loadingVersionId = versionId);
@@ -219,8 +272,12 @@ class _ResumeVersionsScreenState extends State<ResumeVersionsScreen> {
     final folderPath = version['overleaf_folder_path'] as String? ?? '';
     final pageCount = version['page_count'] as int? ?? 1;
     final isDefault = version['is_default'] as bool? ?? false;
+    final status = version['status'] as String? ?? 'ready';
+    final errorMessage = version['error_message'] as String? ?? '';
     final createdAt = version['created_at'] as String? ?? '';
     final isCardLoading = _loadingVersionId == versionId;
+    final isGenerating = status == 'generating' || status == 'processing';
+    final isFailed = status == 'failed';
 
     final formattedDate = createdAt.length >= 10 ? createdAt.substring(0, 10) : createdAt;
 
@@ -229,8 +286,14 @@ class _ResumeVersionsScreenState extends State<ResumeVersionsScreen> {
         color: AppColors.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDefault ? AppColors.matchGreen : AppColors.outlineVariant,
-          width: isDefault ? 1.5 : 1.0,
+          color: isDefault
+              ? AppColors.matchGreen
+              : isGenerating
+                  ? Colors.orange.withValues(alpha: 0.5)
+                  : isFailed
+                      ? Colors.redAccent.withValues(alpha: 0.5)
+                      : AppColors.outlineVariant,
+          width: (isDefault || isGenerating || isFailed) ? 1.5 : 1.0,
         ),
         boxShadow: [
           BoxShadow(
@@ -256,14 +319,30 @@ class _ResumeVersionsScreenState extends State<ResumeVersionsScreen> {
                   decoration: BoxDecoration(
                     color: isDefault
                         ? AppColors.matchGreen.withValues(alpha: 0.1)
-                        : AppColors.surfaceContainerHigh,
+                        : isGenerating
+                            ? Colors.orange.withValues(alpha: 0.1)
+                            : isFailed
+                                ? Colors.redAccent.withValues(alpha: 0.1)
+                                : AppColors.surfaceContainerHigh,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(
-                    Icons.description,
-                    color: isDefault ? AppColors.matchGreen : AppColors.primary,
-                    size: 24,
-                  ),
+                  child: isGenerating
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.orange),
+                        )
+                      : Icon(
+                          isFailed
+                              ? Icons.error_outline
+                              : Icons.description,
+                          color: isDefault
+                              ? AppColors.matchGreen
+                              : isFailed
+                                  ? Colors.redAccent
+                                  : AppColors.primary,
+                          size: 24,
+                        ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -284,7 +363,39 @@ class _ResumeVersionsScreenState extends State<ResumeVersionsScreen> {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          if (isDefault)
+                          if (isGenerating)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Text(
+                                'Generating...',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.orange,
+                                ),
+                              ),
+                            )
+                          else if (isFailed)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.redAccent.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Text(
+                                'Failed',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.redAccent,
+                                ),
+                              ),
+                            )
+                          else if (isDefault)
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                               decoration: BoxDecoration(
@@ -303,28 +414,45 @@ class _ResumeVersionsScreenState extends State<ResumeVersionsScreen> {
                         ],
                       ),
                       const SizedBox(height: 6),
-                      Text(
-                        'Folder: $folderPath',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.onSurfaceVariant,
-                          fontFamily: 'monospace',
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Text(
-                            '$pageCount page(s) · $formattedDate',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppColors.outline,
-                            ),
+                      if (isGenerating)
+                        const Text(
+                          'AI is tailoring and compiling LaTeX in Open-Overleaf...',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.orange,
+                            fontWeight: FontWeight.w500,
                           ),
-                        ],
-                      ),
+                        )
+                      else if (isFailed)
+                        Text(
+                          errorMessage.isNotEmpty ? errorMessage : 'Tailoring failed.',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.redAccent,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        )
+                      else ...[
+                        Text(
+                          'Folder: $folderPath',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.onSurfaceVariant,
+                            fontFamily: 'monospace',
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '$pageCount page(s) · $formattedDate',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.outline,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
