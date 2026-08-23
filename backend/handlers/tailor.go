@@ -85,16 +85,194 @@ func (handler *TailorHandler) fetchJobTailoringRecord(ctx *gin.Context, jobID st
 }
 
 func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{}) string {
-	var bioText string
+	var fullName, primaryEmail, phone, location, linkedInURL, gitHubURL, portfolioURL string
+	var bioText, latexCV, parsedExperienceJSON string
 	queryError := handler.DB.QueryRow(
 		ctx.Request.Context(),
-		`SELECT COALESCE(NULLIF(bio_experience_text, ''), master_cv_text, '') FROM user_preferences WHERE user_id = $1`,
+		`SELECT
+			COALESCE(p.full_name, ''),
+			COALESCE(u.primary_email, ''),
+			COALESCE(p.phone, u.phone, ''),
+			COALESCE(p.location, u.location, ''),
+			COALESCE(p.linkedin_url, u.links->>'linkedin', ''),
+			COALESCE(p.github_url, u.links->>'github', ''),
+			COALESCE(p.portfolio_url, u.links->>'portfolio', ''),
+			COALESCE(NULLIF(p.bio_experience_text, ''), p.master_cv_text, ''),
+			COALESCE(u.latex_cv, ''),
+			COALESCE(u.parsed_experience::text, '[]')
+		 FROM users u
+		 LEFT JOIN user_preferences p ON u.id = p.user_id
+		 WHERE u.id = $1`,
 		userID,
-	).Scan(&bioText)
-	if queryError != nil || bioText == "" {
+	).Scan(&fullName, &primaryEmail, &phone, &location, &linkedInURL, &gitHubURL, &portfolioURL, &bioText, &latexCV, &parsedExperienceJSON)
+	if queryError != nil {
 		return "Experienced software engineer with strong backend and cloud infrastructure skills."
 	}
-	return bioText
+
+	var profile strings.Builder
+
+	profile.WriteString("CANDIDATE CONTACT INFORMATION (USE EXACTLY AS-IS, DO NOT MODIFY OR INVENT)\n")
+	if fullName != "" {
+		profile.WriteString(fmt.Sprintf("  Full Name: %s\n", fullName))
+	}
+	if primaryEmail != "" {
+		profile.WriteString(fmt.Sprintf("  Email: %s\n", primaryEmail))
+	}
+	if phone != "" {
+		profile.WriteString(fmt.Sprintf("  Phone: %s\n", phone))
+	}
+	if location != "" {
+		profile.WriteString(fmt.Sprintf("  Location: %s\n", location))
+	}
+	if linkedInURL != "" {
+		profile.WriteString(fmt.Sprintf("  LinkedIn: %s\n", linkedInURL))
+	}
+	if gitHubURL != "" {
+		profile.WriteString(fmt.Sprintf("  GitHub: %s\n", gitHubURL))
+	}
+	if portfolioURL != "" {
+		profile.WriteString(fmt.Sprintf("  Portfolio: %s\n", portfolioURL))
+	}
+	profile.WriteString("\n")
+
+	var parsedData struct {
+		BioSummary     string `json:"bio_summary"`
+		Location       string `json:"location"`
+		Skills         []string `json:"skills"`
+		Education      []struct {
+			Institution string `json:"institution"`
+			Degree      string `json:"degree"`
+			Year        string `json:"year"`
+			Grade       string `json:"grade"`
+		} `json:"education"`
+		Experience []struct {
+			Company    string `json:"company"`
+			Role       string `json:"role"`
+			Duration   string `json:"duration"`
+			Highlights string `json:"highlights"`
+		} `json:"experience"`
+		Projects []struct {
+			Title       string   `json:"title"`
+			TechStack   []string `json:"tech_stack"`
+			Description string   `json:"description"`
+			Link        string   `json:"link"`
+		} `json:"projects"`
+		Achievements []struct {
+			Title   string `json:"title"`
+			Details string `json:"details"`
+		} `json:"achievements"`
+		Certifications []struct {
+			Name   string `json:"name"`
+			Issuer string `json:"issuer"`
+		} `json:"certifications"`
+	}
+
+	hasParsedData := false
+	if parsedExperienceJSON != "" && parsedExperienceJSON != "[]" {
+		if unmarshalErr := json.Unmarshal([]byte(parsedExperienceJSON), &parsedData); unmarshalErr == nil {
+			hasParsedData = parsedData.BioSummary != "" || len(parsedData.Skills) > 0 || len(parsedData.Education) > 0 || len(parsedData.Experience) > 0 || len(parsedData.Projects) > 0
+		}
+	}
+
+	if hasParsedData {
+		if parsedData.BioSummary != "" {
+			profile.WriteString("PROFESSIONAL SUMMARY\n")
+			profile.WriteString(parsedData.BioSummary)
+			profile.WriteString("\n\n")
+		}
+
+		if len(parsedData.Skills) > 0 {
+			profile.WriteString("TECHNICAL SKILLS\n")
+			profile.WriteString(strings.Join(parsedData.Skills, ", "))
+			profile.WriteString("\n\n")
+		}
+
+		if len(parsedData.Experience) > 0 {
+			profile.WriteString("WORK EXPERIENCE\n")
+			for _, experienceItem := range parsedData.Experience {
+				profile.WriteString(fmt.Sprintf("  %s at %s (%s)\n", experienceItem.Role, experienceItem.Company, experienceItem.Duration))
+				if experienceItem.Highlights != "" {
+					profile.WriteString(fmt.Sprintf("    %s\n", experienceItem.Highlights))
+				}
+			}
+			profile.WriteString("\n")
+		}
+
+		if len(parsedData.Education) > 0 {
+			profile.WriteString("EDUCATION\n")
+			for _, educationItem := range parsedData.Education {
+				profile.WriteString(fmt.Sprintf("  %s — %s", educationItem.Degree, educationItem.Institution))
+				if educationItem.Year != "" {
+					profile.WriteString(fmt.Sprintf(" (%s)", educationItem.Year))
+				}
+				if educationItem.Grade != "" {
+					profile.WriteString(fmt.Sprintf(" [%s]", educationItem.Grade))
+				}
+				profile.WriteString("\n")
+			}
+			profile.WriteString("\n")
+		}
+
+		if len(parsedData.Projects) > 0 {
+			profile.WriteString("PROJECTS\n")
+			for _, projectItem := range parsedData.Projects {
+				profile.WriteString(fmt.Sprintf("  %s", projectItem.Title))
+				if len(projectItem.TechStack) > 0 {
+					profile.WriteString(fmt.Sprintf(" [%s]", strings.Join(projectItem.TechStack, ", ")))
+				}
+				profile.WriteString("\n")
+				if projectItem.Description != "" {
+					profile.WriteString(fmt.Sprintf("    %s\n", projectItem.Description))
+				}
+				if projectItem.Link != "" {
+					profile.WriteString(fmt.Sprintf("    Link: %s\n", projectItem.Link))
+				}
+			}
+			profile.WriteString("\n")
+		}
+
+		if len(parsedData.Achievements) > 0 {
+			profile.WriteString("ACHIEVEMENTS\n")
+			for _, achievementItem := range parsedData.Achievements {
+				profile.WriteString(fmt.Sprintf("  %s", achievementItem.Title))
+				if achievementItem.Details != "" {
+					profile.WriteString(fmt.Sprintf(": %s", achievementItem.Details))
+				}
+				profile.WriteString("\n")
+			}
+			profile.WriteString("\n")
+		}
+
+		if len(parsedData.Certifications) > 0 {
+			profile.WriteString("CERTIFICATIONS\n")
+			for _, certItem := range parsedData.Certifications {
+				profile.WriteString(fmt.Sprintf("  %s", certItem.Name))
+				if certItem.Issuer != "" {
+					profile.WriteString(fmt.Sprintf(" — %s", certItem.Issuer))
+				}
+				profile.WriteString("\n")
+			}
+			profile.WriteString("\n")
+		}
+	}
+
+	if bioText != "" {
+		profile.WriteString("ADDITIONAL BIO / RAW EXPERIENCE TEXT\n")
+		profile.WriteString(bioText)
+		profile.WriteString("\n\n")
+	}
+
+	if latexCV != "" && !hasParsedData {
+		profile.WriteString("RAW LATEX CV SOURCE\n")
+		profile.WriteString(latexCV)
+		profile.WriteString("\n\n")
+	}
+
+	result := profile.String()
+	if strings.TrimSpace(result) == "" {
+		return "Experienced software engineer with strong backend and cloud infrastructure skills."
+	}
+	return result
 }
 
 func (handler *TailorHandler) fetchUserTargetPages(ctx *gin.Context, userID interface{}) (int, int) {

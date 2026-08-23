@@ -327,6 +327,11 @@ var schemaQueries = []string{
 
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS target_resume_pages INTEGER DEFAULT 1;`,
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS target_cover_letter_pages INTEGER DEFAULT 1;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS phone TEXT;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS location TEXT;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS linkedin_url TEXT;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS github_url TEXT;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS portfolio_url TEXT;`,
 	`CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);`,
 	`ALTER TABLE resume_versions ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'ready';`,
 	`ALTER TABLE resume_versions ADD COLUMN IF NOT EXISTS error_message TEXT;`,

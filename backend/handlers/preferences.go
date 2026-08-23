@@ -28,6 +28,11 @@ type PreferencesHandler struct {
 
 type PreferencesRequest struct {
 	FullName               string   `json:"full_name" binding:"required"`
+	Phone                  string   `json:"phone"`
+	Location               string   `json:"location"`
+	LinkedInURL            string   `json:"linkedin_url"`
+	GitHubURL              string   `json:"github_url"`
+	PortfolioURL           string   `json:"portfolio_url"`
 	TargetRoles            []string `json:"target_roles" binding:"required"`
 	TargetIndustries       []string `json:"target_industries"`
 	TargetLocations        []string `json:"target_locations"`
@@ -101,7 +106,7 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 
 	var req PreferencesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -115,11 +120,16 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 	}
 
 	query := `
-		INSERT INTO user_preferences (user_id, full_name, target_roles, target_industries, target_locations, work_models, min_salary, currency, master_cv_text, bio_experience_text, target_resume_pages, target_cover_letter_pages)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		INSERT INTO user_preferences (user_id, full_name, phone, location, linkedin_url, github_url, portfolio_url, target_roles, target_industries, target_locations, work_models, min_salary, currency, master_cv_text, bio_experience_text, target_resume_pages, target_cover_letter_pages)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		ON CONFLICT (user_id) 
 		DO UPDATE SET 
 			full_name = EXCLUDED.full_name,
+			phone = EXCLUDED.phone,
+			location = EXCLUDED.location,
+			linkedin_url = EXCLUDED.linkedin_url,
+			github_url = EXCLUDED.github_url,
+			portfolio_url = EXCLUDED.portfolio_url,
 			target_roles = EXCLUDED.target_roles,
 			target_industries = EXCLUDED.target_industries,
 			target_locations = EXCLUDED.target_locations,
@@ -133,7 +143,7 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 			updated_at = CURRENT_TIMESTAMP;
 	`
 
-	_, err := h.DB.Exec(context.Background(), query, userID, req.FullName, req.TargetRoles, req.TargetIndustries, req.TargetLocations, req.WorkModels, req.MinSalary, req.Currency, req.MasterCVText, req.BioExperienceText, targetResumePages, targetCoverLetterPages)
+	_, err := h.DB.Exec(context.Background(), query, userID, req.FullName, req.Phone, req.Location, req.LinkedInURL, req.GitHubURL, req.PortfolioURL, req.TargetRoles, req.TargetIndustries, req.TargetLocations, req.WorkModels, req.MinSalary, req.Currency, req.MasterCVText, req.BioExperienceText, targetResumePages, targetCoverLetterPages)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save preferences: " + err.Error()})
 		return
@@ -159,6 +169,11 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 	query := `
 		SELECT 
 			COALESCE(p.full_name, ''), 
+			COALESCE(p.phone, u.phone, ''),
+			COALESCE(p.location, u.location, ''),
+			COALESCE(p.linkedin_url, u.links->>'linkedin', ''),
+			COALESCE(p.github_url, u.links->>'github', ''),
+			COALESCE(p.portfolio_url, u.links->>'portfolio', ''),
 			COALESCE(p.target_roles, '[]'::jsonb), 
 			COALESCE(p.target_industries, '[]'::jsonb), 
 			COALESCE(p.target_locations, '["India (On-site & Hybrid)", "India (Remote)", "Global Remote"]'::jsonb), 
@@ -179,7 +194,7 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 	var pref PreferencesRequest
 	var hasPreferences bool
 	err := h.DB.QueryRow(context.Background(), query, userID).Scan(
-		&pref.FullName, &pref.TargetRoles, &pref.TargetIndustries, &pref.TargetLocations, &pref.WorkModels, &pref.MinSalary, &pref.Currency, &pref.MasterCVText, &pref.BioExperienceText, &pref.AIMatchingEnabled, &pref.TargetResumePages, &pref.TargetCoverLetterPages, &hasPreferences,
+		&pref.FullName, &pref.Phone, &pref.Location, &pref.LinkedInURL, &pref.GitHubURL, &pref.PortfolioURL, &pref.TargetRoles, &pref.TargetIndustries, &pref.TargetLocations, &pref.WorkModels, &pref.MinSalary, &pref.Currency, &pref.MasterCVText, &pref.BioExperienceText, &pref.AIMatchingEnabled, &pref.TargetResumePages, &pref.TargetCoverLetterPages, &hasPreferences,
 	)
 
 	if err != nil {

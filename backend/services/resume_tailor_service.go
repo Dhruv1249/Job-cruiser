@@ -173,6 +173,7 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 			"JOB DESCRIPTION\n%s\n\n"+
 			"CANDIDATE EXPERIENCE BANK\n%s\n\n"+
 			"STRICT RULES\n"+
+			"- CONTACT INFO: The experience bank above starts with CANDIDATE CONTACT INFORMATION. You MUST use the candidate's REAL name, email, phone, location, LinkedIn URL, and GitHub URL EXACTLY as provided. NEVER use placeholders like '[Your Name]', 'candidate@email.com', or '[Your Phone Number]'. If a field is missing, simply omit it.\n"+
 			"- Page budget: exactly %d page(s). Ensure the resume fills the entire target page area completely without empty space or whitespace gaps at the bottom.\n"+
 			"- Standard Packages Only: Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
 			"- Escape Special Characters: ALWAYS properly escape special characters in text, company names, titles, and links: use \\& for &, \\%% for %%, \\_ for _, \\# for #, \\$ for $.\n"+
@@ -336,6 +337,7 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 			"JOB DESCRIPTION\n%s\n\n"+
 			"CANDIDATE BIO & EXPERIENCE\n%s\n\n"+
 			"STRICT RULES\n"+
+			"- CONTACT INFO: The candidate bio above starts with CANDIDATE CONTACT INFORMATION. You MUST use the candidate's REAL name, email, phone, and location EXACTLY as provided in the header and signature. NEVER use placeholders like '[Your Name]', '[Your Email Address]', or '[Your Phone Number]'. If a field is missing, simply omit it.\n"+
 			"- Page budget: exactly %d page(s). Professional tone. Address the hiring team directly.\n"+
 			"- Standard Packages Only: Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
 			"- Escape Special Characters: ALWAYS properly escape special characters in text, company names, titles, and links: use \\& for &, \\%% for %%, \\_ for _, \\# for #, \\$ for $.\n"+
