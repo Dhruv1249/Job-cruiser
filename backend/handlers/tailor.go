@@ -22,12 +22,16 @@ type TailorHandler struct {
 	MCPSecret     string
 }
 
-// TailorRequestPayload defines incoming JSON parameters for tailoring operations.
+/*
+TailorRequestPayload defines incoming JSON parameters for tailoring operations.
+*/
 type TailorRequestPayload struct {
-	JobID                  string `json:"job_id" binding:"required"`
-	TargetPages            int    `json:"target_pages"`
-	TargetResumePages      int    `json:"target_resume_pages"`
-	TargetCoverLetterPages int    `json:"target_cover_letter_pages"`
+	JobID                   string `json:"job_id" binding:"required"`
+	TargetPages             int    `json:"target_pages"`
+	TargetResumePages       int    `json:"target_resume_pages"`
+	TargetCoverLetterPages  int    `json:"target_cover_letter_pages"`
+	ResumeTemplatePath      string `json:"resume_template_path"`
+	CoverLetterTemplatePath string `json:"cover_letter_template_path"`
 }
 
 // NewTailorHandler initializes a TailorHandler with all required dependencies.
@@ -361,6 +365,14 @@ func (handler *TailorHandler) TailorResume(ginContext *gin.Context) {
 		projectName = "job_applications"
 	}
 
+	resumeTemplatePath := strings.TrimSpace(payload.ResumeTemplatePath)
+	if resumeTemplatePath == "" && credentials != nil {
+		resumeTemplatePath = credentials.ResumeTemplatePath
+	}
+	if resumeTemplatePath == "" {
+		resumeTemplatePath = "templates/resume.tex"
+	}
+
 	folderPath := services.BuildJobFolderPath(jobRecord.Company, jobRecord.Title)
 	jobContext := services.JobTailoringContext{
 		Title:     jobRecord.Title,
@@ -370,7 +382,7 @@ func (handler *TailorHandler) TailorResume(ginContext *gin.Context) {
 		RawDesc:   jobRecord.RawDesc,
 	}
 
-	result, tailorError := handler.TailorService.TailorResumeToFolder(
+	result, tailorError := handler.TailorService.TailorResumeToFolderWithTemplate(
 		ginContext.Request.Context(),
 		mcpClient,
 		userBio,
@@ -378,6 +390,7 @@ func (handler *TailorHandler) TailorResume(ginContext *gin.Context) {
 		folderPath,
 		projectName,
 		targetPages,
+		resumeTemplatePath,
 	)
 	if tailorError != nil {
 		ginContext.JSON(http.StatusInternalServerError, gin.H{"error": tailorError.Error()})
@@ -476,6 +489,14 @@ func (handler *TailorHandler) GenerateCoverLetter(ginContext *gin.Context) {
 		projectName = "job_applications"
 	}
 
+	coverLetterTemplatePath := strings.TrimSpace(payload.CoverLetterTemplatePath)
+	if coverLetterTemplatePath == "" && credentials != nil {
+		coverLetterTemplatePath = credentials.CoverLetterTemplatePath
+	}
+	if coverLetterTemplatePath == "" {
+		coverLetterTemplatePath = "templates/cover_letter.tex"
+	}
+
 	folderPath := services.BuildJobFolderPath(jobRecord.Company, jobRecord.Title)
 	jobContext := services.JobTailoringContext{
 		Title:     jobRecord.Title,
@@ -485,7 +506,7 @@ func (handler *TailorHandler) GenerateCoverLetter(ginContext *gin.Context) {
 		RawDesc:   jobRecord.RawDesc,
 	}
 
-	result, generateError := handler.TailorService.GenerateCoverLetterToFolder(
+	result, generateError := handler.TailorService.GenerateCoverLetterToFolderWithTemplate(
 		ginContext.Request.Context(),
 		mcpClient,
 		userBio,
@@ -493,6 +514,7 @@ func (handler *TailorHandler) GenerateCoverLetter(ginContext *gin.Context) {
 		folderPath,
 		projectName,
 		targetPages,
+		coverLetterTemplatePath,
 	)
 	if generateError != nil {
 		ginContext.JSON(http.StatusInternalServerError, gin.H{"error": generateError.Error()})
@@ -561,7 +583,7 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 		return
 	}
 
-	_, _, mcpError := services.LoadUserMCPClient(
+	_, credentials, mcpError := services.LoadUserMCPClient(
 		ginContext.Request.Context(),
 		handler.DB,
 		userID,
@@ -592,6 +614,22 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 		targetCoverLetterPages = prefCoverPages
 	}
 
+	resumeTemplatePath := strings.TrimSpace(payload.ResumeTemplatePath)
+	if resumeTemplatePath == "" && credentials != nil {
+		resumeTemplatePath = credentials.ResumeTemplatePath
+	}
+	if resumeTemplatePath == "" {
+		resumeTemplatePath = "templates/resume.tex"
+	}
+
+	coverLetterTemplatePath := strings.TrimSpace(payload.CoverLetterTemplatePath)
+	if coverLetterTemplatePath == "" && credentials != nil {
+		coverLetterTemplatePath = credentials.CoverLetterTemplatePath
+	}
+	if coverLetterTemplatePath == "" {
+		coverLetterTemplatePath = "templates/cover_letter.tex"
+	}
+
 	folderPath := services.BuildJobFolderPath(jobRecord.Company, jobRecord.Title)
 	resumeLabel := fmt.Sprintf("%s — %s (%s)", jobRecord.Company, jobRecord.Title, time.Now().UTC().Format("2006-01-02"))
 	coverLabel := fmt.Sprintf("%s — %s (Cover Letter %s)", jobRecord.Company, jobRecord.Title, time.Now().UTC().Format("2006-01-02"))
@@ -613,7 +651,7 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 		userID, payload.JobID, coverLabel, folderPath, targetCoverLetterPages,
 	).Scan(&coverVersionID)
 
-	go func(backgroundCtx context.Context, uID string, jID string, jRecord *jobTailoringRecord, bio string, resPages int, covPages int, resVerID string, covVerID string, targetFolder string) {
+	go func(backgroundCtx context.Context, uID string, jID string, jRecord *jobTailoringRecord, bio string, resPages int, covPages int, resVerID string, covVerID string, targetFolder string, resTpl string, covTpl string) {
 		log.Printf("[TailorAsync] Starting generation for %s at %s (userID: %s)...", jRecord.Title, jRecord.Company, uID)
 
 		client, credentials, clientError := services.LoadUserMCPClient(
@@ -649,7 +687,7 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 			RawDesc:   jRecord.RawDesc,
 		}
 
-		resumeResult, resumeError := handler.TailorService.TailorResumeToFolder(
+		resumeResult, resumeError := handler.TailorService.TailorResumeToFolderWithTemplate(
 			backgroundCtx,
 			client,
 			bio,
@@ -657,6 +695,7 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 			targetFolder,
 			projectName,
 			resPages,
+			resTpl,
 		)
 		if resumeError != nil {
 			log.Printf("[TailorAsync] Resume generation error for %s: %v", jRecord.Company, resumeError)
@@ -680,7 +719,7 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 			)
 		}
 
-		coverResult, coverError := handler.TailorService.GenerateCoverLetterToFolder(
+		coverResult, coverError := handler.TailorService.GenerateCoverLetterToFolderWithTemplate(
 			backgroundCtx,
 			client,
 			bio,
@@ -688,6 +727,7 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 			targetFolder,
 			projectName,
 			covPages,
+			covTpl,
 		)
 		if coverError != nil {
 			log.Printf("[TailorAsync] Cover letter generation error for %s: %v", jRecord.Company, coverError)
@@ -719,7 +759,7 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 			`INSERT INTO notifications (user_id, title, message, is_read) VALUES ($1, $2, $3, false)`,
 			uID, successTitle, successMessage,
 		)
-	}(context.Background(), userID, payload.JobID, jobRecord, userBio, targetResumePages, targetCoverLetterPages, resumeVersionID, coverVersionID, folderPath)
+	}(context.Background(), userID, payload.JobID, jobRecord, userBio, targetResumePages, targetCoverLetterPages, resumeVersionID, coverVersionID, folderPath, resumeTemplatePath, coverLetterTemplatePath)
 
 	ginContext.JSON(http.StatusAccepted, gin.H{
 		"status":                    "processing",
@@ -731,3 +771,118 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 		"cover_letter_version_id":   coverVersionID,
 	})
 }
+
+/*
+ListTemplates retrieves available LaTeX template files from the user's Open-Overleaf instance.
+*/
+func (handler *TailorHandler) ListTemplates(ginContext *gin.Context) {
+	userIDValue, exists := ginContext.Get("user_id")
+	if !exists {
+		ginContext.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDValue)
+
+	mcpClient, credentials, mcpError := services.LoadUserMCPClient(
+		ginContext.Request.Context(),
+		handler.DB,
+		userID,
+		handler.AESKey,
+		handler.MCPSecret,
+	)
+	if mcpError != nil {
+		ginContext.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error":        "Open-Overleaf is not configured. Please set your Open-Overleaf Server URL in Preferences.",
+			"unconfigured": true,
+		})
+		return
+	}
+
+	projectName := credentials.ProjectName
+	if projectName == "" {
+		projectName = "job_applications"
+	}
+
+	_ = services.EnsureDefaultTemplatesExist(ginContext.Request.Context(), mcpClient, projectName)
+
+	filesList, listError := mcpClient.ListFiles(ginContext.Request.Context(), projectName, "templates")
+	if listError != nil {
+		ginContext.JSON(http.StatusOK, gin.H{
+			"project_name":                 projectName,
+			"active_resume_template":       credentials.ResumeTemplatePath,
+			"active_cover_letter_template": credentials.CoverLetterTemplatePath,
+			"templates":                    []interface{}{},
+		})
+		return
+	}
+
+	var templateEntries []map[string]interface{}
+	for _, fileEntry := range filesList {
+		if fileEntry.IsDirectory {
+			continue
+		}
+		if strings.HasSuffix(strings.ToLower(fileEntry.Name), ".tex") {
+			templateEntries = append(templateEntries, map[string]interface{}{
+				"name":      fileEntry.Name,
+				"path":      fileEntry.Path,
+				"sizeBytes": fileEntry.SizeBytes,
+			})
+		}
+	}
+
+	ginContext.JSON(http.StatusOK, gin.H{
+		"project_name":                 projectName,
+		"active_resume_template":       credentials.ResumeTemplatePath,
+		"active_cover_letter_template": credentials.CoverLetterTemplatePath,
+		"templates":                    templateEntries,
+	})
+}
+
+/*
+SeedDefaultTemplates re-seeds the default industry-standard resume and cover letter templates in Open-Overleaf.
+*/
+func (handler *TailorHandler) SeedDefaultTemplates(ginContext *gin.Context) {
+	userIDValue, exists := ginContext.Get("user_id")
+	if !exists {
+		ginContext.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDValue)
+
+	mcpClient, credentials, mcpError := services.LoadUserMCPClient(
+		ginContext.Request.Context(),
+		handler.DB,
+		userID,
+		handler.AESKey,
+		handler.MCPSecret,
+	)
+	if mcpError != nil {
+		ginContext.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error":        "Open-Overleaf is not configured. Please set your Open-Overleaf Server URL in Preferences.",
+			"unconfigured": true,
+		})
+		return
+	}
+
+	projectName := credentials.ProjectName
+	if projectName == "" {
+		projectName = "job_applications"
+	}
+
+	resumeErr := mcpClient.WriteProjectFile(ginContext.Request.Context(), projectName, "templates/resume.tex", services.GetDefaultResumeTemplate())
+	if resumeErr != nil {
+		ginContext.JSON(http.StatusInternalServerError, gin.H{"error": "Failed seeding resume template: " + resumeErr.Error()})
+		return
+	}
+
+	coverErr := mcpClient.WriteProjectFile(ginContext.Request.Context(), projectName, "templates/cover_letter.tex", services.GetDefaultCoverLetterTemplate())
+	if coverErr != nil {
+		ginContext.JSON(http.StatusInternalServerError, gin.H{"error": "Failed seeding cover letter template: " + coverErr.Error()})
+		return
+	}
+
+	ginContext.JSON(http.StatusOK, gin.H{
+		"message": "Default resume and cover letter templates successfully initialized in Open-Overleaf.",
+	})
+}
+

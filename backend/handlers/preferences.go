@@ -209,9 +209,11 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 }
 
 type OverleafConfigRequest struct {
-	DeploymentURL string `json:"deployment_url" binding:"required"`
-	MCPSecret     string `json:"mcp_secret"`
-	ProjectName   string `json:"project_name"`
+	DeploymentURL           string `json:"deployment_url" binding:"required"`
+	MCPSecret               string `json:"mcp_secret"`
+	ProjectName             string `json:"project_name"`
+	ResumeTemplatePath      string `json:"resume_template_path"`
+	CoverLetterTemplatePath string `json:"cover_letter_template_path"`
 }
 
 /*
@@ -233,6 +235,16 @@ func (h *PreferencesHandler) UpdateOverleafConfig(c *gin.Context) {
 	projectName := strings.TrimSpace(req.ProjectName)
 	if projectName == "" {
 		projectName = "job_applications"
+	}
+
+	resumeTemplatePath := strings.TrimSpace(req.ResumeTemplatePath)
+	if resumeTemplatePath == "" {
+		resumeTemplatePath = "templates/resume.tex"
+	}
+
+	coverLetterTemplatePath := strings.TrimSpace(req.CoverLetterTemplatePath)
+	if coverLetterTemplatePath == "" {
+		coverLetterTemplatePath = "templates/cover_letter.tex"
 	}
 
 	var encryptedToken *string
@@ -263,22 +275,31 @@ func (h *PreferencesHandler) UpdateOverleafConfig(c *gin.Context) {
 	}
 
 	query := `
-		INSERT INTO user_overleaf_config (user_id, deployment_url, project_name, encrypted_access_token, token_encrypted)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO user_overleaf_config (user_id, deployment_url, project_name, encrypted_access_token, token_encrypted, resume_template_path, cover_letter_template_path)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (user_id)
 		DO UPDATE SET
 			deployment_url = EXCLUDED.deployment_url,
 			project_name = EXCLUDED.project_name,
+			resume_template_path = EXCLUDED.resume_template_path,
+			cover_letter_template_path = EXCLUDED.cover_letter_template_path,
 			encrypted_access_token = CASE WHEN EXCLUDED.encrypted_access_token IS NOT NULL THEN EXCLUDED.encrypted_access_token ELSE user_overleaf_config.encrypted_access_token END,
 			token_encrypted = CASE WHEN EXCLUDED.encrypted_access_token IS NOT NULL THEN EXCLUDED.token_encrypted ELSE user_overleaf_config.token_encrypted END,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 
-	_, err := h.DB.Exec(context.Background(), query, userID, strings.TrimSpace(req.DeploymentURL), projectName, encryptedToken, tokenEncrypted)
+	_, err := h.DB.Exec(context.Background(), query, userID, strings.TrimSpace(req.DeploymentURL), projectName, encryptedToken, tokenEncrypted, resumeTemplatePath, coverLetterTemplatePath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save open-overleaf configuration"})
 		return
 	}
+
+	go func(uID string) {
+		client, _, clientErr := services.LoadUserMCPClient(context.Background(), h.DB, uID, h.AESKey, "")
+		if clientErr == nil && client != nil {
+			_ = services.EnsureDefaultTemplatesExist(context.Background(), client, projectName)
+		}
+	}(fmt.Sprintf("%v", userID))
 
 	c.JSON(http.StatusOK, gin.H{"message": "Self-hosted open-overleaf configured successfully"})
 }
@@ -294,14 +315,15 @@ func (h *PreferencesHandler) GetOverleafConfig(c *gin.Context) {
 	}
 
 	query := `
-		SELECT deployment_url, COALESCE(project_name, 'job_applications'), COALESCE(encrypted_access_token, ''), COALESCE(token_encrypted, false)
+		SELECT deployment_url, COALESCE(project_name, 'job_applications'), COALESCE(encrypted_access_token, ''), COALESCE(token_encrypted, false),
+		       COALESCE(resume_template_path, 'templates/resume.tex'), COALESCE(cover_letter_template_path, 'templates/cover_letter.tex')
 		FROM user_overleaf_config
 		WHERE user_id = $1;
 	`
 
-	var url, projectName, encryptedToken string
+	var url, projectName, encryptedToken, resumeTemplatePath, coverLetterTemplatePath string
 	var tokenEncrypted bool
-	err := h.DB.QueryRow(context.Background(), query, userID).Scan(&url, &projectName, &encryptedToken, &tokenEncrypted)
+	err := h.DB.QueryRow(context.Background(), query, userID).Scan(&url, &projectName, &encryptedToken, &tokenEncrypted, &resumeTemplatePath, &coverLetterTemplatePath)
 	if err != nil {
 		if err.Error() == "no rows in result set" {
 			c.JSON(http.StatusOK, gin.H{"data": nil})
@@ -327,10 +349,12 @@ func (h *PreferencesHandler) GetOverleafConfig(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"deployment_url": url,
-			"project_name":   projectName,
-			"has_secret":     encryptedToken != "",
-			"mcp_secret":     secret,
+			"deployment_url":              url,
+			"project_name":                projectName,
+			"has_secret":                  encryptedToken != "",
+			"mcp_secret":                  secret,
+			"resume_template_path":       resumeTemplatePath,
+			"cover_letter_template_path": coverLetterTemplatePath,
 		},
 	})
 }

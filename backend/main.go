@@ -211,6 +211,8 @@ func main() {
 		protected.POST("/tailor/cover-letter", tailorHandler.GenerateCoverLetter)
 		protected.POST("/tailor/application", tailorHandler.TailorApplicationAsync)
 		protected.POST("/tailor/application-async", tailorHandler.TailorApplicationAsync)
+		protected.GET("/tailor/templates", tailorHandler.ListTemplates)
+		protected.POST("/tailor/templates/seed", tailorHandler.SeedDefaultTemplates)
 		protected.GET("/notifications", notificationsHandler.GetNotifications)
 		protected.POST("/notifications/:id/read", notificationsHandler.MarkNotificationAsRead)
 		protected.POST("/notifications/read-all", notificationsHandler.MarkAllNotificationsAsRead)

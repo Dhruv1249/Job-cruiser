@@ -159,3 +159,35 @@ func TestTailorApplicationAsyncRequiresAuthentication(t *testing.T) {
 	}
 }
 
+
+func TestListTemplatesRequiresAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
+
+	router := gin.New()
+	router.GET("/api/tailor/templates", tailorHandler.ListTemplates)
+
+	httpRequest, _ := http.NewRequest(http.MethodGet, "/api/tailor/templates", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httpRequest)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for unauthenticated request, got %d", recorder.Code)
+	}
+}
+
+func TestSeedDefaultTemplatesRequiresAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
+
+	router := gin.New()
+	router.POST("/api/tailor/templates/seed", tailorHandler.SeedDefaultTemplates)
+
+	httpRequest, _ := http.NewRequest(http.MethodPost, "/api/tailor/templates/seed", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httpRequest)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for unauthenticated request, got %d", recorder.Code)
+	}
+}

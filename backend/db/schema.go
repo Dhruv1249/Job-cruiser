@@ -78,6 +78,8 @@ var schemaQueries = []string{
 		project_name TEXT DEFAULT 'job_applications',
 		encrypted_access_token TEXT,
 		token_encrypted BOOLEAN DEFAULT false,
+		resume_template_path TEXT DEFAULT 'templates/resume.tex',
+		cover_letter_template_path TEXT DEFAULT 'templates/cover_letter.tex',
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`,
 
@@ -337,6 +339,8 @@ var schemaQueries = []string{
 	`ALTER TABLE resume_versions ADD COLUMN IF NOT EXISTS error_message TEXT;`,
 	`ALTER TABLE cover_letter_versions ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'ready';`,
 	`ALTER TABLE cover_letter_versions ADD COLUMN IF NOT EXISTS error_message TEXT;`,
+	`ALTER TABLE user_overleaf_config ADD COLUMN IF NOT EXISTS resume_template_path TEXT DEFAULT 'templates/resume.tex';`,
+	`ALTER TABLE user_overleaf_config ADD COLUMN IF NOT EXISTS cover_letter_template_path TEXT DEFAULT 'templates/cover_letter.tex';`,
 }
 
 // InitSchema executes the queries in sequence.

@@ -530,6 +530,8 @@ class ApiService {
     required String deploymentUrl,
     String? mcpSecret,
     String? projectName,
+    String? resumeTemplatePath,
+    String? coverLetterTemplatePath,
   }) async {
     try {
       final payload = <String, dynamic>{
@@ -541,7 +543,38 @@ class ApiService {
       if (projectName != null && projectName.isNotEmpty) {
         payload['project_name'] = projectName;
       }
+      if (resumeTemplatePath != null && resumeTemplatePath.isNotEmpty) {
+        payload['resume_template_path'] = resumeTemplatePath;
+      }
+      if (coverLetterTemplatePath != null && coverLetterTemplatePath.isNotEmpty) {
+        payload['cover_letter_template_path'] = coverLetterTemplatePath;
+      }
       final response = await _dio.post('/overleaf/config', data: payload);
+      return response.statusCode == 200;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
+
+  /// Fetches available baseline LaTeX templates from Open-Overleaf.
+  Future<Map<String, dynamic>?> fetchTemplates() async {
+    try {
+      final response = await _dio.get('/tailor/templates');
+      if (response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      _logger.e(e);
+      return null;
+    }
+  }
+
+  /// Re-seeds default baseline resume and cover letter templates in Open-Overleaf.
+  Future<bool> seedDefaultTemplates() async {
+    try {
+      final response = await _dio.post('/tailor/templates/seed');
       return response.statusCode == 200;
     } catch (e) {
       _logger.e(e);

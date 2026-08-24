@@ -473,3 +473,105 @@ func TestTailorResumeSelfHealingOnCompileFailure(t *testing.T) {
 	}
 }
 
+
+func TestTailorResumeToFolderWithTemplateIncludesBaselineInPrompt(t *testing.T) {
+	customTemplate := "\\documentclass{article}\n\\newcommand{\\myCustomMacro}[1]{\\textbf{#1}}\n\\begin{document}\nTemplate\n\\end{document}"
+	var capturedGeminiPrompt string
+
+	geminiServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var requestBody map[string]interface{}
+		json.NewDecoder(request.Body).Decode(&requestBody)
+		contents := requestBody["contents"].([]interface{})
+		firstContent := contents[0].(map[string]interface{})
+		parts := firstContent["parts"].([]interface{})
+		firstPart := parts[0].(map[string]interface{})
+		capturedGeminiPrompt = firstPart["text"].(string)
+
+		responsePayload := map[string]interface{}{
+			"candidates": []map[string]interface{}{
+				{
+					"content": map[string]interface{}{
+						"parts": []map[string]string{
+							{"text": "\\documentclass{article}\n\\begin{document}\nTailored with custom template\n\\end{document}"},
+						},
+					},
+				},
+			},
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(writer).Encode(responsePayload)
+	}))
+	defer geminiServer.Close()
+
+	mcpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]interface{}
+		json.NewDecoder(request.Body).Decode(&body)
+		tool, _ := body["tool"].(string)
+		arguments, _ := body["arguments"].(map[string]interface{})
+
+		switch tool {
+		case "read_project_file":
+			filePath := arguments["filePath"].(string)
+			if filePath == "templates/custom_resume.tex" {
+				json.NewEncoder(writer).Encode(map[string]interface{}{
+					"success": true,
+					"result":  map[string]interface{}{"content": customTemplate},
+				})
+				return
+			}
+			json.NewEncoder(writer).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "not found",
+			})
+		case "list_files":
+			json.NewEncoder(writer).Encode(map[string]interface{}{
+				"success": true,
+				"result":  map[string]interface{}{"files": []interface{}{}},
+			})
+		case "write_project_file":
+			json.NewEncoder(writer).Encode(map[string]interface{}{"success": true, "result": map[string]interface{}{"message": "written"}})
+		case "compile_project":
+			json.NewEncoder(writer).Encode(map[string]interface{}{
+				"success": true,
+				"result":  map[string]interface{}{"status": "compiled", "pageCount": 1, "outputLog": "OK"},
+			})
+		case "get_project_pdf":
+			json.NewEncoder(writer).Encode(map[string]interface{}{
+				"success": true,
+				"result":  map[string]interface{}{"fileName": "resume.pdf", "mimeType": "application/pdf", "pageCount": 1, "base64Data": "AAAA", "sizeBytes": 1024},
+			})
+		}
+	}))
+	defer mcpServer.Close()
+
+	mcpClient := services.NewMCPClient(mcpServer.URL, "test-token")
+	tailorService := services.NewResumeTailorService(geminiServer.URL, "test-key", mcpClient)
+	jobContext := services.JobTailoringContext{
+		Title:     "DevOps Engineer",
+		Company:   "CloudCorp",
+		Seniority: "Senior",
+		TechStack: []string{"Kubernetes", "Terraform"},
+		RawDesc:   "Manage cloud infrastructure",
+	}
+
+	result, err := tailorService.TailorResumeToFolderWithTemplate(
+		context.Background(),
+		mcpClient,
+		"Experience with Kubernetes and Terraform",
+		jobContext,
+		"cloudcorp_devops",
+		"job_applications",
+		1,
+		"templates/custom_resume.tex",
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error tailoring with custom template, got: %v", err)
+	}
+	if result.CompileResult.Status != "compiled" {
+		t.Fatalf("expected compiled status, got: %s", result.CompileResult.Status)
+	}
+	if !strings.Contains(capturedGeminiPrompt, "myCustomMacro") {
+		t.Fatalf("expected Gemini prompt to include custom macro from baseline template, prompt was: %s", capturedGeminiPrompt)
+	}
+}

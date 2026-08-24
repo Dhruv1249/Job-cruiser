@@ -3,6 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'auth.dart';
 import 'main.dart' show AppColors;
 import 'services/api_service.dart';
@@ -102,6 +103,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   late final TextEditingController _overleafUrlController;
   late final TextEditingController _overleafSecretController;
   late final TextEditingController _overleafProjectController;
+  late final TextEditingController _resumeTemplateController;
+  late final TextEditingController _coverLetterTemplateController;
   late final TextEditingController _bioTextController;
 
   bool _isParsingCV = false;
@@ -176,6 +179,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     _overleafUrlController = TextEditingController();
     _overleafSecretController = TextEditingController();
     _overleafProjectController = TextEditingController(text: 'job_applications');
+    _resumeTemplateController = TextEditingController(text: 'templates/resume.tex');
+    _coverLetterTemplateController = TextEditingController(text: 'templates/cover_letter.tex');
     _bioTextController = TextEditingController();
     _baseSalary = widget.initialPreferences?.baseSalary ?? 120.0;
     _equityExpectation =
@@ -242,6 +247,12 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
       setState(() {
         _overleafUrlController.text = overleaf['deployment_url'] ?? '';
         _overleafProjectController.text = overleaf['project_name'] ?? 'job_applications';
+        if (overleaf['resume_template_path'] != null && (overleaf['resume_template_path'] as String).isNotEmpty) {
+          _resumeTemplateController.text = overleaf['resume_template_path'] as String;
+        }
+        if (overleaf['cover_letter_template_path'] != null && (overleaf['cover_letter_template_path'] as String).isNotEmpty) {
+          _coverLetterTemplateController.text = overleaf['cover_letter_template_path'] as String;
+        }
         _hasConfiguredSecret = overleaf['has_secret'] == true;
         if (overleaf['mcp_secret'] != null && (overleaf['mcp_secret'] as String).isNotEmpty) {
           _overleafSecretController.text = overleaf['mcp_secret'] as String;
@@ -257,6 +268,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     _overleafUrlController.dispose();
     _overleafSecretController.dispose();
     _overleafProjectController.dispose();
+    _resumeTemplateController.dispose();
+    _coverLetterTemplateController.dispose();
     _bioTextController.dispose();
     super.dispose();
   }
@@ -422,7 +435,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   Widget _buildOverleafCard() {
     return _buildSectionCard(
       icon: Icons.description,
-      title: 'Open-Overleaf TeX Sync',
+      title: 'Open-Overleaf TeX Sync & Format Guidance',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -467,16 +480,106 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
               helperText: 'Top-level folder or workspace in Open-Overleaf (defaults to job_applications)',
             ),
           ),
+          const SizedBox(height: 20),
+          const Divider(),
+          const SizedBox(height: 12),
+          Row(
+            children: const [
+              Icon(Icons.palette_outlined, size: 18, color: AppColors.primary),
+              SizedBox(width: 8),
+              Text(
+                'Baseline Format & Style Guidance',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'The AI uses these LaTeX templates as visual & structural blueprints (fonts, margins, macro structures) when tailoring for each job.',
+            style: TextStyle(fontSize: 12, color: AppColors.onSurfaceVariant),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _resumeTemplateController,
+            decoration: const InputDecoration(
+              labelText: 'Resume Baseline Template Path',
+              hintText: 'templates/resume.tex',
+              border: OutlineInputBorder(),
+              helperText: 'Path to baseline resume .tex inside your Overleaf project',
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _coverLetterTemplateController,
+            decoration: const InputDecoration(
+              labelText: 'Cover Letter Baseline Template Path',
+              hintText: 'templates/cover_letter.tex',
+              border: OutlineInputBorder(),
+              helperText: 'Path to baseline cover letter .tex inside your Overleaf project',
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.open_in_browser, size: 16),
+                  label: const Text('Edit in Overleaf'),
+                  onPressed: () async {
+                    final rawUrl = _overleafUrlController.text.trim();
+                    if (rawUrl.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Please configure your Open-Overleaf URL first')),
+                      );
+                      return;
+                    }
+                    final project = _overleafProjectController.text.trim().isEmpty ? 'job_applications' : _overleafProjectController.text.trim();
+                    final uri = Uri.parse('${rawUrl.replaceAll(RegExp(r"/+$"), "")}/?project=$project');
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    } else {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Could not launch: $uri')),
+                      );
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('Reset Defaults'),
+                  onPressed: () async {
+                    final ok = await ApiService().seedDefaultTemplates();
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          ok
+                              ? 'Default resume and cover letter formats restored in Open-Overleaf!'
+                              : 'Failed to restore default formats. Check server connection.',
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
-            child: OutlinedButton.icon(
+            child: ElevatedButton.icon(
               icon: const Icon(Icons.save, size: 18),
-              label: const Text('Save Overleaf Integration'),
+              label: const Text('Save Overleaf & Format Settings'),
               onPressed: () async {
                 final url = _overleafUrlController.text.trim();
                 final secret = _overleafSecretController.text.trim();
                 final project = _overleafProjectController.text.trim();
+                final resumeTemplate = _resumeTemplateController.text.trim();
+                final coverLetterTemplate = _coverLetterTemplateController.text.trim();
 
                 if (url.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -496,6 +599,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
                   deploymentUrl: url,
                   mcpSecret: secret.isNotEmpty ? secret : null,
                   projectName: project.isNotEmpty ? project : 'job_applications',
+                  resumeTemplatePath: resumeTemplate.isNotEmpty ? resumeTemplate : 'templates/resume.tex',
+                  coverLetterTemplatePath: coverLetterTemplate.isNotEmpty ? coverLetterTemplate : 'templates/cover_letter.tex',
                 );
 
                 if (!mounted) return;
@@ -507,7 +612,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
                   SnackBar(
                     content: Text(
                       ok
-                          ? 'Open-Overleaf configuration saved successfully!'
+                          ? 'Open-Overleaf configuration and format settings saved successfully!'
                           : 'Failed to save Open-Overleaf configuration',
                     ),
                   ),

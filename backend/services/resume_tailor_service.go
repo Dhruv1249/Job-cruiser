@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -53,7 +54,9 @@ func GetGeminiModelCascade() []string {
 var markdownLatexFenceRegexp = regexp.MustCompile("(?s)^\\s*`{3,}(latex|tex)?\\s*")
 var markdownClosingFenceRegexp = regexp.MustCompile("(?s)\\s*`{3,}\\s*$")
 
-// JobTailoringContext carries structured job metadata used to build richer Gemini prompts.
+/*
+JobTailoringContext carries structured job metadata used to build richer Gemini prompts.
+*/
 type JobTailoringContext struct {
 	Title     string
 	Company   string
@@ -62,7 +65,9 @@ type JobTailoringContext struct {
 	RawDesc   string
 }
 
-// ResumeTailorResult contains the compiled PDF artifact, MCP path references, and page count metadata.
+/*
+ResumeTailorResult contains the compiled PDF artifact, MCP path references, and page count metadata.
+*/
 type ResumeTailorResult struct {
 	ProjectName   string         `json:"projectName"`
 	FolderPath    string         `json:"folderPath"`
@@ -73,7 +78,9 @@ type ResumeTailorResult struct {
 	PDFResult     *PDFResult     `json:"pdfResult"`
 }
 
-// ResumeTailorService orchestrates Gemini AI prompt tailoring and MCP compilation in open-overleaf.
+/*
+ResumeTailorService orchestrates Gemini AI prompt tailoring and MCP compilation in open-overleaf.
+*/
 type ResumeTailorService struct {
 	GeminiBaseURL       string
 	GeminiAPIKey        string
@@ -83,7 +90,9 @@ type ResumeTailorService struct {
 	MCPClient           *MCPClient
 }
 
-// NewResumeTailorService constructs a ResumeTailorService with configurable Gemini endpoint and model.
+/*
+NewResumeTailorService constructs a ResumeTailorService with configurable Gemini endpoint and model cascade.
+*/
 func NewResumeTailorService(geminiBaseURL string, geminiAPIKey string, mcpClient *MCPClient) *ResumeTailorService {
 	if geminiBaseURL == "" {
 		geminiBaseURL = defaultGeminiBaseURL
@@ -106,8 +115,9 @@ func NewResumeTailorService(geminiBaseURL string, geminiAPIKey string, mcpClient
 	}
 }
 
-// BuildJobFolderPath creates a URL-safe folder slug combining company name, job title, and current date.
-// Example: "Stripe" + "Software Engineer" → "stripe_software_engineer_20260820"
+/*
+BuildJobFolderPath creates a URL-safe folder slug combining company name, job title, and current date.
+*/
 func BuildJobFolderPath(company string, title string) string {
 	slugify := func(input string) string {
 		lowered := strings.ToLower(input)
@@ -129,18 +139,16 @@ func BuildJobFolderPath(company string, title string) string {
 	return fmt.Sprintf("%s_%s_%s", slugify(company), slugify(title), dateSuffix)
 }
 
-// sanitizeGeminiLatex strips markdown code fence markers that Gemini may prepend or append
-// to generated LaTeX content despite explicit instructions to avoid them.
 func sanitizeGeminiLatex(rawOutput string) string {
 	cleaned := markdownLatexFenceRegexp.ReplaceAllString(rawOutput, "")
 	cleaned = markdownClosingFenceRegexp.ReplaceAllString(cleaned, "")
 	return strings.TrimSpace(cleaned)
 }
 
-// TailorResumeToFolder generates tailored LaTeX using Gemini based on the job context and user bio,
-// writes it to {projectName}/{folderPath}/resume.tex via the provided mcpClient,
-// compiles with xelatex (up to MaxTighteningPasses retry loops to hit the page budget),
-// and returns the result including base64 PDF bytes.
+/*
+TailorResumeToFolder generates tailored LaTeX using Gemini based on the job context and user bio,
+saving to the specified folder path with default template fallback.
+*/
 func (service *ResumeTailorService) TailorResumeToFolder(
 	ctx context.Context,
 	mcpClient *MCPClient,
@@ -149,6 +157,25 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 	folderPath string,
 	projectName string,
 	targetPages int,
+) (*ResumeTailorResult, error) {
+	return service.TailorResumeToFolderWithTemplate(ctx, mcpClient, userBio, jobContext, folderPath, projectName, targetPages, defaultResumeTemplatePath)
+}
+
+/*
+TailorResumeToFolderWithTemplate reads the specified baseline resume template from Open-Overleaf,
+prompts Gemini to preserve the template's layout and custom macros while tailoring content to the JD,
+syncs auxiliary files, writes to {projectName}/{folderPath}/resume.tex, compiles with xelatex,
+and returns the compiled PDF result.
+*/
+func (service *ResumeTailorService) TailorResumeToFolderWithTemplate(
+	ctx context.Context,
+	mcpClient *MCPClient,
+	userBio string,
+	jobContext JobTailoringContext,
+	folderPath string,
+	projectName string,
+	targetPages int,
+	templatePath string,
 ) (*ResumeTailorResult, error) {
 	if targetPages <= 0 {
 		targetPages = defaultTargetPages
@@ -162,9 +189,28 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 		effectiveProjectName = jobApplicationsProjectName
 	}
 
+	effectiveTemplatePath := strings.TrimSpace(templatePath)
+	if effectiveTemplatePath == "" {
+		effectiveTemplatePath = defaultResumeTemplatePath
+	}
+
+	_ = EnsureDefaultTemplatesExist(ctx, effectiveMCPClient, effectiveProjectName)
+
+	templateContent, templateReadError := effectiveMCPClient.ReadProjectFile(ctx, effectiveProjectName, effectiveTemplatePath)
+	if templateReadError != nil || strings.TrimSpace(templateContent) == "" {
+		templateContent = GetDefaultResumeTemplate()
+		_ = effectiveMCPClient.WriteProjectFile(ctx, effectiveProjectName, effectiveTemplatePath, templateContent)
+	}
+
+	templateDirectory := path.Dir(effectiveTemplatePath)
+	if templateDirectory != "." && templateDirectory != "/" && templateDirectory != "" {
+		_ = SyncAuxiliaryTemplateFiles(ctx, effectiveMCPClient, effectiveProjectName, templateDirectory, folderPath)
+	}
+
 	techStackList := strings.Join(jobContext.TechStack, ", ")
 	initialPrompt := fmt.Sprintf(
 		"You are an expert LaTeX resume tailoring engine. Output ONLY valid compilable LaTeX — no markdown fences, no explanations, no commentary.\n\n"+
+			"=== BASELINE LATEX TEMPLATE (FORMAT & MACRO BLUEPRINT) ===\n%s\n=== END BASELINE TEMPLATE ===\n\n"+
 			"TARGET ROLE\n"+
 			"  Title:     %s\n"+
 			"  Company:   %s\n"+
@@ -172,9 +218,10 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 			"  Tech:      %s\n\n"+
 			"JOB DESCRIPTION\n%s\n\n"+
 			"CANDIDATE EXPERIENCE BANK\n%s\n\n"+
-			"STRICT RULES\n"+
-			"- CONTACT INFO: The experience bank above starts with CANDIDATE CONTACT INFORMATION. You MUST use the candidate's REAL name, email, phone, location, LinkedIn URL, and GitHub URL EXACTLY as provided. NEVER use placeholders like '[Your Name]', 'candidate@email.com', or '[Your Phone Number]'. If a field is missing, simply omit it.\n"+
-			"- Page budget: exactly %d page(s). Ensure the resume fills the entire target page area completely without empty space or whitespace gaps at the bottom.\n"+
+			"STRICT RULES FOR FORMAT PRESERVATION & CONTENT TAILORING\n"+
+			"- FORMAT & STRUCTURE PRESERVATION (MANDATORY): You MUST adopt and preserve the EXACT LaTeX preamble, package imports, geometry margins, custom macro definitions (e.g. \\resumeSubheading, \\resumeItem, \\resumeProjectHeading), fonts, color definitions, and overall visual layout from the BASELINE LATEX TEMPLATE above. Do not invent new macro names or change structural commands.\n"+
+			"- CONTACT INFO: The experience bank above starts with CANDIDATE CONTACT INFORMATION. You MUST use the candidate's REAL name, email, phone, location, LinkedIn URL, and GitHub URL EXACTLY as provided in the header. NEVER use placeholders like '[Your Name]', 'candidate@email.com', or '[Your Phone Number]'. If a field is missing, simply omit it.\n"+
+			"- Page budget: exactly %d page(s). Ensure the resume fills the entire target page area completely without empty space or whitespace gaps at the bottom, and does not spill over.\n"+
 			"- Standard Packages Only: Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
 			"- Escape Special Characters: ALWAYS properly escape special characters in text, company names, titles, and links: use \\& for &, \\%% for %%, \\_ for _, \\# for #, \\$ for $.\n"+
 			"- Relevant Details Selection: Compare the Job Description requirements with the candidate experience bank. If the candidate has multiple projects, select ONLY the top 2-3 most relevant projects and experiences that directly match the JD's tech stack and responsibilities. Do not include unrelated projects.\n"+
@@ -182,6 +229,7 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 			"- Full Page Density (No Emptiness): If candidate details are brief, expand upon the depth of their actual technical implementation, architecture, databases, tools, APIs, testing, and achievements to produce a dense, impressive, fully-filled %d-page resume.\n"+
 			"- Emphasize matching tech keywords in bullets and skills sections.\n"+
 			"- Output MUST begin with \\documentclass and end with \\end{document}.",
+		templateContent,
 		jobContext.Title,
 		jobContext.Company,
 		jobContext.Seniority,
@@ -226,7 +274,7 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 				"--- COMPILER ERROR LOG ---\n%s\n--- END ERROR LOG ---\n\n"+
 				"--- FAILED LATEX SOURCE ---\n%s\n--- END LATEX SOURCE ---\n\n"+
 				"DEBUGGING & FIXING INSTRUCTIONS:\n"+
-				"1. Correct all syntax errors, undefined macros, and environment mismatches shown in the log.\n"+
+				"1. Correct all syntax errors, undefined macros, and environment mismatches shown in the log while strictly preserving the template's design.\n"+
 				"2. Escape all special characters in text: use \\& for &, \\%% for %%, \\_ for _, \\# for #, and \\$ for $.\n"+
 				"3. Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
 				"4. Output ONLY the complete, corrected, compilable LaTeX code with no markdown fences or commentary.",
@@ -257,7 +305,7 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 	for passIndex := 1; passIndex <= service.MaxTighteningPasses && compileResult.PageCount > targetPages; passIndex++ {
 		tighteningPrompt := fmt.Sprintf(
 			"The compiled LaTeX resume spans %d pages, exceeding the strict target of %d page(s).\n"+
-				"Tightening pass %d of %d — be progressively more aggressive: prune lower-impact bullets, reduce spacing, condense sections.\n\n"+
+				"Tightening pass %d of %d — be progressively more aggressive: prune lower-impact bullets, reduce spacing, condense sections, while preserving custom macros and structural formatting.\n\n"+
 				"Current LaTeX:\n%s\n\n"+
 				"Output ONLY the revised LaTeX — no markdown fences, no commentary.",
 			compileResult.PageCount,
@@ -302,9 +350,9 @@ func (service *ResumeTailorService) TailorResumeToFolder(
 	}, nil
 }
 
-// GenerateCoverLetterToFolder generates a personalized LaTeX cover letter using Gemini based on job context
-// and user bio, writes it to {projectName}/{folderPath}/cover_letter.tex via mcpClient,
-// compiles with xelatex, and returns the result including base64 PDF bytes.
+/*
+GenerateCoverLetterToFolder generates a personalized LaTeX cover letter using default template fallback.
+*/
 func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 	ctx context.Context,
 	mcpClient *MCPClient,
@@ -313,6 +361,23 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 	folderPath string,
 	projectName string,
 	targetPages int,
+) (*ResumeTailorResult, error) {
+	return service.GenerateCoverLetterToFolderWithTemplate(ctx, mcpClient, userBio, jobContext, folderPath, projectName, targetPages, defaultCoverLetterTemplatePath)
+}
+
+/*
+GenerateCoverLetterToFolderWithTemplate reads the specified baseline cover letter template from Open-Overleaf,
+prompts Gemini to preserve layout while customizing the letter body to the JD, writes and compiles via MCP.
+*/
+func (service *ResumeTailorService) GenerateCoverLetterToFolderWithTemplate(
+	ctx context.Context,
+	mcpClient *MCPClient,
+	userBio string,
+	jobContext JobTailoringContext,
+	folderPath string,
+	projectName string,
+	targetPages int,
+	templatePath string,
 ) (*ResumeTailorResult, error) {
 	if targetPages <= 0 {
 		targetPages = defaultTargetPages
@@ -326,9 +391,28 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 		effectiveProjectName = jobApplicationsProjectName
 	}
 
+	effectiveTemplatePath := strings.TrimSpace(templatePath)
+	if effectiveTemplatePath == "" {
+		effectiveTemplatePath = defaultCoverLetterTemplatePath
+	}
+
+	_ = EnsureDefaultTemplatesExist(ctx, effectiveMCPClient, effectiveProjectName)
+
+	templateContent, templateReadError := effectiveMCPClient.ReadProjectFile(ctx, effectiveProjectName, effectiveTemplatePath)
+	if templateReadError != nil || strings.TrimSpace(templateContent) == "" {
+		templateContent = GetDefaultCoverLetterTemplate()
+		_ = effectiveMCPClient.WriteProjectFile(ctx, effectiveProjectName, effectiveTemplatePath, templateContent)
+	}
+
+	templateDirectory := path.Dir(effectiveTemplatePath)
+	if templateDirectory != "." && templateDirectory != "/" && templateDirectory != "" {
+		_ = SyncAuxiliaryTemplateFiles(ctx, effectiveMCPClient, effectiveProjectName, templateDirectory, folderPath)
+	}
+
 	techStackList := strings.Join(jobContext.TechStack, ", ")
 	coverLetterPrompt := fmt.Sprintf(
 		"You are an expert LaTeX cover letter writer. Output ONLY valid compilable LaTeX — no markdown fences, no explanations.\n\n"+
+			"=== BASELINE LATEX COVER LETTER TEMPLATE (FORMAT BLUEPRINT) ===\n%s\n=== END BASELINE TEMPLATE ===\n\n"+
 			"TARGET ROLE\n"+
 			"  Title:     %s\n"+
 			"  Company:   %s\n"+
@@ -337,6 +421,7 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 			"JOB DESCRIPTION\n%s\n\n"+
 			"CANDIDATE BIO & EXPERIENCE\n%s\n\n"+
 			"STRICT RULES\n"+
+			"- FORMAT PRESERVATION: Adopt the exact preamble, geometry, font settings, and layout structure of the BASELINE LATEX COVER LETTER TEMPLATE above.\n"+
 			"- CONTACT INFO: The candidate bio above starts with CANDIDATE CONTACT INFORMATION. You MUST use the candidate's REAL name, email, phone, and location EXACTLY as provided in the header and signature. NEVER use placeholders like '[Your Name]', '[Your Email Address]', or '[Your Phone Number]'. If a field is missing, simply omit it.\n"+
 			"- Page budget: exactly %d page(s). Professional tone. Address the hiring team directly.\n"+
 			"- Standard Packages Only: Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
@@ -345,6 +430,7 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 			"- Truthfulness: Never invent facts, companies, or experience.\n"+
 			"- Full Page Density: Structure the letter with a strong opening hook, 2-3 substantial technical body paragraphs explaining concrete relevant accomplishments, and a confident closing that neatly fills the %d page(s) without large empty gaps.\n"+
 			"- Output MUST begin with \\documentclass and end with \\end{document}.",
+		templateContent,
 		jobContext.Title,
 		jobContext.Company,
 		jobContext.Seniority,
@@ -389,7 +475,7 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 				"--- COMPILER ERROR LOG ---\n%s\n--- END ERROR LOG ---\n\n"+
 				"--- FAILED LATEX SOURCE ---\n%s\n--- END LATEX SOURCE ---\n\n"+
 				"DEBUGGING & FIXING INSTRUCTIONS:\n"+
-				"1. Correct all syntax errors, undefined macros, and environment mismatches shown in the log.\n"+
+				"1. Correct all syntax errors, undefined macros, and environment mismatches shown in the log while preserving the template layout.\n"+
 				"2. Escape all special characters in text: use \\& for &, \\%% for %%, \\_ for _, \\# for #, and \\$ for $.\n"+
 				"3. Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
 				"4. Output ONLY the complete, corrected, compilable LaTeX code with no markdown fences or commentary.",
@@ -420,7 +506,7 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 	for passIndex := 1; passIndex <= service.MaxTighteningPasses && compileResult.PageCount > targetPages; passIndex++ {
 		tighteningPrompt := fmt.Sprintf(
 			"The compiled LaTeX cover letter spans %d pages, exceeding the strict target of %d page(s).\n"+
-				"Tightening pass %d of %d: reduce paragraph lengths, adjust spacing/margins to fit neatly on %d page(s).\n\n"+
+				"Tightening pass %d of %d: reduce paragraph lengths, adjust spacing/margins to fit neatly on %d page(s) while preserving template structure.\n\n"+
 				"Current LaTeX:\n%s\n\n"+
 				"Output ONLY the revised LaTeX — no markdown fences, no commentary.",
 			compileResult.PageCount,
@@ -466,8 +552,10 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolder(
 	}, nil
 }
 
-// TailorResumeDirect is kept for backward compatibility with existing tests.
-// New code should use TailorResumeToFolder with per-user MCPClient.
+/*
+TailorResumeDirect is kept for backward compatibility with existing tests.
+New code should use TailorResumeToFolder with per-user MCPClient.
+*/
 func (service *ResumeTailorService) TailorResumeDirect(
 	ctx context.Context,
 	userBio string,
@@ -549,7 +637,9 @@ func (service *ResumeTailorService) TailorResumeDirect(
 	}, nil
 }
 
-// GenerateCoverLetterDirect is kept for backward compatibility.
+/*
+GenerateCoverLetterDirect is kept for backward compatibility with existing tests.
+*/
 func (service *ResumeTailorService) GenerateCoverLetterDirect(
 	ctx context.Context,
 	userBio string,
