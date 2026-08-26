@@ -23,16 +23,16 @@ func TestPreferencesRequestBinding(t *testing.T) {
 		{
 			name: "valid request with explicit AI matching disabled",
 			body: map[string]interface{}{
-				"full_name":                  "Jane Doe",
-				"target_roles":               []string{"Backend Engineer", "DevOps SRE"},
-				"work_models":                []string{"remote"},
-				"min_salary":                 150000,
-				"currency":                   "USD",
-				"master_cv_text":             "Experienced Go developer",
-				"bio_experience_text":        "5 years building microservices",
-				"ai_matching_enabled":        false,
-				"target_resume_pages":        2,
-				"target_cover_letter_pages":  1,
+				"full_name":                 "Jane Doe",
+				"target_roles":              []string{"Backend Engineer", "DevOps SRE"},
+				"work_models":               []string{"remote"},
+				"min_salary":                150000,
+				"currency":                  "USD",
+				"master_cv_text":            "Experienced Go developer",
+				"bio_experience_text":       "5 years building microservices",
+				"ai_matching_enabled":       false,
+				"target_resume_pages":       2,
+				"target_cover_letter_pages": 1,
 			},
 			expectedStatus: http.StatusOK,
 			expectError:    false,
@@ -40,16 +40,16 @@ func TestPreferencesRequestBinding(t *testing.T) {
 		{
 			name: "valid request with AI matching enabled",
 			body: map[string]interface{}{
-				"full_name":                  "John Smith",
-				"target_roles":               []string{"Fullstack SDE"},
-				"work_models":                []string{"hybrid"},
-				"min_salary":                 120000,
-				"currency":                   "USD",
-				"master_cv_text":             "Fullstack engineer",
-				"bio_experience_text":        "React and Node expert",
-				"ai_matching_enabled":        true,
-				"target_resume_pages":        1,
-				"target_cover_letter_pages":  2,
+				"full_name":                 "John Smith",
+				"target_roles":              []string{"Fullstack SDE"},
+				"work_models":               []string{"hybrid"},
+				"min_salary":                120000,
+				"currency":                  "USD",
+				"master_cv_text":            "Fullstack engineer",
+				"bio_experience_text":       "React and Node expert",
+				"ai_matching_enabled":       true,
+				"target_resume_pages":       1,
+				"target_cover_letter_pages": 2,
 			},
 			expectedStatus: http.StatusOK,
 			expectError:    false,
@@ -81,10 +81,10 @@ func TestPreferencesRequestBinding(t *testing.T) {
 				}
 
 				c.JSON(http.StatusOK, gin.H{
-					"full_name":                  req.FullName,
-					"ai_matching_enabled":        req.AIMatchingEnabled,
-					"target_resume_pages":        req.TargetResumePages,
-					"target_cover_letter_pages":  req.TargetCoverLetterPages,
+					"full_name":                 req.FullName,
+					"ai_matching_enabled":       req.AIMatchingEnabled,
+					"target_resume_pages":       req.TargetResumePages,
+					"target_cover_letter_pages": req.TargetCoverLetterPages,
 				})
 			})
 
@@ -204,4 +204,3 @@ func TestOverleafConfigRequestBinding(t *testing.T) {
 		})
 	}
 }
-

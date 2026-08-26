@@ -155,8 +155,6 @@ var schemaQueries = []string{
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`,
 
-	
-
 	`CREATE TABLE IF NOT EXISTS jobs (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		company_id UUID REFERENCES companies(id) ON DELETE CASCADE,

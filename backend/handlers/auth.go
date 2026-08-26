@@ -314,4 +314,3 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 		"has_preferences":     hasPreferences,
 	})
 }
-

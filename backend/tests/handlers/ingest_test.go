@@ -8,11 +8,11 @@ import (
 
 func TestExtractTechTagsMatchesKnownKeywords(t *testing.T) {
 	testCases := []struct {
-		name             string
-		title            string
-		description      string
-		expectedPresent  []string
-		expectedAbsent   []string
+		name            string
+		title           string
+		description     string
+		expectedPresent []string
+		expectedAbsent  []string
 	}{
 		{
 			name:            "backend engineer with Go and Postgres",

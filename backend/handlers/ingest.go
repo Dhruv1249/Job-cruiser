@@ -49,7 +49,6 @@ type IngestRawRequest struct {
 	Jobs  []IngestJobPayload `json:"jobs" binding:"required"`
 }
 
-
 type IngestRequest struct {
 	RunID   string             `json:"run_id" binding:"required"`
 	Company string             `json:"company" binding:"required"`
@@ -303,7 +302,7 @@ func (h *IngestHandler) IngestJobs(c *gin.Context) {
 				tags = append(tags, strings.ToLower(dep))
 			}
 		}
-		
+
 		if len(job.TechStack) > 0 {
 			for _, ts := range job.TechStack {
 				if ts != "" {
@@ -314,7 +313,7 @@ func (h *IngestHandler) IngestJobs(c *gin.Context) {
 			techTags := ExtractTechTags(job.Title, job.DescriptionText)
 			tags = append(tags, techTags...)
 		}
-		
+
 		tagsJSON, _ := json.Marshal(tags)
 
 		// Determine Job Type (rough heuristic)
@@ -378,7 +377,7 @@ func (h *IngestHandler) IngestJobs(c *gin.Context) {
 	// 4. Update the scraper run telemetry details
 	var sources []string
 	_ = json.Unmarshal(currentSourcesJSON, &sources)
-	
+
 	// Add company name if not already listed
 	alreadyExists := false
 	for _, src := range sources {
@@ -472,7 +471,7 @@ var knownTechKeywords = []string{
 func ExtractTechTags(title, description string) []string {
 	text := strings.ToLower(title + " " + description)
 	var tags []string
-	
+
 	for _, kw := range knownTechKeywords {
 		if ContainsWord(text, kw) {
 			tags = append(tags, kw)
@@ -490,10 +489,10 @@ func ContainsWord(text, word string) bool {
 		}
 		start := index + i
 		end := start + len(word)
-		
+
 		startOk := start == 0 || !IsAlphanumeric(text[start-1])
 		endOk := end == len(text) || !IsAlphanumeric(text[end])
-		
+
 		if startOk && endOk {
 			return true
 		}

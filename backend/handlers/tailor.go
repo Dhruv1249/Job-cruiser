@@ -140,10 +140,10 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 	profile.WriteString("\n")
 
 	var parsedData struct {
-		BioSummary     string `json:"bio_summary"`
-		Location       string `json:"location"`
-		Skills         []string `json:"skills"`
-		Education      []struct {
+		BioSummary string   `json:"bio_summary"`
+		Location   string   `json:"location"`
+		Skills     []string `json:"skills"`
+		Education  []struct {
 			Institution string `json:"institution"`
 			Degree      string `json:"degree"`
 			Year        string `json:"year"`
@@ -885,4 +885,3 @@ func (handler *TailorHandler) SeedDefaultTemplates(ginContext *gin.Context) {
 		"message": "Default resume and cover letter templates successfully initialized in Open-Overleaf.",
 	})
 }
-

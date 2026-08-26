@@ -159,7 +159,6 @@ func TestTailorApplicationAsyncRequiresAuthentication(t *testing.T) {
 	}
 }
 
-
 func TestListTemplatesRequiresAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")

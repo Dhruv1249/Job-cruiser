@@ -499,7 +499,7 @@ func (s *NvidiaNimService) GenerateCompletionWithNvExt(ctx context.Context, prom
 		TopP:        0.95,
 		Seed:        42,
 		ChatTemplateKwargs: &nvidiaChatTemplateKwargs{
-			EnableThinking:      false,
+			EnableThinking:       false,
 			ForceNonemptyContent: true,
 		},
 		NvExt: nvExt,

@@ -12,7 +12,7 @@ func RequireIngestKey() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ingestKey := c.GetHeader("X-Ingest-Key")
 		expectedKey := os.Getenv("INGEST_API_KEY")
-		
+
 		// Fallback for development if not specified
 		if expectedKey == "" {
 			expectedKey = "dev-ingest-key-12345"

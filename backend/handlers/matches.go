@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/Dhruv1249/Job-cruiser/backend/services"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/Dhruv1249/Job-cruiser/backend/services"
 )
 
 type MatchHandler struct {
@@ -42,7 +42,7 @@ func (h *MatchHandler) EvaluateJobMatch(c *gin.Context) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "AI deep matching requires a premium subscription tier"})
 			return
 		}
-		
+
 		res, err = h.AIService.ComputePremiumMatch(userID.(string), req.JobID)
 		isAIMatched = true
 	} else {

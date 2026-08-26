@@ -71,7 +71,9 @@ func main() {
 		log.Println("WARNING: NVIDIA_API_KEY missing. NVIDIA NIM GLM-5.2 features will fail.")
 	}
 	nvidiaNimService := services.NewNvidiaNimService(databasePool, nvidiaApiKey)
-	hybridMatchService := services.NewHybridBatchMatchService(nvidiaNimService)
+	geminiApiKey := os.Getenv("GEMINI_API_KEY")
+	geminiBatchService := services.NewGeminiBatchMatchService(databasePool, geminiApiKey)
+	hybridMatchService := services.NewHybridBatchMatchService(nvidiaNimService, geminiBatchService)
 
 	hybridMatchService.StartBackgroundScheduler(context.Background())
 
@@ -178,7 +180,7 @@ func main() {
 		public.POST("/auth/google", authHandler.GoogleLogin)
 		public.GET("/keywords", jobHandler.GetMasterKeywords)
 	}
-	
+
 	// Serverless Ingest & Scrapper Telemetry Routes
 	scraperIngest := webRouter.Group("/api/scraper")
 	scraperIngest.Use(middleware.RequireIngestKey())

@@ -349,10 +349,10 @@ func (h *PreferencesHandler) GetOverleafConfig(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"deployment_url":              url,
-			"project_name":                projectName,
-			"has_secret":                  encryptedToken != "",
-			"mcp_secret":                  secret,
+			"deployment_url":             url,
+			"project_name":               projectName,
+			"has_secret":                 encryptedToken != "",
+			"mcp_secret":                 secret,
 			"resume_template_path":       resumeTemplatePath,
 			"cover_letter_template_path": coverLetterTemplatePath,
 		},
@@ -514,44 +514,129 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 }`, strings.Join(masterList, ", "), req.RawCVText)
 
 	var rawJSON string
-	if h.NimService != nil {
-		completionContent, errNim := h.NimService.GenerateCompletionWithSchema(ctx, prompt, "", services.CVParsingJSONSchema)
-		if errNim != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "NVIDIA NIM CV parsing failed: " + errNim.Error()})
-			return
-		}
-		rawJSON = completionContent
-	} else {
-		client, errClient := genai.NewClient(ctx, &genai.ClientConfig{
-			Backend: genai.BackendGeminiAPI,
-			APIKey:  apiKey,
-		})
-		if errClient != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize Gemini AI client: " + errClient.Error()})
-			return
-		}
+	client, errClient := genai.NewClient(ctx, &genai.ClientConfig{
+		Backend: genai.BackendGeminiAPI,
+		APIKey:  apiKey,
+	})
+	if errClient != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize Gemini AI client: " + errClient.Error()})
+		return
+	}
 
-		config := &genai.GenerateContentConfig{
-			ResponseMIMEType: "application/json",
-			Temperature:      genai.Ptr[float32](0.0),
-		}
-
-		modelsCascade := services.GetGeminiModelCascade()
-		var lastGenError error
-		for _, modelName := range modelsCascade {
-			result, errGen := client.Models.GenerateContent(ctx, modelName, genai.Text(prompt), config)
-			if errGen != nil {
-				lastGenError = errGen
-				continue
+	cvSchemaJSON := `{
+		"type": "object",
+		"properties": {
+			"bio_summary": {"type": "string"},
+			"location": {"type": "string"},
+			"skills": {
+				"type": "array",
+				"items": {"type": "string"}
+			},
+			"education": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"institution": {"type": "string"},
+						"degree": {"type": "string"},
+						"year": {"type": "string"},
+						"grade": {"type": "string"}
+					},
+					"required": ["institution", "degree"]
+				}
+			},
+			"experience": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"company": {"type": "string"},
+						"role": {"type": "string"},
+						"duration": {"type": "string"},
+						"highlights": {
+							"type": "array",
+							"items": {"type": "string"}
+						}
+					},
+					"required": ["company", "role"]
+				}
+			},
+			"projects": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"title": {"type": "string"},
+						"tech_stack": {
+							"type": "array",
+							"items": {"type": "string"}
+						},
+						"description": {"type": "string"},
+						"link": {"type": "string"}
+					},
+					"required": ["title"]
+				}
+			},
+			"achievements": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"title": {"type": "string"},
+						"details": {"type": "string"}
+					},
+					"required": ["title"]
+				}
+			},
+			"certifications": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"name": {"type": "string"},
+						"issuer": {"type": "string"}
+					},
+					"required": ["name"]
+				}
+			},
+			"discovered_keywords": {
+				"type": "array",
+				"items": {"type": "string"}
 			}
-			rawJSON = result.Text()
-			break
-		}
+		},
+		"required": ["bio_summary", "location", "skills", "education", "experience", "projects", "achievements", "certifications", "discovered_keywords"]
+	}`
 
-		if rawJSON == "" && lastGenError != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gemini AI CV parsing failed: " + lastGenError.Error()})
-			return
+	var responseSchema genai.Schema
+	if errSchema := json.Unmarshal([]byte(cvSchemaJSON), &responseSchema); errSchema != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to unmarshal CV response schema: " + errSchema.Error()})
+		return
+	}
+
+	config := &genai.GenerateContentConfig{
+		ThinkingConfig: &genai.ThinkingConfig{
+			ThinkingLevel: genai.ThinkingLevelMinimal,
+		},
+		ResponseMIMEType: "application/json",
+		ResponseSchema:   &responseSchema,
+		Temperature:      genai.Ptr[float32](0.0),
+	}
+
+	modelsCascade := services.GetGeminiModelCascade()
+	var lastGenError error
+	for _, modelName := range modelsCascade {
+		result, errGen := client.Models.GenerateContent(ctx, modelName, genai.Text(prompt), config)
+		if errGen != nil {
+			lastGenError = errGen
+			continue
 		}
+		rawJSON = result.Text()
+		break
+	}
+
+	if rawJSON == "" && lastGenError != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gemini AI CV parsing failed: " + lastGenError.Error()})
+		return
 	}
 
 	var flexRes flexCVResponse

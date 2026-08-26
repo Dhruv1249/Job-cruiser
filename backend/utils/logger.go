@@ -13,17 +13,17 @@ import (
 )
 
 const (
-	AnsiReset          = "\033[0m"
-	AnsiBoldRed        = "\033[1;31m"
-	AnsiBoldGreen      = "\033[1;32m"
-	AnsiBoldYellow     = "\033[1;33m"
-	AnsiBoldBlue       = "\033[1;34m"
-	AnsiBoldMagenta    = "\033[1;35m"
-	AnsiBoldCyan       = "\033[1;36m"
-	AnsiBoldWhite      = "\033[1;37m"
-	AnsiBgPurple       = "\033[45;1;37m"
-	AnsiBgRed          = "\033[41;1;37m"
-	AnsiBrightPurple   = "\033[1;95m"
+	AnsiReset        = "\033[0m"
+	AnsiBoldRed      = "\033[1;31m"
+	AnsiBoldGreen    = "\033[1;32m"
+	AnsiBoldYellow   = "\033[1;33m"
+	AnsiBoldBlue     = "\033[1;34m"
+	AnsiBoldMagenta  = "\033[1;35m"
+	AnsiBoldCyan     = "\033[1;36m"
+	AnsiBoldWhite    = "\033[1;37m"
+	AnsiBgPurple     = "\033[45;1;37m"
+	AnsiBgRed        = "\033[41;1;37m"
+	AnsiBrightPurple = "\033[1;95m"
 )
 
 // ColorLogWriter wraps an underlying io.Writer to inject ANSI color escape sequences into Go log outputs.

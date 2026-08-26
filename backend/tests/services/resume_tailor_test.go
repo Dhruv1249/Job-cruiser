@@ -149,12 +149,12 @@ func TestTailorResumeToFolderSuccess(t *testing.T) {
 		case "compile_project":
 			json.NewEncoder(writer).Encode(map[string]interface{}{
 				"success": true,
-				"result": map[string]interface{}{"status": "compiled", "engine": "xelatex", "pageCount": 1, "outputLog": "OK"},
+				"result":  map[string]interface{}{"status": "compiled", "engine": "xelatex", "pageCount": 1, "outputLog": "OK"},
 			})
 		case "get_project_pdf":
 			json.NewEncoder(writer).Encode(map[string]interface{}{
 				"success": true,
-				"result": map[string]interface{}{"fileName": "resume.pdf", "mimeType": "application/pdf", "pageCount": 1, "base64Data": "AAAA", "sizeBytes": 1024},
+				"result":  map[string]interface{}{"fileName": "resume.pdf", "mimeType": "application/pdf", "pageCount": 1, "base64Data": "AAAA", "sizeBytes": 1024},
 			})
 		}
 	}))
@@ -222,12 +222,12 @@ func TestGenerateCoverLetterToFolderSuccess(t *testing.T) {
 		case "compile_project":
 			json.NewEncoder(writer).Encode(map[string]interface{}{
 				"success": true,
-				"result": map[string]interface{}{"status": "compiled", "pageCount": 1, "outputLog": "OK"},
+				"result":  map[string]interface{}{"status": "compiled", "pageCount": 1, "outputLog": "OK"},
 			})
 		case "get_project_pdf":
 			json.NewEncoder(writer).Encode(map[string]interface{}{
 				"success": true,
-				"result": map[string]interface{}{"fileName": "cover_letter.pdf", "mimeType": "application/pdf", "pageCount": 1, "base64Data": "BBBB", "sizeBytes": 512},
+				"result":  map[string]interface{}{"fileName": "cover_letter.pdf", "mimeType": "application/pdf", "pageCount": 1, "base64Data": "BBBB", "sizeBytes": 512},
 			})
 		}
 	}))
@@ -472,7 +472,6 @@ func TestTailorResumeSelfHealingOnCompileFailure(t *testing.T) {
 		t.Fatalf("expected 2 Gemini calls (initial + healing pass), got %d", geminiCallCount)
 	}
 }
-
 
 func TestTailorResumeToFolderWithTemplateIncludesBaselineInPrompt(t *testing.T) {
 	customTemplate := "\\documentclass{article}\n\\newcommand{\\myCustomMacro}[1]{\\textbf{#1}}\n\\begin{document}\nTemplate\n\\end{document}"

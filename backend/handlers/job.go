@@ -194,4 +194,3 @@ func (h *JobHandler) UndismissJob(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Job restored successfully", "job_id": jobID})
 }
-

@@ -518,12 +518,12 @@ func (h *AdminHandler) GetScraperStats(c *gin.Context) {
 			var jobsAdded int
 			if scanErr := rows.Scan(&runID, &startedAt, &finishedAt, &status, &jobsAdded, &sourcesRaw); scanErr == nil {
 				runs = append(runs, gin.H{
-					"run_id":       runID,
-					"started_at":   startedAt.Format(time.RFC3339),
-					"finished_at":  finishedAt.Format(time.RFC3339),
-					"status":       status,
-					"jobs_added":   jobsAdded,
-					"sources_hit":  sourcesRaw,
+					"run_id":      runID,
+					"started_at":  startedAt.Format(time.RFC3339),
+					"finished_at": finishedAt.Format(time.RFC3339),
+					"status":      status,
+					"jobs_added":  jobsAdded,
+					"sources_hit": sourcesRaw,
 				})
 			}
 		}

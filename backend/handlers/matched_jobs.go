@@ -339,4 +339,3 @@ func (h *MatchedJobsHandler) GetMatchedJobByID(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"data": job})
 }
-
