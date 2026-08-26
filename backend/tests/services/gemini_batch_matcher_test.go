@@ -155,3 +155,65 @@ func TestGeminiBatchMatchServiceLocationMismatchScoreCap(t *testing.T) {
 		t.Fatalf("expected match score to be capped at 25 due to 4-year experience deficit, got %d", matchResult.MatchScore)
 	}
 }
+
+func TestGeminiBatchMatchServicePerModelFiveErrorsDisablesModel(t *testing.T) {
+	t.Setenv("GEMINI_BATCH_MODELS", "test-model-1,test-model-2")
+
+	service := services.NewGeminiBatchMatchService(nil, "test-api-key")
+
+	// 1. Four errors do not disable model
+	for i := 0; i < 4; i++ {
+		service.RecordModelFailureForTest(context.Background(), "test-model-1", "mock timeout error")
+	}
+	if service.IsModelDisabledForTest("test-model-1") {
+		t.Fatalf("expected model to remain enabled after 4 errors")
+	}
+
+	// 2. Success resets consecutive error count
+	service.RecordModelSuccessForTest("test-model-1")
+	if service.GetModelConsecutiveErrorsForTest("test-model-1") != 0 {
+		t.Fatalf("expected consecutive error count to reset to 0 upon success")
+	}
+
+	// 3. Five consecutive errors permanently disables model
+	for i := 0; i < 5; i++ {
+		service.RecordModelFailureForTest(context.Background(), "test-model-1", "mock 429 quota error")
+	}
+	if !service.IsModelDisabledForTest("test-model-1") {
+		t.Fatalf("expected model to be permanently disabled after 5 consecutive errors")
+	}
+
+	// 4. Remaining model-2 continues to be used exclusively
+	selectedModel1, err1 := service.GetNextModelNameForTest()
+	if err1 != nil || selectedModel1 != "test-model-2" {
+		t.Fatalf("expected only test-model-2 to be selected, got: %s (err: %v)", selectedModel1, err1)
+	}
+
+	selectedModel2, err2 := service.GetNextModelNameForTest()
+	if err2 != nil || selectedModel2 != "test-model-2" {
+		t.Fatalf("expected test-model-2 to continue being selected, got: %s (err: %v)", selectedModel2, err2)
+	}
+}
+
+func TestGeminiBatchMatchServiceAllModelsDisabledShutsDownPipeline(t *testing.T) {
+	t.Setenv("GEMINI_BATCH_MODELS", "alpha-model,beta-model")
+
+	service := services.NewGeminiBatchMatchService(nil, "test-api-key")
+
+	// Disable both models with 5 consecutive errors each
+	for i := 0; i < 5; i++ {
+		service.RecordModelFailureForTest(context.Background(), "alpha-model", "mock 500 error")
+	}
+	for i := 0; i < 5; i++ {
+		service.RecordModelFailureForTest(context.Background(), "beta-model", "mock 500 error")
+	}
+
+	if !service.IsPipelinePermanentlyStoppedForTest() {
+		t.Fatalf("expected pipeline to be permanently stopped when all models are disabled")
+	}
+
+	_, errModel := service.GetNextModelNameForTest()
+	if errModel == nil {
+		t.Fatalf("expected error when attempting to get next model after pipeline shutdown")
+	}
+}

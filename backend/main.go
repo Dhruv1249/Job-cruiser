@@ -77,14 +77,6 @@ func main() {
 
 	hybridMatchService.StartBackgroundScheduler(context.Background())
 
-	aiMatcherService := &services.AIMatcherService{
-		DB:     databasePool,
-		APIKey: nvidiaApiKey,
-	}
-	basicMatcherService := &services.BasicMatcherService{
-		DB: databasePool,
-	}
-
 	overleafAESKeyHex := os.Getenv("OVERLEAF_AES_KEY")
 	overleafAESKey := make([]byte, 32)
 	if overleafAESKeyHex != "" {
@@ -129,11 +121,6 @@ func main() {
 	}
 	matchedJobsHandler := &handlers.MatchedJobsHandler{DB: databasePool}
 	adminHandler := &handlers.AdminHandler{DB: databasePool, MatchService: hybridMatchService}
-	matchHandler := &handlers.MatchHandler{
-		DB:           databasePool,
-		AIService:    aiMatcherService,
-		BasicService: basicMatcherService,
-	}
 
 	overleafURL := os.Getenv("OVERLEAF_MCP_URL")
 	if overleafURL == "" {
@@ -232,7 +219,6 @@ func main() {
 		protected.GET("/applications", appHandler.GetUserApplications)
 		protected.PUT("/applications/:id/status", appHandler.UpdateApplicationStatus)
 		protected.DELETE("/applications/:id", appHandler.DeleteApplication)
-		protected.POST("/jobs/match", matchHandler.EvaluateJobMatch)
 		protected.POST("/user/reset-matches", adminHandler.ResetUserMatches)
 
 		// Master Admin Routes

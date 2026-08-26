@@ -271,8 +271,11 @@ class _MyHomePageState extends State<MyHomePage> {
     _loadMatchedJobs();
     _loadUnreadNotificationsCount();
     _notificationPollingTimer = Timer.periodic(
-      const Duration(seconds: 8),
-      (_) => _loadUnreadNotificationsCount(),
+      const Duration(seconds: 6),
+      (_) {
+        _loadUnreadNotificationsCount();
+        _refreshMatchStatus();
+      },
     );
     _searchController.addListener(() {
       setState(() {
@@ -280,6 +283,25 @@ class _MyHomePageState extends State<MyHomePage> {
       });
     });
     _scrollController.addListener(_onScroll);
+  }
+
+  Future<void> _refreshMatchStatus() async {
+    final status = await _apiService.fetchMatchStatus();
+    if (!mounted) return;
+    final isEvaluating = status['is_evaluating'] == true;
+    final pendingCount = (status['pending_count'] as num?)?.toInt() ?? 0;
+
+    if (_isMatchEngineRunning != isEvaluating || _pendingMatchCount != pendingCount) {
+      final wasEvaluating = _isMatchEngineRunning;
+      setState(() {
+        _isMatchEngineRunning = isEvaluating;
+        _pendingMatchCount = pendingCount;
+      });
+
+      if (wasEvaluating && !isEvaluating) {
+        _loadMatchedJobs();
+      }
+    }
   }
 
   Future<void> _loadUnreadNotificationsCount() async {

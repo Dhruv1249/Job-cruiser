@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Dhruv1249/Job-cruiser/backend/utils"
@@ -25,7 +26,7 @@ const (
 	defaultNvidiaNimEndpoint        = "https://integrate.api.nvidia.com/v1/chat/completions"
 	defaultNvidiaNimModel           = "deepseek-ai/deepseek-v4-flash-0731"
 	backgroundWorkerBatchSize       = 8
-	backgroundTickerIntervalSeconds = 15
+	backgroundTickerIntervalSeconds = 600
 	maxJobDescriptionLength         = 10000
 	matchScoreMinThreshold          = 30
 	maxTargetTokensPerPrompt        = 250000
@@ -39,15 +40,17 @@ const (
 
 // NvidiaNimService manages single-key AI job matching, CV parsing, and queue preemption for NVIDIA NIM API.
 type NvidiaNimService struct {
-	DB                     *pgxpool.Pool
-	APIKey                 string
-	Endpoint               string
-	ModelName              string
-	HTTPClient             *http.Client
-	queueMutex             sync.RWMutex
-	isQueuePaused          bool
-	isEvaluationInProgress bool
-	tokenBucket            chan struct{}
+	DB                  *pgxpool.Pool
+	APIKey              string
+	Endpoint            string
+	ModelName           string
+	HTTPClient          *http.Client
+	queueMutex          sync.RWMutex
+	isQueuePaused       bool
+	isEvaluationInProgress       bool
+	isPipelinePermanentlyStopped bool
+	tokenBucket                  chan struct{}
+	consecutiveFailures          atomic.Int64
 }
 
 // UserProfileData contains parsed candidate background data for job matching prompts.
@@ -320,6 +323,28 @@ func (s *NvidiaNimService) IsQueuePaused() bool {
 	return s.isQueuePaused
 }
 
+// IsPipelinePermanentlyStopped returns true if the matching pipeline has been permanently shut down.
+func (s *NvidiaNimService) IsPipelinePermanentlyStopped() bool {
+	s.queueMutex.RLock()
+	defer s.queueMutex.RUnlock()
+	return s.isPipelinePermanentlyStopped
+}
+
+// SetPipelinePermanentlyStopped marks the NVIDIA NIM engine as permanently shut down.
+func (s *NvidiaNimService) SetPipelinePermanentlyStopped(stopped bool) {
+	s.queueMutex.Lock()
+	defer s.queueMutex.Unlock()
+	s.isPipelinePermanentlyStopped = stopped
+}
+
+// FillTokenBucketForTest refills the rate limiter token bucket immediately for non-blocking unit tests.
+func (s *NvidiaNimService) FillTokenBucketForTest() {
+	select {
+	case s.tokenBucket <- struct{}{}:
+	default:
+	}
+}
+
 // StartBackgroundScheduler starts a 15-second ticker executing up to 5 concurrent worker goroutines.
 func (s *NvidiaNimService) StartBackgroundScheduler(ctx context.Context) {
 	ticker := time.NewTicker(time.Duration(backgroundTickerIntervalSeconds) * time.Second)
@@ -332,6 +357,10 @@ func (s *NvidiaNimService) StartBackgroundScheduler(ctx context.Context) {
 				ticker.Stop()
 				return
 			case <-ticker.C:
+				if s.IsPipelinePermanentlyStopped() {
+					log.Println("[NvidiaNimService] Pipeline is permanently shut down, skipping background batch dispatch.")
+					continue
+				}
 				if s.IsQueuePaused() {
 					log.Println("[NvidiaNimService] Queue is paused, skipping background batch dispatch.")
 					continue
@@ -345,6 +374,11 @@ func (s *NvidiaNimService) StartBackgroundScheduler(ctx context.Context) {
 // EvaluatePendingForAllUsers fetches unevaluated jobs, packs them into multi-job token batches using exact token counts (up to 500k tokens), and dispatches a 5-goroutine worker pool.
 func (s *NvidiaNimService) EvaluatePendingForAllUsers(ctx context.Context) {
 	s.queueMutex.Lock()
+	if s.isPipelinePermanentlyStopped {
+		s.queueMutex.Unlock()
+		log.Println("[NvidiaNimService] Pipeline is permanently shut down. Skipping evaluation.")
+		return
+	}
 	if s.isEvaluationInProgress {
 		s.queueMutex.Unlock()
 		return
@@ -388,6 +422,10 @@ func (s *NvidiaNimService) EvaluatePendingForAllUsers(ctx context.Context) {
 
 	log.Printf("[NvidiaNimService] Dispatching continuous pipeline: %d max concurrent workers across %d total batches...", backgroundWorkerBatchSize, len(jobBatches))
 
+	workerCtx, cancelWorkers := context.WithCancel(ctx)
+	defer cancelWorkers()
+
+	var hasCircuitBroken atomic.Bool
 	evaluatedJobIDs := make(map[string]bool)
 	var syncMutex sync.Mutex
 	var workerWaitGroup sync.WaitGroup
@@ -398,18 +436,39 @@ func (s *NvidiaNimService) EvaluatePendingForAllUsers(ctx context.Context) {
 	}
 
 	for _, singleBatch := range jobBatches {
+		if workerCtx.Err() != nil || hasCircuitBroken.Load() {
+			break
+		}
+
 		workerID := <-workerPool
 		workerWaitGroup.Add(1)
 
 		go func(batch []JobSnippetData, id int) {
 			defer workerWaitGroup.Done()
 			defer func() { workerPool <- id }()
+
+			if workerCtx.Err() != nil || hasCircuitBroken.Load() {
+				return
+			}
+
 			log.Printf("[NvidiaNimWorker-%d] Starting evaluation for batch of %d jobs...", id, len(batch))
-			success := s.evaluateJobBatchWithBackoff(ctx, userProfiles, batch, evaluatedJobIDs, &syncMutex, id)
+			success := s.evaluateJobBatchWithBackoff(workerCtx, userProfiles, batch, evaluatedJobIDs, &syncMutex, id)
 			if !success {
-				log.Printf("[NvidiaNimWorker-%d] Batch of %d jobs postponed for next retry pass.", id, len(batch))
+				failureCount := s.consecutiveFailures.Add(1)
+				log.Printf("[NvidiaNimWorker-%d] Batch of %d jobs failed. Consecutive failure count across all workers: %d/4", id, len(batch), failureCount)
+				if failureCount >= 4 {
+					log.Println("[NvidiaNimService] 4 continuous worker errors reached across all workers. Triggering circuit breaker and stopping NVIDIA NIM worker pool.")
+					hasCircuitBroken.Store(true)
+					cancelWorkers()
+				}
 			} else {
-				log.Printf("[NvidiaNimWorker-%d] Successfully evaluated batch of %d jobs.", id, len(batch))
+				s.consecutiveFailures.Store(0)
+				log.Printf("[NvidiaNimWorker-%d] Successfully evaluated batch of %d jobs. Reset shared consecutive failure count to 0.", id, len(batch))
+				batchJobIDs := make(map[string]bool)
+				for _, item := range batch {
+					batchJobIDs[item.JobID] = true
+				}
+				_ = s.markJobsEvaluated(ctx, batchJobIDs)
 			}
 		}(singleBatch, workerID)
 	}
@@ -426,29 +485,139 @@ func (s *NvidiaNimService) EvaluatePendingForAllUsers(ctx context.Context) {
 	}
 }
 
+// EvaluatePendingForAllUsersWithResult executes the worker pool and returns true if completed without circuit breaker abort.
+func (s *NvidiaNimService) EvaluatePendingForAllUsersWithResult(ctx context.Context) bool {
+	s.queueMutex.Lock()
+	if s.isPipelinePermanentlyStopped {
+		s.queueMutex.Unlock()
+		log.Println("[NvidiaNimService] Pipeline is permanently shut down. Skipping evaluation.")
+		return false
+	}
+	if s.isEvaluationInProgress {
+		s.queueMutex.Unlock()
+		return true
+	}
+	s.isEvaluationInProgress = true
+	s.queueMutex.Unlock()
+
+	defer func() {
+		s.queueMutex.Lock()
+		s.isEvaluationInProgress = false
+		s.queueMutex.Unlock()
+	}()
+
+	userProfiles, errProfiles := s.fetchAllUserProfiles(ctx)
+	if errProfiles != nil || len(userProfiles) == 0 {
+		return true
+	}
+
+	pendingJobs, errJobs := s.fetchUnevaluatedJobs(ctx)
+	if errJobs != nil || len(pendingJobs) == 0 {
+		return true
+	}
+
+	jobBatches := s.buildMultiJobTokenBatches(ctx, pendingJobs, maxTargetTokensPerPrompt)
+	if len(jobBatches) == 0 {
+		return true
+	}
+
+	workerCtx, cancelWorkers := context.WithCancel(ctx)
+	defer cancelWorkers()
+
+	var hasCircuitBroken atomic.Bool
+	evaluatedJobIDs := make(map[string]bool)
+	var syncMutex sync.Mutex
+	var workerWaitGroup sync.WaitGroup
+
+	workerPool := make(chan int, backgroundWorkerBatchSize)
+	for i := 1; i <= backgroundWorkerBatchSize; i++ {
+		workerPool <- i
+	}
+
+	for _, singleBatch := range jobBatches {
+		if workerCtx.Err() != nil || hasCircuitBroken.Load() {
+			break
+		}
+
+		workerID := <-workerPool
+		workerWaitGroup.Add(1)
+
+		go func(batch []JobSnippetData, id int) {
+			defer workerWaitGroup.Done()
+			defer func() { workerPool <- id }()
+
+			if workerCtx.Err() != nil || hasCircuitBroken.Load() {
+				return
+			}
+
+			success := s.evaluateJobBatchWithBackoff(workerCtx, userProfiles, batch, evaluatedJobIDs, &syncMutex, id)
+			if !success {
+				failureCount := s.consecutiveFailures.Add(1)
+				log.Printf("[NvidiaNimWorker-%d] Batch failed. Consecutive failure count across all workers: %d/4", id, failureCount)
+				if failureCount >= 4 {
+					log.Println("[NvidiaNimService] 4 continuous worker errors reached. Circuit breaker triggered.")
+					hasCircuitBroken.Store(true)
+					cancelWorkers()
+				}
+			} else {
+				s.consecutiveFailures.Store(0)
+				batchJobIDs := make(map[string]bool)
+				for _, item := range batch {
+					batchJobIDs[item.JobID] = true
+				}
+				_ = s.markJobsEvaluated(ctx, batchJobIDs)
+			}
+		}(singleBatch, workerID)
+	}
+
+	workerWaitGroup.Wait()
+
+	if len(evaluatedJobIDs) > 0 {
+		_ = s.markJobsEvaluated(ctx, evaluatedJobIDs)
+	}
+
+	return !hasCircuitBroken.Load()
+}
+
 // EvaluateForSingleUser evaluates unmatched jobs for a specific user upon initial onboarding or bio update.
 func (s *NvidiaNimService) EvaluateForSingleUser(ctx context.Context, targetUserID string) {
+	_ = s.EvaluateForSingleUserWithResult(ctx, targetUserID)
+}
+
+// EvaluateForSingleUserWithResult evaluates single user unmatched jobs and returns true if completed without circuit breaker abort.
+func (s *NvidiaNimService) EvaluateForSingleUserWithResult(ctx context.Context, targetUserID string) bool {
+	s.queueMutex.RLock()
+	if s.isPipelinePermanentlyStopped {
+		s.queueMutex.RUnlock()
+		log.Printf("[NvidiaNimService] Pipeline is permanently shut down. Skipping evaluation for user %s.", targetUserID)
+		return false
+	}
+	s.queueMutex.RUnlock()
+
 	profile, errProfile := s.fetchSingleUserProfile(ctx, targetUserID)
-	if errProfile != nil {
-		log.Printf("[NvidiaNimService] Failed to fetch profile for user %s: %v", targetUserID, errProfile)
-		return
+	if errProfile != nil || profile == nil {
+		return true
 	}
 
 	unmatchedJobs, errJobs := s.fetchJobsUnmatchedForUser(ctx, targetUserID)
-	if errJobs != nil {
-		log.Printf("[NvidiaNimService] Failed to fetch unmatched jobs for user %s: %v", targetUserID, errJobs)
-		return
-	}
-	if len(unmatchedJobs) == 0 {
-		return
+	if errJobs != nil || len(unmatchedJobs) == 0 {
+		return true
 	}
 
 	jobBatches := s.buildMultiJobTokenBatches(ctx, unmatchedJobs, maxTargetTokensPerPrompt)
 	evaluatedJobIDs := make(map[string]bool)
 	var syncMutex sync.Mutex
 	var workerWaitGroup sync.WaitGroup
+	var hasCircuitBroken atomic.Bool
+
+	workerCtx, cancelWorkers := context.WithCancel(ctx)
+	defer cancelWorkers()
 
 	for index := 0; index < len(jobBatches); index++ {
+		if workerCtx.Err() != nil || hasCircuitBroken.Load() {
+			break
+		}
+
 		if index > 0 && index%backgroundWorkerBatchSize == 0 {
 			workerWaitGroup.Wait()
 			time.Sleep(2 * time.Second)
@@ -459,11 +628,25 @@ func (s *NvidiaNimService) EvaluateForSingleUser(ctx context.Context, targetUser
 
 		go func(batch []JobSnippetData, id int) {
 			defer workerWaitGroup.Done()
-			s.evaluateJobBatchWithBackoff(ctx, []UserProfileData{*profile}, batch, evaluatedJobIDs, &syncMutex, id)
+			if workerCtx.Err() != nil || hasCircuitBroken.Load() {
+				return
+			}
+			success := s.evaluateJobBatchWithBackoff(workerCtx, []UserProfileData{*profile}, batch, evaluatedJobIDs, &syncMutex, id)
+			if !success {
+				failureCount := s.consecutiveFailures.Add(1)
+				if failureCount >= 4 {
+					log.Println("[NvidiaNimService] 4 continuous worker errors reached for single user evaluation. Circuit breaker triggered.")
+					hasCircuitBroken.Store(true)
+					cancelWorkers()
+				}
+			} else {
+				s.consecutiveFailures.Store(0)
+			}
 		}(singleBatch, index+1)
 	}
 
 	workerWaitGroup.Wait()
+	return !hasCircuitBroken.Load()
 }
 
 // GenerateCompletion executes a synchronous API request for CV parsing or Overleaf interactive tasks.
@@ -1006,7 +1189,29 @@ func (s *NvidiaNimService) buildMultiJobPrompt(userProfiles []UserProfileData, j
 	return builder.String()
 }
 
+// EvaluatePilotBatch evaluates a small pilot batch of jobs to verify NVIDIA NIM health before full dispatch.
+func (s *NvidiaNimService) EvaluatePilotBatch(ctx context.Context, userProfiles []UserProfileData, pilotBatch []JobSnippetData) bool {
+	if s.IsPipelinePermanentlyStopped() || s.APIKey == "" || len(pilotBatch) == 0 || len(userProfiles) == 0 {
+		return false
+	}
+	evaluatedJobIDs := make(map[string]bool)
+	var syncMutex sync.Mutex
+	success := s.evaluateJobBatchWithBackoff(ctx, userProfiles, pilotBatch, evaluatedJobIDs, &syncMutex, 1)
+	if success && len(evaluatedJobIDs) > 0 {
+		_ = s.markJobsEvaluated(ctx, evaluatedJobIDs)
+	}
+	return success
+}
+
+// FetchAllUserProfiles retrieves all users with AI matching enabled.
+func (s *NvidiaNimService) FetchAllUserProfiles(ctx context.Context) ([]UserProfileData, error) {
+	return s.fetchAllUserProfiles(ctx)
+}
+
 func (s *NvidiaNimService) fetchAllUserProfiles(ctx context.Context) ([]UserProfileData, error) {
+	if s.DB == nil {
+		return nil, fmt.Errorf("database pool is not initialized")
+	}
 	sqlQuery := `
 		SELECT u.id, u.primary_email, COALESCE(up.bio_experience_text, ''), COALESCE(up.master_cv_text, ''), COALESCE(up.target_roles, '[]'),
 		       COALESCE(up.target_locations, '[]'), COALESCE(up.work_models->>0, ''), 0
@@ -1032,7 +1237,15 @@ func (s *NvidiaNimService) fetchAllUserProfiles(ctx context.Context) ([]UserProf
 	return profiles, nil
 }
 
+// FetchSingleUserProfile retrieves candidate background data for a specific user ID.
+func (s *NvidiaNimService) FetchSingleUserProfile(ctx context.Context, targetUserID string) (*UserProfileData, error) {
+	return s.fetchSingleUserProfile(ctx, targetUserID)
+}
+
 func (s *NvidiaNimService) fetchSingleUserProfile(ctx context.Context, targetUserID string) (*UserProfileData, error) {
+	if s.DB == nil {
+		return nil, fmt.Errorf("database pool is not initialized")
+	}
 	sqlQuery := `
 		SELECT u.id, u.primary_email, COALESCE(up.bio_experience_text, ''), COALESCE(up.master_cv_text, ''), COALESCE(up.target_roles, '[]'),
 		       COALESCE(up.target_locations, '[]'), COALESCE(up.work_models->>0, ''), 0
@@ -1049,7 +1262,15 @@ func (s *NvidiaNimService) fetchSingleUserProfile(ctx context.Context, targetUse
 	return &item, nil
 }
 
+// FetchUnevaluatedJobs retrieves recent unevaluated job listings from the database.
+func (s *NvidiaNimService) FetchUnevaluatedJobs(ctx context.Context) ([]JobSnippetData, error) {
+	return s.fetchUnevaluatedJobs(ctx)
+}
+
 func (s *NvidiaNimService) fetchUnevaluatedJobs(ctx context.Context) ([]JobSnippetData, error) {
+	if s.DB == nil {
+		return nil, fmt.Errorf("database pool is not initialized")
+	}
 	sqlQuery := `
 		SELECT j.id, j.title, COALESCE(c.name, ''), COALESCE(j.location, ''), COALESCE(j.raw_desc, '')
 		FROM jobs j
@@ -1075,7 +1296,15 @@ func (s *NvidiaNimService) fetchUnevaluatedJobs(ctx context.Context) ([]JobSnipp
 	return snippets, nil
 }
 
+// FetchJobsUnmatchedForUser retrieves unevaluated jobs specific to a given user.
+func (s *NvidiaNimService) FetchJobsUnmatchedForUser(ctx context.Context, targetUserID string) ([]JobSnippetData, error) {
+	return s.fetchJobsUnmatchedForUser(ctx, targetUserID)
+}
+
 func (s *NvidiaNimService) fetchJobsUnmatchedForUser(ctx context.Context, targetUserID string) ([]JobSnippetData, error) {
+	if s.DB == nil {
+		return nil, fmt.Errorf("database pool is not initialized")
+	}
 	sqlQuery := `
 		SELECT j.id, j.title, COALESCE(c.name, ''), COALESCE(j.location, ''), COALESCE(j.raw_desc, '')
 		FROM jobs j
@@ -1106,6 +1335,9 @@ func (s *NvidiaNimService) fetchJobsUnmatchedForUser(ctx context.Context, target
 }
 
 func (s *NvidiaNimService) upsertUserMatch(ctx context.Context, userID, jobID string, score int, reasoning string, isMatch bool) error {
+	if s.DB == nil {
+		return nil
+	}
 	sqlQuery := `
 		INSERT INTO user_job_matches (user_id, job_id, match_score, match_reasoning, is_ai_matched, ai_model, evaluated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, NOW())
@@ -1121,7 +1353,7 @@ func (s *NvidiaNimService) upsertUserMatch(ctx context.Context, userID, jobID st
 }
 
 func (s *NvidiaNimService) markJobsEvaluated(ctx context.Context, jobIDsMap map[string]bool) error {
-	if len(jobIDsMap) == 0 {
+	if s.DB == nil || len(jobIDsMap) == 0 {
 		return nil
 	}
 

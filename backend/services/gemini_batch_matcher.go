@@ -71,10 +71,17 @@ type GeminiBatchMatchService struct {
 	RateLimitInterval      time.Duration
 	lastRequestTime        time.Time
 	rateLimitMutex         sync.Mutex
-	queueMutex             sync.RWMutex
-	isQueuePaused          bool
-	isEvaluationInProgress bool
+	queueMutex                    sync.RWMutex
+	isQueuePaused                 bool
+	isEvaluationInProgress        bool
+	isPipelinePermanentlyStopped  bool
+	OnPipelineShutdown            func()
+	modelErrorMutex               sync.RWMutex
+	modelConsecutiveErrors        map[string]int
+	disabledModels                map[string]bool
 }
+
+const maxConsecutiveModelErrors = 5
 
 // NewGeminiBatchMatchService constructs a new GeminiBatchMatchService configured via environment variables.
 func NewGeminiBatchMatchService(databasePool *pgxpool.Pool, apiKey string) *GeminiBatchMatchService {
@@ -87,12 +94,14 @@ func NewGeminiBatchMatchService(databasePool *pgxpool.Pool, apiKey string) *Gemi
 	rateLimitDuration := parseConfiguredRateLimitDuration()
 
 	return &GeminiBatchMatchService{
-		DB:                databasePool,
-		APIKey:            apiKey,
-		HTTPClient:        &http.Client{Timeout: 15 * time.Minute},
-		Models:            configuredModels,
-		TargetTokenBudget: tokenBudget,
-		RateLimitInterval: rateLimitDuration,
+		DB:                     databasePool,
+		APIKey:                 apiKey,
+		HTTPClient:             &http.Client{Timeout: 15 * time.Minute},
+		Models:                 configuredModels,
+		TargetTokenBudget:      tokenBudget,
+		RateLimitInterval:      rateLimitDuration,
+		modelConsecutiveErrors: make(map[string]int),
+		disabledModels:         make(map[string]bool),
 	}
 }
 
@@ -163,12 +172,9 @@ func (s *GeminiBatchMatchService) IsQueuePaused() bool {
 	return s.isQueuePaused
 }
 
-// StartBackgroundScheduler starts a periodic ticker triggering batch evaluations.
+// StartBackgroundScheduler starts a periodic ticker triggering batch evaluations every 10 minutes.
 func (s *GeminiBatchMatchService) StartBackgroundScheduler(ctx context.Context) {
-	tickerDuration := s.RateLimitInterval
-	if tickerDuration <= 0 {
-		tickerDuration = 60 * time.Second
-	}
+	tickerDuration := 10 * time.Minute
 	ticker := time.NewTicker(tickerDuration)
 	log.Printf("[GeminiBatchMatchService] Started %v background ticker scheduler.", tickerDuration)
 
@@ -179,6 +185,10 @@ func (s *GeminiBatchMatchService) StartBackgroundScheduler(ctx context.Context) 
 				ticker.Stop()
 				return
 			case <-ticker.C:
+				if s.IsPipelinePermanentlyStopped() {
+					log.Println("[GeminiBatchMatchService] AI matching pipeline is permanently stopped, skipping background batch dispatch.")
+					continue
+				}
 				if s.IsQueuePaused() {
 					log.Println("[GeminiBatchMatchService] Queue is paused, skipping background batch dispatch.")
 					continue
@@ -192,6 +202,11 @@ func (s *GeminiBatchMatchService) StartBackgroundScheduler(ctx context.Context) 
 // EvaluatePendingForAllUsers fetches unevaluated jobs and evaluates them in sequential batches.
 func (s *GeminiBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context) {
 	s.queueMutex.Lock()
+	if s.isPipelinePermanentlyStopped {
+		s.queueMutex.Unlock()
+		log.Println("[GeminiBatchMatchService] AI matching pipeline is permanently stopped. Skipping evaluation.")
+		return
+	}
 	if s.isEvaluationInProgress {
 		s.queueMutex.Unlock()
 		return
@@ -234,46 +249,66 @@ func (s *GeminiBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context
 		return
 	}
 
-	log.Printf("[GeminiBatchMatchService] Dispatching sequential Gemini pipeline across %d batches...", len(jobBatches))
+	log.Printf("[GeminiBatchMatchService] Dispatching sequential Gemini pipeline across %d initial batches...", len(jobBatches))
 
-	evaluatedJobIDs := make(map[string]bool)
-
-	for batchIndex, singleBatch := range jobBatches {
+	batchIteration := 0
+	for len(jobBatches) > 0 {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
 
-		selectedModel, errModel := s.getNextModelName()
-		if errModel != nil {
-			log.Printf("[GeminiBatchMatchService] Configuration error: %v", errModel)
+		if s.IsPipelinePermanentlyStopped() {
+			log.Println("[GeminiBatchMatchService] AI matching pipeline is permanently stopped. Aborting remaining batches.")
 			return
 		}
 
-		log.Printf("[GeminiBatchMatchService] Processing batch %d/%d (%d jobs) using model: %s...",
-			batchIndex+1, len(jobBatches), len(singleBatch), selectedModel)
+		singleBatch := jobBatches[0]
+		jobBatches = jobBatches[1:]
+		batchIteration++
+
+		selectedModel, errModel := s.getNextModelName()
+		if errModel != nil {
+			log.Printf("[GeminiBatchMatchService] Configuration/Shutdown error: %v", errModel)
+			return
+		}
+
+		log.Printf("[GeminiBatchMatchService] Processing batch %d (%d jobs, %d remaining in queue) using model: %s...",
+			batchIteration, len(singleBatch), len(jobBatches), selectedModel)
 
 		s.enforceRateLimitPacing()
 
-		success := s.evaluateJobBatch(ctx, userProfiles, singleBatch, evaluatedJobIDs, selectedModel)
+		currentBatchEvaluatedIDs := make(map[string]bool)
+		success := s.evaluateJobBatch(ctx, userProfiles, singleBatch, currentBatchEvaluatedIDs, selectedModel)
 		if !success {
-			log.Printf("[GeminiBatchMatchService] Batch %d/%d failed — continuing to next iteration.", batchIndex+1, len(jobBatches))
-		}
-	}
-
-	if len(evaluatedJobIDs) > 0 {
-		markErr := s.markJobsEvaluated(ctx, evaluatedJobIDs)
-		if markErr != nil {
-			log.Printf("[GeminiBatchMatchService] Failed marking jobs as evaluated: %v", markErr)
+			log.Printf("[GeminiBatchMatchService] Batch of %d jobs failed with model %s — re-queuing batch at the end of queue.", len(singleBatch), selectedModel)
+			if !s.IsPipelinePermanentlyStopped() {
+				jobBatches = append(jobBatches, singleBatch)
+			}
 		} else {
-			log.Printf("[GeminiBatchMatchService] Marked %d jobs as evaluated in database.", len(evaluatedJobIDs))
+			if len(currentBatchEvaluatedIDs) > 0 {
+				markErr := s.markJobsEvaluated(ctx, currentBatchEvaluatedIDs)
+				if markErr != nil {
+					log.Printf("[GeminiBatchMatchService] Failed marking batch of %d jobs as evaluated: %v", len(currentBatchEvaluatedIDs), markErr)
+				} else {
+					log.Printf("[GeminiBatchMatchService] Live progress: marked %d jobs as evaluated in database.", len(currentBatchEvaluatedIDs))
+				}
+			}
 		}
 	}
 }
 
 // EvaluateForSingleUser evaluates unmatched jobs for a specific user.
 func (s *GeminiBatchMatchService) EvaluateForSingleUser(ctx context.Context, targetUserID string) {
+	s.queueMutex.RLock()
+	if s.isPipelinePermanentlyStopped {
+		s.queueMutex.RUnlock()
+		log.Printf("[GeminiBatchMatchService] AI matching pipeline is permanently stopped. Skipping evaluation for user %s.", targetUserID)
+		return
+	}
+	s.queueMutex.RUnlock()
+
 	if s.DB == nil {
 		return
 	}
@@ -295,14 +330,23 @@ func (s *GeminiBatchMatchService) EvaluateForSingleUser(ctx context.Context, tar
 
 	jobBatches := s.buildMultiJobTokenBatches(ctx, unmatchedJobs, s.TargetTokenBudget)
 	userProfiles := []UserProfileData{*profile}
-	evaluatedJobIDs := make(map[string]bool)
 
-	for batchIndex, singleBatch := range jobBatches {
+	batchIteration := 0
+	for len(jobBatches) > 0 {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
+
+		if s.IsPipelinePermanentlyStopped() {
+			log.Printf("[GeminiBatchMatchService] Pipeline stopped. Aborting single-user batches for user %s.", targetUserID)
+			return
+		}
+
+		singleBatch := jobBatches[0]
+		jobBatches = jobBatches[1:]
+		batchIteration++
 
 		selectedModel, errModel := s.getNextModelName()
 		if errModel != nil {
@@ -311,24 +355,147 @@ func (s *GeminiBatchMatchService) EvaluateForSingleUser(ctx context.Context, tar
 		}
 
 		s.enforceRateLimitPacing()
-		s.evaluateJobBatch(ctx, userProfiles, singleBatch, evaluatedJobIDs, selectedModel)
-		log.Printf("[GeminiBatchMatchService] Evaluated single-user batch %d/%d for user %s.", batchIndex+1, len(jobBatches), targetUserID)
+		currentBatchEvaluatedIDs := make(map[string]bool)
+		success := s.evaluateJobBatch(ctx, userProfiles, singleBatch, currentBatchEvaluatedIDs, selectedModel)
+		if !success {
+			log.Printf("[GeminiBatchMatchService] Single-user batch of %d jobs failed with model %s — re-queuing batch at the end of queue.", len(singleBatch), selectedModel)
+			if !s.IsPipelinePermanentlyStopped() {
+				jobBatches = append(jobBatches, singleBatch)
+			}
+		} else {
+			log.Printf("[GeminiBatchMatchService] Evaluated single-user batch %d (%d jobs) for user %s.", batchIteration, len(singleBatch), targetUserID)
+		}
 	}
 }
 
 func (s *GeminiBatchMatchService) getNextModelName() (string, error) {
+	s.modelErrorMutex.RLock()
+	if s.isPipelinePermanentlyStopped {
+		s.modelErrorMutex.RUnlock()
+		return "", fmt.Errorf("gemini matching pipeline is permanently stopped because all models exceeded error limit")
+	}
+	s.modelErrorMutex.RUnlock()
+
 	if len(s.Models) == 0 {
 		s.Models = parseConfiguredGeminiModels()
 	}
 	if len(s.Models) == 0 {
 		return "", fmt.Errorf("no Gemini models configured in GEMINI_BATCH_MODELS or GEMINI_MODELS")
 	}
+
+	s.modelErrorMutex.RLock()
+	var activeModels []string
+	for _, model := range s.Models {
+		if !s.disabledModels[model] {
+			activeModels = append(activeModels, model)
+		}
+	}
+	s.modelErrorMutex.RUnlock()
+
+	if len(activeModels) == 0 {
+		s.modelErrorMutex.Lock()
+		s.isPipelinePermanentlyStopped = true
+		if s.OnPipelineShutdown != nil {
+			s.OnPipelineShutdown()
+		}
+		s.modelErrorMutex.Unlock()
+		return "", fmt.Errorf("all configured Gemini models are permanently stopped")
+	}
+
 	nextIndex := s.currentModelIndex.Add(1) - 1
-	modelIndex := int(nextIndex) % len(s.Models)
+	modelIndex := int(nextIndex) % len(activeModels)
 	if modelIndex < 0 {
 		modelIndex = -modelIndex
 	}
-	return s.Models[modelIndex], nil
+	return activeModels[modelIndex], nil
+}
+
+// IsPipelinePermanentlyStopped returns true if the matching pipeline has been permanently shut down.
+func (s *GeminiBatchMatchService) IsPipelinePermanentlyStopped() bool {
+	s.modelErrorMutex.RLock()
+	defer s.modelErrorMutex.RUnlock()
+	return s.isPipelinePermanentlyStopped
+}
+
+func (s *GeminiBatchMatchService) recordModelSuccess(modelName string) {
+	s.modelErrorMutex.Lock()
+	defer s.modelErrorMutex.Unlock()
+
+	s.modelConsecutiveErrors[modelName] = 0
+}
+
+func (s *GeminiBatchMatchService) recordModelFailure(ctx context.Context, modelName string, failureReason string) {
+	s.modelErrorMutex.Lock()
+	defer s.modelErrorMutex.Unlock()
+
+	s.modelConsecutiveErrors[modelName]++
+	consecutiveErrors := s.modelConsecutiveErrors[modelName]
+
+	log.Printf("[GeminiBatchMatchService] Model '%s' consecutive error count: %d/%d (Reason: %s)",
+		modelName, consecutiveErrors, maxConsecutiveModelErrors, failureReason)
+
+	if consecutiveErrors >= maxConsecutiveModelErrors && !s.disabledModels[modelName] {
+		s.disabledModels[modelName] = true
+		log.Printf("[GeminiBatchMatchService] Model '%s' exceeded %d consecutive errors. Permanently disabling model.",
+			modelName, maxConsecutiveModelErrors)
+
+		go s.notifyAdminModelDisabled(modelName, failureReason)
+
+		allDisabled := true
+		for _, model := range s.Models {
+			if !s.disabledModels[model] {
+				allDisabled = false
+				break
+			}
+		}
+
+		if allDisabled && !s.isPipelinePermanentlyStopped {
+			s.isPipelinePermanentlyStopped = true
+			log.Println("[GeminiBatchMatchService] All configured Gemini models permanently disabled. Shutting down AI evaluation pipeline.")
+			if s.OnPipelineShutdown != nil {
+				s.OnPipelineShutdown()
+			}
+			go s.notifyAdminPipelineShutdown()
+		}
+	}
+}
+
+func (s *GeminiBatchMatchService) notifyAdminModelDisabled(modelName string, reason string) {
+	if s.DB == nil {
+		return
+	}
+
+	title := fmt.Sprintf("Alert: Gemini Model '%s' Permanently Stopped", modelName)
+	message := fmt.Sprintf("The Gemini matching engine has permanently disabled model '%s' after reaching %d consecutive errors. Last error: %s. Remaining models in cascade will continue processing.",
+		modelName, maxConsecutiveModelErrors, reason)
+
+	masterAdminEmail := os.Getenv("MASTER_ADMIN_EMAIL")
+	query := `
+		INSERT INTO notifications (user_id, title, message, is_read)
+		SELECT id, $1, $2, false
+		FROM users
+		WHERE is_master_admin = true OR (primary_email = $3 AND $3 != '');
+	`
+	_, _ = s.DB.Exec(context.Background(), query, title, message, masterAdminEmail)
+}
+
+func (s *GeminiBatchMatchService) notifyAdminPipelineShutdown() {
+	if s.DB == nil {
+		return
+	}
+
+	title := "Critical Alert: AI Matching Pipeline Permanently Stopped"
+	message := fmt.Sprintf("All configured Gemini models have exceeded %d consecutive errors. The AI batch evaluation pipeline has been permanently stopped. Please check model availability or API quotas.",
+		maxConsecutiveModelErrors)
+
+	masterAdminEmail := os.Getenv("MASTER_ADMIN_EMAIL")
+	query := `
+		INSERT INTO notifications (user_id, title, message, is_read)
+		SELECT id, $1, $2, false
+		FROM users
+		WHERE is_master_admin = true OR (primary_email = $3 AND $3 != '');
+	`
+	_, _ = s.DB.Exec(context.Background(), query, title, message, masterAdminEmail)
 }
 
 func (s *GeminiBatchMatchService) enforceRateLimitPacing() {
@@ -432,6 +599,7 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 	if errGenerate != nil {
 		log.Printf("[GeminiBatchMatchService] API error with model %s: %v", modelName, errGenerate)
 		utils.LogRawAIResponse("GeminiBatch-ERROR", modelName, promptText, errGenerate.Error(), time.Since(requestStart), true)
+		s.recordModelFailure(ctx, modelName, errGenerate.Error())
 		return false
 	}
 
@@ -440,10 +608,14 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 	if errJSON := json.Unmarshal([]byte(cleanJSON), &batchResult); errJSON != nil {
 		log.Printf("[GeminiBatchMatchService] JSON parse error from model %s: %v", modelName, errJSON)
 		utils.LogRawAIResponse("GeminiBatch-PARSE-ERROR", modelName, promptText, rawOutput, time.Since(requestStart), true)
+		s.recordModelFailure(ctx, modelName, "JSON parse failure: "+errJSON.Error())
 		return false
 	}
 
 	utils.LogRawAIResponse("GeminiBatch", modelName, promptText, rawOutput, time.Since(requestStart), false)
+	s.recordModelSuccess(modelName)
+	log.Printf("[GeminiBatchMatchService] Answer received from model '%s' in %v (Response size: %d bytes). Successfully parsed %d job match results for %d candidate profile(s).",
+		modelName, time.Since(requestStart).Truncate(time.Millisecond), len(rawOutput), len(batchResult.Results), len(userProfiles))
 
 	for _, resultItem := range batchResult.Results {
 		if resultItem.JobID == "" || resultItem.UserID == "" || !isValidUUIDString(resultItem.JobID) || !isValidUUIDString(resultItem.UserID) {
@@ -472,6 +644,37 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 	}
 
 	return true
+}
+
+// IsModelDisabledForTest checks if a model is currently disabled.
+func (s *GeminiBatchMatchService) IsModelDisabledForTest(modelName string) bool {
+	s.modelErrorMutex.RLock()
+	defer s.modelErrorMutex.RUnlock()
+	return s.disabledModels[modelName]
+}
+
+// IsPipelinePermanentlyStoppedForTest checks if the pipeline is permanently stopped.
+func (s *GeminiBatchMatchService) IsPipelinePermanentlyStoppedForTest() bool {
+	s.modelErrorMutex.RLock()
+	defer s.modelErrorMutex.RUnlock()
+	return s.isPipelinePermanentlyStopped
+}
+
+// GetModelConsecutiveErrorsForTest returns current consecutive failure count for a model.
+func (s *GeminiBatchMatchService) GetModelConsecutiveErrorsForTest(modelName string) int {
+	s.modelErrorMutex.RLock()
+	defer s.modelErrorMutex.RUnlock()
+	return s.modelConsecutiveErrors[modelName]
+}
+
+// RecordModelFailureForTest records a model failure for testing.
+func (s *GeminiBatchMatchService) RecordModelFailureForTest(ctx context.Context, modelName string, reason string) {
+	s.recordModelFailure(ctx, modelName, reason)
+}
+
+// RecordModelSuccessForTest records a model success for testing.
+func (s *GeminiBatchMatchService) RecordModelSuccessForTest(modelName string) {
+	s.recordModelSuccess(modelName)
 }
 
 func (s *GeminiBatchMatchService) generateBatchContent(ctx context.Context, modelName string, prompt string) (string, error) {

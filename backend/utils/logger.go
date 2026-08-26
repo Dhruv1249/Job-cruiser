@@ -146,48 +146,10 @@ func LogWorker(workerID int, format string, args ...interface{}) {
 	log.Printf("%s[WORKER-%d]%s %s", AnsiBoldMagenta, workerID, AnsiReset, formattedMsg)
 }
 
-var logFileMutex sync.Mutex
-
-// ClearRawAILogFile truncates logs/nim_generation.log so each evaluation run starts with a clean log file.
+// ClearRawAILogFile is a no-op placeholder with file logging disabled.
 func ClearRawAILogFile() {
-	logFileMutex.Lock()
-	defer logFileMutex.Unlock()
-
-	logDirPath := "logs"
-	_ = os.MkdirAll(logDirPath, 0755)
-	logFilePath := logDirPath + "/nim_generation.log"
-	_ = os.Truncate(logFilePath, 0)
 }
 
-// LogRawAIResponse appends raw AI generation outputs to a dedicated debug log file (logs/nim_generation.log).
+// LogRawAIResponse is a placeholder with file and stdout logging disabled.
 func LogRawAIResponse(callerTag string, modelName string, promptContent string, rawGeneratedOutput string, duration time.Duration, isError bool) {
-	logFileMutex.Lock()
-	defer logFileMutex.Unlock()
-
-	logDirPath := "logs"
-	_ = os.MkdirAll(logDirPath, 0755)
-
-	logFilePath := logDirPath + "/nim_generation.log"
-	fileHandle, openErr := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if openErr != nil {
-		return
-	}
-	defer fileHandle.Close()
-
-	timestamp := time.Now().Format("2006/01/02 15:04:05")
-	status := "SUCCESS"
-	if isError {
-		status = "ERROR"
-	}
-
-	separator := fmt.Sprintf(
-		"================================================================================\n"+
-			"[%s] TIMESTAMP: %s | TAG: %s | MODEL: %s | DURATION: %v\n"+
-			"--------------------------------------------------------------------------------\n"+
-			"%s\n"+
-			"================================================================================\n\n",
-		status, timestamp, callerTag, modelName, duration.Truncate(time.Millisecond), rawGeneratedOutput,
-	)
-
-	_, _ = fileHandle.WriteString(separator)
 }

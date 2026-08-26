@@ -23,14 +23,27 @@ type HybridBatchMatchService struct {
 
 // NewHybridBatchMatchService initializes a hybrid batch matcher service with NVIDIA NIM and Gemini fallback engines.
 func NewHybridBatchMatchService(nvidiaNim *NvidiaNimService, geminiBatch *GeminiBatchMatchService) *HybridBatchMatchService {
-	return &HybridBatchMatchService{
+	service := &HybridBatchMatchService{
 		NvidiaNimService:   nvidiaNim,
 		GeminiBatchService: geminiBatch,
 	}
+
+	if geminiBatch != nil && nvidiaNim != nil {
+		geminiBatch.OnPipelineShutdown = func() {
+			nvidiaNim.SetPipelinePermanentlyStopped(true)
+		}
+	}
+
+	return service
 }
 
-// EvaluatePendingForAllUsers delegates batch evaluation pass to active provider with automatic fallback.
+// EvaluatePendingForAllUsers probes NVIDIA NIM with the first 10 jobs; if NIM fails, it automatically falls back to Gemini.
 func (s *HybridBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context) {
+	if s.GeminiBatchService != nil && s.GeminiBatchService.IsPipelinePermanentlyStopped() {
+		log.Println("[HybridMatcher] AI evaluation pipeline is permanently shut down. Skipping evaluation pass.")
+		return
+	}
+
 	primaryProvider := strings.ToLower(strings.TrimSpace(os.Getenv("PRIMARY_AI_PROVIDER")))
 
 	if primaryProvider == "gemini" {
@@ -42,19 +55,44 @@ func (s *HybridBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context
 	}
 
 	if s.NvidiaNimService != nil && s.NvidiaNimService.APIKey != "" {
-		log.Println("[HybridMatcher] Delegating batch evaluation pass to NVIDIA NIM Engine...")
-		s.NvidiaNimService.EvaluatePendingForAllUsers(ctx)
-		return
+		log.Println("[HybridMatcher] Probing NVIDIA NIM with pilot batch of first 10 jobs...")
+		userProfiles, errProfiles := s.NvidiaNimService.FetchAllUserProfiles(ctx)
+		if errProfiles == nil && len(userProfiles) > 0 {
+			pendingJobs, errJobs := s.NvidiaNimService.FetchUnevaluatedJobs(ctx)
+			if errJobs == nil && len(pendingJobs) > 0 {
+				pilotBatchSize := 10
+				if len(pendingJobs) < pilotBatchSize {
+					pilotBatchSize = len(pendingJobs)
+				}
+				pilotBatch := pendingJobs[:pilotBatchSize]
+				pilotSuccess := s.NvidiaNimService.EvaluatePilotBatch(ctx, userProfiles, pilotBatch)
+				if pilotSuccess {
+					log.Println("[HybridMatcher] NVIDIA NIM pilot batch succeeded. Continuing full evaluation pass with NVIDIA NIM engine...")
+					fullPassSuccess := s.NvidiaNimService.EvaluatePendingForAllUsersWithResult(ctx)
+					if fullPassSuccess {
+						return
+					}
+					log.Println("[HybridMatcher] NVIDIA NIM encountered 4 continuous errors across workers. Automatically falling back to Gemini Batch Service...")
+				} else {
+					log.Println("[HybridMatcher] NVIDIA NIM pilot batch of 10 jobs failed. Automatically falling back to Gemini Batch Service...")
+				}
+			}
+		}
 	}
 
 	if s.GeminiBatchService != nil {
-		log.Println("[HybridMatcher] NVIDIA NIM unconfigured or unavailable. Falling back to Gemini Batch Service...")
+		log.Println("[HybridMatcher] Delegating job evaluation pass to Gemini Batch Service fallback...")
 		s.GeminiBatchService.EvaluatePendingForAllUsers(ctx)
 	}
 }
 
-// EvaluateForSingleUser delegates single-user evaluation pass with automatic fallback.
+// EvaluateForSingleUser probes NVIDIA NIM with the user's first 10 jobs; if NIM fails, it automatically falls back to Gemini.
 func (s *HybridBatchMatchService) EvaluateForSingleUser(ctx context.Context, targetUserID string) {
+	if s.GeminiBatchService != nil && s.GeminiBatchService.IsPipelinePermanentlyStopped() {
+		log.Printf("[HybridMatcher] AI evaluation pipeline is permanently shut down. Skipping evaluation for user %s.", targetUserID)
+		return
+	}
+
 	primaryProvider := strings.ToLower(strings.TrimSpace(os.Getenv("PRIMARY_AI_PROVIDER")))
 
 	if primaryProvider == "gemini" {
@@ -66,13 +104,32 @@ func (s *HybridBatchMatchService) EvaluateForSingleUser(ctx context.Context, tar
 	}
 
 	if s.NvidiaNimService != nil && s.NvidiaNimService.APIKey != "" {
-		log.Printf("[HybridMatcher] Delegating single-user evaluation pass for user %s to NVIDIA NIM Engine...", targetUserID)
-		s.NvidiaNimService.EvaluateForSingleUser(ctx, targetUserID)
-		return
+		profile, errProfile := s.NvidiaNimService.FetchSingleUserProfile(ctx, targetUserID)
+		if errProfile == nil && profile != nil {
+			unmatchedJobs, errJobs := s.NvidiaNimService.FetchJobsUnmatchedForUser(ctx, targetUserID)
+			if errJobs == nil && len(unmatchedJobs) > 0 {
+				pilotBatchSize := 10
+				if len(unmatchedJobs) < pilotBatchSize {
+					pilotBatchSize = len(unmatchedJobs)
+				}
+				pilotBatch := unmatchedJobs[:pilotBatchSize]
+				pilotSuccess := s.NvidiaNimService.EvaluatePilotBatch(ctx, []UserProfileData{*profile}, pilotBatch)
+				if pilotSuccess {
+					log.Printf("[HybridMatcher] NVIDIA NIM pilot batch succeeded for user %s. Continuing with NVIDIA NIM engine...", targetUserID)
+					userPassSuccess := s.NvidiaNimService.EvaluateForSingleUserWithResult(ctx, targetUserID)
+					if userPassSuccess {
+						return
+					}
+					log.Printf("[HybridMatcher] NVIDIA NIM encountered 4 continuous errors during evaluation for user %s. Automatically falling back to Gemini Batch Service...", targetUserID)
+				} else {
+					log.Printf("[HybridMatcher] NVIDIA NIM pilot batch failed for user %s. Automatically falling back to Gemini Batch Service...", targetUserID)
+				}
+			}
+		}
 	}
 
 	if s.GeminiBatchService != nil {
-		log.Printf("[HybridMatcher] NVIDIA NIM unavailable. Falling back to Gemini single-user evaluation for user %s...", targetUserID)
+		log.Printf("[HybridMatcher] Delegating single-user evaluation for user %s to Gemini Batch Service...", targetUserID)
 		s.GeminiBatchService.EvaluateForSingleUser(ctx, targetUserID)
 	}
 }
