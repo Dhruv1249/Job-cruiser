@@ -254,30 +254,35 @@ class _ApplicationTrackerPageState extends State<ApplicationTrackerPage> {
       body: RefreshIndicator(
         onRefresh: _loadApplications,
         color: AppColors.primary,
-        child: Column(
-          children: [
-            _buildPipelineMetricsBar(),
-            _buildFilterChips(),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _filteredApplications.isEmpty
-                      ? _buildEmptyState()
-                      : ListView.builder(
-                          padding: const EdgeInsets.only(
-                            left: 16,
-                            right: 16,
-                            top: 12,
-                            bottom: 24,
-                          ),
-                          itemCount: _filteredApplications.length,
-                          itemBuilder: (context, index) {
-                            final app = _filteredApplications[index];
-                            return _buildApplicationCard(app);
-                          },
-                        ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 960),
+            child: Column(
+              children: [
+                _buildPipelineMetricsBar(),
+                _buildFilterChips(),
+                Expanded(
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _filteredApplications.isEmpty
+                          ? _buildEmptyState()
+                          : ListView.builder(
+                              padding: const EdgeInsets.only(
+                                left: 16,
+                                right: 16,
+                                top: 12,
+                                bottom: 24,
+                              ),
+                              itemCount: _filteredApplications.length,
+                              itemBuilder: (context, index) {
+                                final app = _filteredApplications[index];
+                                return _buildApplicationCard(app);
+                              },
+                            ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

@@ -1166,7 +1166,7 @@ func (s *NvidiaNimService) buildMultiJobPrompt(userProfiles []UserProfileData, j
 	builder.WriteString("   - If the job's minimum required YoE is (candidate YoE + 1) to (candidate YoE + 2): cap score at 45–65. This is a stretch role the candidate cannot realistically get.\n")
 	builder.WriteString("   - If candidate YoE is perfectly aligned with the required range (candidate YoE >= minimum required YoE), award a strong bonus (+15 to +20 points) to the match score if the tech stack matches.\n")
 	builder.WriteString("3. HIGH MATCH (75–100): ONLY for roles where candidate YoE meets or exceeds the minimum, role location matches, the candidate has a strong tech stack overlap, and they receive the experience range alignment bonus.\n")
-	builder.WriteString("4. DETAILED REASONING REQUIREMENT: The 'match_reasoning' must be a minimum of 2-3 lines of text explaining location verification, tech stack match, and YoE ranges.\n\n")
+	builder.WriteString("4. DETAILED REASONING REQUIREMENT: The 'match_reasoning' must be a minimum of 4-5 lines of text explaining location verification, tech stack match, and YoE ranges.\n\n")
 
 	builder.WriteString("### CANDIDATE PROFILES\n")
 	for _, profile := range userProfiles {

@@ -50,9 +50,8 @@ type MatchedJobResponse struct {
 }
 
 /*
-GetMatchedJobs returns jobs evaluated for the authenticated user within the 14-day retention window.
-When viewed_only=true, orders strictly by ujv.viewed_at DESC (latest viewed first).
-Otherwise, orders by match_score DESC, unviewed first, and scraped date DESC.
+GetMatchedJobs returns jobs evaluated for the authenticated user within the retention window.
+Supports dynamic filtering by min_score, max_score, days, match_scope, remote_only, viewed status, and sort_by.
 */
 func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 	userID, exists := c.Get("user_id")
@@ -62,23 +61,38 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 	}
 
 	minScoreParam := c.DefaultQuery("min_score", "0")
-	minScore, err := strconv.Atoi(minScoreParam)
-	if err != nil || minScore < 0 || minScore > 100 {
+	minScore, minScoreErr := strconv.Atoi(minScoreParam)
+	if minScoreErr != nil || minScore < 0 || minScore > 100 {
 		minScore = 0
 	}
 
+	maxScoreParam := c.DefaultQuery("max_score", "100")
+	maxScore, maxScoreErr := strconv.Atoi(maxScoreParam)
+	if maxScoreErr != nil || maxScore < 0 || maxScore > 100 {
+		maxScore = 100
+	}
+
+	daysParam := c.DefaultQuery("days", "0")
+	daysFilter, daysErr := strconv.Atoi(daysParam)
+	if daysErr != nil || daysFilter < 0 {
+		daysFilter = 0
+	}
+
+	matchScope := c.DefaultQuery("match_scope", "all")
+	remoteOnly := c.DefaultQuery("remote_only", "false") == "true"
 	viewedOnly := c.DefaultQuery("viewed_only", "false") == "true"
 	unviewedOnly := c.DefaultQuery("unviewed_only", "false") == "true"
+	sortBy := c.DefaultQuery("sort_by", "score_desc")
 
 	limitParam := c.DefaultQuery("limit", "50")
-	limit, err := strconv.Atoi(limitParam)
-	if err != nil || limit <= 0 || limit > 200 {
+	limit, limitErr := strconv.Atoi(limitParam)
+	if limitErr != nil || limit <= 0 || limit > 200 {
 		limit = 50
 	}
 
 	offsetParam := c.DefaultQuery("offset", "0")
-	offset, err := strconv.Atoi(offsetParam)
-	if err != nil || offset < 0 {
+	offset, offsetErr := strconv.Atoi(offsetParam)
+	if offsetErr != nil || offset < 0 {
 		offset = 0
 	}
 
@@ -86,8 +100,11 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 	var args []interface{}
 	args = append(args, userID)
 
-	// Enforce 14-day retention policy window and exclude dismissed jobs
-	conditions = append(conditions, "j.scraped_at >= NOW() - INTERVAL '14 days'")
+	if daysFilter > 0 && daysFilter <= 14 {
+		conditions = append(conditions, fmt.Sprintf("j.scraped_at >= NOW() - INTERVAL '%d days'", daysFilter))
+	} else {
+		conditions = append(conditions, "j.scraped_at >= NOW() - INTERVAL '14 days'")
+	}
 	conditions = append(conditions, "COALESCE(ujm.is_dismissed, false) = false")
 
 	if unviewedOnly {
@@ -96,16 +113,31 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 		conditions = append(conditions, "ujv.viewed_at IS NOT NULL")
 	}
 
+	if matchScope == "matched_only" {
+		conditions = append(conditions, "(COALESCE(ujm.is_ai_matched, false) = true OR COALESCE(ujm.match_score, 0) > 0)")
+	} else if matchScope == "unmatched_only" {
+		conditions = append(conditions, "(ujm.match_score IS NULL OR ujm.match_score = 0)")
+	}
+
 	if minScore > 0 {
 		args = append(args, minScore)
 		conditions = append(conditions, fmt.Sprintf("COALESCE(ujm.match_score, 0) >= $%d", len(args)))
 	}
 
+	if maxScore < 100 {
+		args = append(args, maxScore)
+		conditions = append(conditions, fmt.Sprintf("COALESCE(ujm.match_score, 0) <= $%d", len(args)))
+	}
+
+	if remoteOnly {
+		conditions = append(conditions, "j.is_remote = true")
+	}
+
 	whereClause := ""
 	if len(conditions) > 0 {
 		whereClause = "WHERE " + conditions[0]
-		for i := 1; i < len(conditions); i++ {
-			whereClause += " AND " + conditions[i]
+		for index := 1; index < len(conditions); index++ {
+			whereClause += " AND " + conditions[index]
 		}
 	}
 
@@ -114,16 +146,25 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 	args = append(args, offset)
 	offsetParamIndex := fmt.Sprintf("$%d", len(args))
 
-	orderByClause := `
+	var orderByClause string
+	if viewedOnly {
+		orderByClause = "ORDER BY ujv.viewed_at DESC"
+	} else {
+		switch sortBy {
+		case "date_desc":
+			orderByClause = "ORDER BY j.scraped_at DESC"
+		case "date_asc":
+			orderByClause = "ORDER BY j.scraped_at ASC"
+		case "salary_desc":
+			orderByClause = "ORDER BY COALESCE(j.salary_max, j.salary_min, 0) DESC, j.scraped_at DESC"
+		case "score_desc":
+		default:
+			orderByClause = `
 		ORDER BY
 			COALESCE(ujm.match_score, 0) DESC,
 			CASE WHEN ujv.viewed_at IS NULL THEN 0 ELSE 1 END ASC,
 			j.scraped_at DESC`
-
-	if viewedOnly {
-		orderByClause = `
-		ORDER BY
-			ujv.viewed_at DESC`
+		}
 	}
 
 	query := `

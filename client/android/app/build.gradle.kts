@@ -34,12 +34,9 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
-            manifestPlaceholders["appName"] = "Job Cruiser (Dev)"
+            manifestPlaceholders["appName"] = "Job Cruiser"
         }
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
             manifestPlaceholders["appName"] = "Job Cruiser"
         }

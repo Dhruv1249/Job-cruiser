@@ -7,10 +7,14 @@ import 'auth.dart';
 import 'onboarding.dart';
 import 'tracker.dart';
 import 'models/job.dart';
+import 'models/job_filter_state.dart';
 import 'services/api_service.dart';
 import 'services/notification_service.dart';
 import 'widgets/company_logo_avatar.dart';
 import 'widgets/notifications_sheet.dart';
+import 'widgets/job_filter_bar.dart';
+import 'widgets/job_filter_dialog.dart';
+import 'widgets/job_detail_panel.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 Future<void> main() async {
@@ -20,6 +24,7 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
+/// Palette constants defining theme styling across the application.
 class AppColors {
   static const Color background = Color(0xFFF7F9FB);
   static const Color surface = Color(0xFFF7F9FB);
@@ -51,6 +56,7 @@ class AppColors {
   static const Color sliderInactive = Color(0xFFE2E8F0);
 }
 
+/// Main entry widget configuring theme and initial routing.
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -62,6 +68,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         scaffoldBackgroundColor: AppColors.surface,
+        fontFamily: 'Inter',
         colorScheme: ColorScheme.fromSeed(
           seedColor: AppColors.primary,
           surface: AppColors.surface,
@@ -102,6 +109,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
+/// Widget verifying credentials and routing to onboarding or authenticated shell.
 class AppInitializer extends StatefulWidget {
   const AppInitializer({super.key});
 
@@ -160,6 +168,7 @@ class _AppInitializerState extends State<AppInitializer> {
   }
 }
 
+/// Main application shell providing responsive desktop header and mobile bottom navigation.
 class JobCruiserShell extends StatefulWidget {
   const JobCruiserShell({super.key});
 
@@ -181,7 +190,11 @@ class _JobCruiserShellState extends State<JobCruiserShell> {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isDesktop = screenWidth >= 960;
+
     return Scaffold(
+      appBar: isDesktop ? _buildDesktopTopNav() : null,
       body: IndexedStack(
         index: _currentIndex,
         children: [
@@ -190,11 +203,94 @@ class _JobCruiserShellState extends State<JobCruiserShell> {
           const ProfilePage(),
         ],
       ),
-      bottomNavigationBar: _buildBottomNav(),
+      bottomNavigationBar: isDesktop ? null : _buildMobileBottomNav(),
     );
   }
 
-  Widget _buildBottomNav() {
+  PreferredSizeWidget _buildDesktopTopNav() {
+    return AppBar(
+      backgroundColor: AppColors.surfaceContainerLowest,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(1.0),
+        child: Container(
+          color: AppColors.outlineVariant.withValues(alpha: 0.5),
+          height: 1.0,
+        ),
+      ),
+      titleSpacing: 24,
+      title: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              color: AppColors.primary,
+            ),
+            child: const Icon(
+              Icons.auto_awesome,
+              size: 18,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Text(
+            'Job Cruiser',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: AppColors.primary,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const SizedBox(width: 32),
+          _buildDesktopNavItem(0, 'Inbox & Matches', Icons.chat_bubble_outline, Icons.chat_bubble),
+          const SizedBox(width: 8),
+          _buildDesktopNavItem(1, 'CRM Tracker', Icons.work_history_outlined, Icons.work_history),
+          const SizedBox(width: 8),
+          _buildDesktopNavItem(2, 'Profile & Preferences', Icons.account_circle_outlined, Icons.account_circle),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopNavItem(int index, String label, IconData unselectedIcon, IconData selectedIcon) {
+    final isSelected = _currentIndex == index;
+    return InkWell(
+      onTap: () => setState(() => _currentIndex = index),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.surfaceContainerHigh : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isSelected ? selectedIcon : unselectedIcon,
+              size: 16,
+              color: isSelected ? AppColors.primary : AppColors.onSurfaceVariant,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                color: isSelected ? AppColors.primary : AppColors.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileBottomNav() {
     return Container(
       decoration: BoxDecoration(
         border: const Border(
@@ -237,6 +333,7 @@ class _JobCruiserShellState extends State<JobCruiserShell> {
   }
 }
 
+/// Primary feed page rendering job opportunities with responsive master-detail layouts.
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.onSelectJob});
 
@@ -251,15 +348,14 @@ class _MyHomePageState extends State<MyHomePage> {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
+  JobFilterState _filterState = const JobFilterState();
   List<MatchedJob> _matchedJobs = [];
+  MatchedJob? _selectedJob;
   bool _isLoading = true;
   bool _isFetchingMore = false;
   bool _hasMore = true;
   bool _isMatchEngineRunning = false;
   int _pendingMatchCount = 0;
-  int _minScoreFilter = 0;
-  String _viewFilterMode = 'all'; // 'all', 'unviewed', 'viewed'
-  String _searchQuery = '';
   int _unreadNotificationCount = 0;
   Timer? _notificationPollingTimer;
   final Set<String> _seenNotificationIds = {};
@@ -268,8 +364,7 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
-    _loadMatchedJobs();
-    _loadUnreadNotificationsCount();
+    _initializeFilterAndData();
     _notificationPollingTimer = Timer.periodic(
       const Duration(seconds: 6),
       (_) {
@@ -278,11 +373,27 @@ class _MyHomePageState extends State<MyHomePage> {
       },
     );
     _searchController.addListener(() {
-      setState(() {
-        _searchQuery = _searchController.text.toLowerCase();
-      });
+      final text = _searchController.text;
+      if (text != _filterState.searchQuery) {
+        setState(() {
+          _filterState = _filterState.copyWith(searchQuery: text);
+        });
+      }
     });
     _scrollController.addListener(_onScroll);
+  }
+
+  Future<void> _initializeFilterAndData() async {
+    final savedFilters = await JobFilterState.loadFromStorage();
+    if (!mounted) return;
+
+    setState(() {
+      _filterState = savedFilters;
+      _searchController.text = savedFilters.searchQuery;
+    });
+
+    await _loadMatchedJobs();
+    await _loadUnreadNotificationsCount();
   }
 
   Future<void> _refreshMatchStatus() async {
@@ -364,9 +475,14 @@ class _MyHomePageState extends State<MyHomePage> {
 
     final statusFuture = _apiService.fetchMatchStatus();
     final jobsFuture = _apiService.fetchMatchedJobs(
-      minScore: _minScoreFilter,
-      viewedOnly: _viewFilterMode == 'viewed',
-      unviewedOnly: _viewFilterMode == 'unviewed',
+      minScore: _filterState.minScore,
+      maxScore: _filterState.maxScore,
+      days: _filterState.recencyDays,
+      matchScope: _filterState.matchScope,
+      remoteOnly: _filterState.workModel == 'remote_only',
+      viewedOnly: _filterState.viewMode == 'viewed',
+      unviewedOnly: _filterState.viewMode == 'unviewed',
+      sortBy: _filterState.sortBy,
       offset: 0,
       limit: 50,
     );
@@ -382,6 +498,17 @@ class _MyHomePageState extends State<MyHomePage> {
       _isMatchEngineRunning = status['is_evaluating'] == true;
       _pendingMatchCount = (status['pending_count'] as num?)?.toInt() ?? 0;
       _isLoading = false;
+
+      if (_matchedJobs.isNotEmpty && _selectedJob == null) {
+        _selectedJob = _matchedJobs.first;
+      } else if (_matchedJobs.isNotEmpty && _selectedJob != null) {
+        final existingIndex = _matchedJobs.indexWhere((j) => j.jobId == _selectedJob!.jobId);
+        if (existingIndex != -1) {
+          _selectedJob = _matchedJobs[existingIndex];
+        } else {
+          _selectedJob = _matchedJobs.first;
+        }
+      }
     });
   }
 
@@ -394,9 +521,14 @@ class _MyHomePageState extends State<MyHomePage> {
 
     final nextOffset = _matchedJobs.length;
     final moreJobs = await _apiService.fetchMatchedJobs(
-      minScore: _minScoreFilter,
-      viewedOnly: _viewFilterMode == 'viewed',
-      unviewedOnly: _viewFilterMode == 'unviewed',
+      minScore: _filterState.minScore,
+      maxScore: _filterState.maxScore,
+      days: _filterState.recencyDays,
+      matchScope: _filterState.matchScope,
+      remoteOnly: _filterState.workModel == 'remote_only',
+      viewedOnly: _filterState.viewMode == 'viewed',
+      unviewedOnly: _filterState.viewMode == 'unviewed',
+      sortBy: _filterState.sortBy,
       offset: nextOffset,
       limit: 50,
     );
@@ -411,6 +543,23 @@ class _MyHomePageState extends State<MyHomePage> {
         _matchedJobs.addAll(moreJobs);
       }
     });
+  }
+
+  void _onFilterStateUpdated(JobFilterState updated) {
+    setState(() {
+      _filterState = updated;
+      _searchController.text = updated.searchQuery;
+    });
+    _filterState.saveToStorage();
+    _loadMatchedJobs();
+  }
+
+  void _openFilterSettings() {
+    JobFilterDialog.show(
+      context,
+      currentState: _filterState,
+      onApply: _onFilterStateUpdated,
+    );
   }
 
   Future<void> _dismissJobFromFeed(MatchedJob job) async {
@@ -450,6 +599,9 @@ class _MyHomePageState extends State<MyHomePage> {
 
     setState(() {
       _matchedJobs.removeWhere((j) => j.jobId == job.jobId);
+      if (_selectedJob?.jobId == job.jobId) {
+        _selectedJob = _matchedJobs.isNotEmpty ? _matchedJobs.first : null;
+      }
     });
 
     final success = await _apiService.dismissJob(job.jobId);
@@ -473,31 +625,8 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   List<MatchedJob> get _filteredJobs {
-    List<MatchedJob> list = List.from(_matchedJobs);
-
-    if (_viewFilterMode == 'unviewed') {
-      list = list.where((job) => !job.isViewed).toList();
-    } else if (_viewFilterMode == 'viewed') {
-      list = list.where((job) => job.isViewed).toList();
-    }
-
-    if (_minScoreFilter > 0) {
-      list = list.where((job) => job.matchScore >= _minScoreFilter).toList();
-    }
-
-    if (_searchQuery.isNotEmpty) {
-      list = list.where((job) {
-        final titleMatch = job.title.toLowerCase().contains(_searchQuery);
-        final companyMatch = job.company.toLowerCase().contains(_searchQuery);
-        final summaryMatch = job.summary.toLowerCase().contains(_searchQuery);
-        final techMatch = job.techStack.any(
-          (tech) => tech.toLowerCase().contains(_searchQuery),
-        );
-        return titleMatch || companyMatch || summaryMatch || techMatch;
-      }).toList();
-    }
-
-    return list;
+    final matching = _matchedJobs.where((job) => _filterState.matchesJob(job)).toList();
+    return _filterState.applySort(matching);
   }
 
   void _markJobAsViewedLocally(MatchedJob targetJob) {
@@ -510,52 +639,26 @@ class _MyHomePageState extends State<MyHomePage> {
       if (index != -1) {
         _matchedJobs[index] = _matchedJobs[index].copyWith(isViewed: true, isNew: false);
       }
+      if (_selectedJob?.jobId == targetJob.jobId) {
+        _selectedJob = _selectedJob?.copyWith(isViewed: true, isNew: false);
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: _buildAppBar(),
-      body: RefreshIndicator(
-        onRefresh: _loadMatchedJobs,
-        color: AppColors.primary,
-        child: Column(
-          children: [
-            if (_isMatchEngineRunning) _buildBackgroundStatusBanner(),
-            _buildSearchBar(),
-            _buildScoreFilterChips(),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _filteredJobs.isEmpty
-                      ? _buildEmptyState()
-                      : ListView.builder(
-                          controller: _scrollController,
-                          itemCount: _filteredJobs.length + (_isFetchingMore ? 1 : 0),
-                          itemBuilder: (context, index) {
-                            if (index == _filteredJobs.length) {
-                              return const Padding(
-                                padding: EdgeInsets.all(16.0),
-                                child: Center(
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                ),
-                              );
-                            }
-                            final job = _filteredJobs[index];
-                            return _buildMatchItem(job);
-                          },
-                        ),
-            ),
-          ],
-        ),
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isDesktop = constraints.maxWidth >= 960;
+        return Scaffold(
+          appBar: _buildAppBar(isDesktop),
+          body: isDesktop ? _buildDesktopSplitLayout() : _buildMobileFeedLayout(),
+        );
+      },
     );
   }
 
-  PreferredSizeWidget _buildAppBar() {
+  PreferredSizeWidget _buildAppBar(bool isDesktop) {
     return AppBar(
       backgroundColor: AppColors.surface,
       elevation: 0,
@@ -563,7 +666,7 @@ class _MyHomePageState extends State<MyHomePage> {
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1.0),
         child: Container(
-          color: AppColors.outlineVariant,
+          color: AppColors.outlineVariant.withValues(alpha: 0.5),
           height: 1.0,
         ),
       ),
@@ -586,7 +689,7 @@ class _MyHomePageState extends State<MyHomePage> {
           const Text(
             'Matched Jobs Inbox',
             style: TextStyle(
-              fontSize: 20,
+              fontSize: 19,
               fontWeight: FontWeight.bold,
               color: AppColors.primary,
             ),
@@ -637,6 +740,178 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
+  Widget _buildDesktopSplitLayout() {
+    final jobs = _filteredJobs;
+
+    return Column(
+      children: [
+        if (_isMatchEngineRunning) _buildBackgroundStatusBanner(),
+        Expanded(
+          child: Row(
+            children: [
+              SizedBox(
+                width: 440,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    border: Border(
+                      right: BorderSide(
+                        color: AppColors.outlineVariant.withValues(alpha: 0.5),
+                        width: 1,
+                      ),
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      _buildSearchBar(),
+                      JobFilterBar(
+                        filterState: _filterState,
+                        onFilterChanged: _onFilterStateUpdated,
+                        onOpenFilterDialog: _openFilterSettings,
+                      ),
+                      const Divider(height: 1, color: AppColors.outlineVariant),
+                      Expanded(
+                        child: _isLoading
+                            ? const Center(child: CircularProgressIndicator())
+                            : jobs.isEmpty
+                                ? _buildEmptyState()
+                                : ListView.builder(
+                                    controller: _scrollController,
+                                    itemCount: jobs.length + (_isFetchingMore ? 1 : 0),
+                                    itemBuilder: (context, index) {
+                                      if (index == jobs.length) {
+                                        return const Padding(
+                                          padding: EdgeInsets.all(16.0),
+                                          child: Center(
+                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                          ),
+                                        );
+                                      }
+                                      final job = jobs[index];
+                                      final isSelected = _selectedJob?.jobId == job.jobId;
+                                      return _buildMatchItem(job, isSelected: isSelected);
+                                    },
+                                  ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Expanded(
+                child: _selectedJob == null
+                    ? _buildNoJobSelectedPlaceholder()
+                    : JobDetailPanel(
+                        key: ValueKey(_selectedJob!.jobId),
+                        job: _selectedJob!,
+                        showBackButton: false,
+                        onStatusChanged: (newStatus) {
+                          setState(() {
+                            final idx = _matchedJobs.indexWhere((j) => j.jobId == _selectedJob!.jobId);
+                            if (idx != -1) {
+                              _matchedJobs[idx] = _matchedJobs[idx].copyWith(applicationStatus: newStatus);
+                            }
+                            _selectedJob = _selectedJob?.copyWith(applicationStatus: newStatus);
+                          });
+                        },
+                        onJobDismissed: (dismissedJob) {
+                          setState(() {
+                            _matchedJobs.removeWhere((j) => j.jobId == dismissedJob.jobId);
+                            _selectedJob = _matchedJobs.isNotEmpty ? _matchedJobs.first : null;
+                          });
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileFeedLayout() {
+    final jobs = _filteredJobs;
+
+    return RefreshIndicator(
+      onRefresh: _loadMatchedJobs,
+      color: AppColors.primary,
+      child: Column(
+        children: [
+          if (_isMatchEngineRunning) _buildBackgroundStatusBanner(),
+          _buildSearchBar(),
+          JobFilterBar(
+            filterState: _filterState,
+            onFilterChanged: _onFilterStateUpdated,
+            onOpenFilterDialog: _openFilterSettings,
+          ),
+          const Divider(height: 1, color: AppColors.outlineVariant),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : jobs.isEmpty
+                    ? _buildEmptyState()
+                    : ListView.builder(
+                        controller: _scrollController,
+                        itemCount: jobs.length + (_isFetchingMore ? 1 : 0),
+                        itemBuilder: (context, index) {
+                          if (index == jobs.length) {
+                            return const Padding(
+                              padding: EdgeInsets.all(16.0),
+                              child: Center(
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            );
+                          }
+                          final job = jobs[index];
+                          return _buildMatchItem(job);
+                        },
+                      ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNoJobSelectedPlaceholder() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppColors.primary.withValues(alpha: 0.05),
+            ),
+            child: const Icon(
+              Icons.touch_app_outlined,
+              size: 36,
+              color: AppColors.outline,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Select a Job to View Deep Dive',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.primary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Select any listing from the left feed to view full requirements, AI reasoning, and tailor documents.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              color: AppColors.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBackgroundStatusBanner() {
     final message = _pendingMatchCount > 0
         ? 'AI Match Engine is processing $_pendingMatchCount pending jobs against your profile. Pull down to refresh.'
@@ -672,7 +947,7 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget _buildSearchBar() {
     return Container(
       color: AppColors.surface,
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 2.0),
         decoration: BoxDecoration(
@@ -699,10 +974,10 @@ class _MyHomePageState extends State<MyHomePage> {
               child: TextField(
                 controller: _searchController,
                 decoration: const InputDecoration(
-                  hintText: 'Search matches, skills, companies...',
+                  hintText: 'Search roles, skills, companies...',
                   hintStyle: TextStyle(
                     color: AppColors.onSurfaceVariant,
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: FontWeight.w400,
                   ),
                   border: InputBorder.none,
@@ -710,15 +985,16 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
                 style: const TextStyle(
                   color: AppColors.primary,
-                  fontSize: 14,
+                  fontSize: 13,
                 ),
               ),
             ),
             if (_searchController.text.isNotEmpty)
               IconButton(
-                icon: const Icon(Icons.clear, size: 18),
+                icon: const Icon(Icons.clear, size: 16),
                 onPressed: () {
                   _searchController.clear();
+                  _onFilterStateUpdated(_filterState.copyWith(searchQuery: ''));
                 },
               ),
           ],
@@ -727,101 +1003,9 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  Widget _buildScoreFilterChips() {
-    return Container(
-      color: AppColors.surface,
-      height: 44,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Row(
-          children: [
-            const Text(
-              'View: ',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: AppColors.onSurfaceVariant,
-              ),
-            ),
-            _buildViewFilterChip('All Matches', 'all'),
-            const SizedBox(width: 6),
-            _buildViewFilterChip('Unviewed', 'unviewed'),
-            const SizedBox(width: 6),
-            _buildViewFilterChip('Viewed', 'viewed'),
-            const SizedBox(width: 12),
-            Container(height: 16, width: 1, color: AppColors.outlineVariant),
-            const SizedBox(width: 12),
-            _buildScoreFilterChip('80%+ Top', 80),
-            const SizedBox(width: 6),
-            _buildScoreFilterChip('60%+ Good', 60),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildViewFilterChip(String label, String mode) {
-    final isSelected = _viewFilterMode == mode;
-    return ChoiceChip(
-      label: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: isSelected
-              ? AppColors.surfaceContainerLowest
-              : AppColors.onSurfaceVariant,
-        ),
-      ),
-      selected: isSelected,
-      selectedColor: AppColors.primary,
-      backgroundColor: AppColors.surfaceContainerLowest,
-      side: BorderSide(
-        color: isSelected ? AppColors.primary : AppColors.outlineVariant,
-      ),
-      onSelected: (selected) {
-        if (selected) {
-          setState(() {
-            _viewFilterMode = mode;
-          });
-          _loadMatchedJobs();
-        }
-      },
-    );
-  }
-
-  Widget _buildScoreFilterChip(String label, int minScore) {
-    final isSelected = _minScoreFilter == minScore;
-    return ChoiceChip(
-      label: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: isSelected
-              ? AppColors.surfaceContainerLowest
-              : AppColors.onSurfaceVariant,
-        ),
-      ),
-      selected: isSelected,
-      selectedColor: AppColors.primary,
-      backgroundColor: AppColors.surfaceContainerLowest,
-      side: BorderSide(
-        color: isSelected ? AppColors.primary : AppColors.outlineVariant,
-      ),
-      onSelected: (selected) {
-        if (selected) {
-          setState(() {
-            _minScoreFilter = isSelected ? 0 : minScore;
-          });
-          _loadMatchedJobs();
-        }
-      },
-    );
-  }
-
   Widget _buildEmptyState() {
+    final hasActiveFilters = !_filterState.isDefault;
+
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
       child: Container(
@@ -832,65 +1016,91 @@ class _MyHomePageState extends State<MyHomePage> {
             const SizedBox(height: 40),
             const Icon(
               Icons.auto_awesome_outlined,
-              size: 64,
+              size: 56,
               color: AppColors.outline,
             ),
             const SizedBox(height: 16),
-            const Text(
-              'No AI Matched Jobs Yet',
-              style: TextStyle(
-                fontSize: 18,
+            Text(
+              hasActiveFilters ? 'No Matching Jobs Found' : 'No AI Matched Jobs Yet',
+              style: const TextStyle(
+                fontSize: 17,
                 fontWeight: FontWeight.w700,
                 color: AppColors.primary,
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Set up your target roles, min salary, and industries to run AI match evaluations.',
+            Text(
+              hasActiveFilters
+                  ? 'No listings match your active filters or search terms. Try adjusting your match score range, recency, or scope.'
+                  : 'Set up your target roles, min salary, and industries to run AI match evaluations.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
+              style: const TextStyle(
+                fontSize: 13,
                 color: AppColors.onSurfaceVariant,
               ),
             ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () async {
-                await Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const preferences_page.SetPreferencesScreen(),
-                  ),
-                );
-                _loadMatchedJobs();
-              },
-              icon: const Icon(Icons.tune, size: 18),
-              label: const Text('Set Match Preferences'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            const SizedBox(height: 20),
+            if (hasActiveFilters)
+              ElevatedButton.icon(
+                onPressed: () => _onFilterStateUpdated(_filterState.reset()),
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Reset All Filters'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                ),
+              )
+            else
+              ElevatedButton.icon(
+                onPressed: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const preferences_page.SetPreferencesScreen(),
+                    ),
+                  );
+                  _loadMatchedJobs();
+                },
+                icon: const Icon(Icons.tune, size: 16),
+                label: const Text('Set Match Preferences'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                ),
               ),
-            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildMatchItem(MatchedJob job) {
+  Widget _buildMatchItem(MatchedJob job, {bool isSelected = false}) {
     final isHighMatch = job.matchScore >= 80;
 
     return InkWell(
       onTap: () {
         _markJobAsViewedLocally(job);
-        widget.onSelectJob(job);
+        final screenWidth = MediaQuery.of(context).size.width;
+        if (screenWidth >= 960) {
+          setState(() {
+            _selectedJob = job;
+          });
+        } else {
+          widget.onSelectJob(job);
+        }
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        decoration: const BoxDecoration(
-          color: AppColors.surface,
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.surfaceContainerLowest
+              : AppColors.surface,
           border: Border(
-            bottom: BorderSide(color: AppColors.outlineVariant, width: 1.0),
+            bottom: const BorderSide(color: AppColors.outlineVariant, width: 1.0),
+            left: isSelected
+                ? const BorderSide(color: AppColors.primary, width: 4.0)
+                : BorderSide.none,
           ),
         ),
         child: Column(
@@ -902,9 +1112,9 @@ class _MyHomePageState extends State<MyHomePage> {
                 Expanded(
                   child: Text(
                     job.title,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: isSelected ? FontWeight.w800 : FontWeight.w700,
                       color: AppColors.primary,
                       letterSpacing: -0.2,
                     ),
@@ -918,7 +1128,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                       decoration: BoxDecoration(
                         color: isHighMatch
                             ? AppColors.matchGreen
@@ -930,11 +1140,11 @@ class _MyHomePageState extends State<MyHomePage> {
                       ),
                       child: Text(
                         job.matchScore > 0
-                            ? '${job.matchScore}% Match'
+                            ? '${job.matchScore}%'
                             : 'Unmatched',
                         style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
                           color: isHighMatch
                               ? AppColors.onTertiary
                               : AppColors.outline,
@@ -944,7 +1154,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     if (job.isNew) ...[
                       const SizedBox(width: 4),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                         decoration: BoxDecoration(
                           color: AppColors.primaryContainer,
                           borderRadius: BorderRadius.circular(4),
@@ -952,7 +1162,7 @@ class _MyHomePageState extends State<MyHomePage> {
                         child: const Text(
                           'NEW',
                           style: TextStyle(
-                            fontSize: 9,
+                            fontSize: 8.5,
                             fontWeight: FontWeight.w800,
                             color: Colors.white,
                             letterSpacing: 0.5,
@@ -962,10 +1172,10 @@ class _MyHomePageState extends State<MyHomePage> {
                     ],
                     const SizedBox(width: 2),
                     SizedBox(
-                      width: 28,
-                      height: 28,
+                      width: 26,
+                      height: 26,
                       child: PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_vert, size: 18, color: AppColors.outline),
+                        icon: const Icon(Icons.more_vert, size: 16, color: AppColors.outline),
                         padding: EdgeInsets.zero,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         onSelected: (action) {
@@ -980,9 +1190,9 @@ class _MyHomePageState extends State<MyHomePage> {
                             value: 'details',
                             child: Row(
                               children: [
-                                Icon(Icons.open_in_new, size: 16, color: AppColors.primary),
+                                Icon(Icons.open_in_new, size: 15, color: AppColors.primary),
                                 SizedBox(width: 8),
-                                Text('Open Details'),
+                                Text('Open in Separate View'),
                               ],
                             ),
                           ),
@@ -991,7 +1201,7 @@ class _MyHomePageState extends State<MyHomePage> {
                             value: 'dismiss',
                             child: Row(
                               children: [
-                                Icon(Icons.visibility_off_outlined, size: 16, color: AppColors.error),
+                                Icon(Icons.visibility_off_outlined, size: 15, color: AppColors.error),
                                 SizedBox(width: 8),
                                 Text(
                                   'Hide Job',
@@ -1007,13 +1217,13 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Row(
               children: [
                 CompanyLogoAvatar(
                   companyName: job.company,
                   jobUrl: job.url,
-                  size: 20,
+                  size: 18,
                 ),
                 const SizedBox(width: 6),
                 Flexible(
@@ -1021,7 +1231,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   child: Text(
                     job.company,
                     style: const TextStyle(
-                      fontSize: 13,
+                      fontSize: 12.5,
                       fontWeight: FontWeight.w600,
                       color: AppColors.onSurfaceVariant,
                     ),
@@ -1033,7 +1243,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   const SizedBox(width: 6),
                   Icon(
                     job.isRemote ? Icons.wifi : Icons.location_on_outlined,
-                    size: 12,
+                    size: 11,
                     color: AppColors.onSurfaceVariant,
                   ),
                   const SizedBox(width: 2),
@@ -1054,19 +1264,9 @@ class _MyHomePageState extends State<MyHomePage> {
                 if (job.scrapedAgoText.isNotEmpty) ...[
                   const SizedBox(width: 6),
                   Text(
-                    '• Scraped ${job.scrapedAgoText}',
+                    '• ${job.scrapedAgoText}',
                     style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: AppColors.onSurfaceVariant,
-                    ),
-                  ),
-                ] else if (job.postedDate.isNotEmpty) ...[
-                  const SizedBox(width: 6),
-                  Text(
-                    '• ${job.postedDate}',
-                    style: const TextStyle(
-                      fontSize: 11,
+                      fontSize: 10.5,
                       fontWeight: FontWeight.w500,
                       color: AppColors.onSurfaceVariant,
                     ),
@@ -1075,14 +1275,14 @@ class _MyHomePageState extends State<MyHomePage> {
               ],
             ),
             if (job.matchReasoning.isNotEmpty || job.summary.isNotEmpty) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(
                 job.matchReasoning.isNotEmpty
                     ? job.matchReasoning
                     : job.summary,
                 style: const TextStyle(
-                  fontSize: 12.5,
-                  height: 1.4,
+                  fontSize: 12,
+                  height: 1.35,
                   fontWeight: FontWeight.w400,
                   color: AppColors.secondary,
                 ),

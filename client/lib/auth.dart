@@ -31,8 +31,8 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(
-    clientId: _resolveGoogleClientId(),
-    serverClientId: kIsWeb ? null : _resolveGoogleClientId(),
+    clientId: kIsWeb ? _resolveGoogleClientId() : null,
+    serverClientId: _resolveGoogleClientId(),
   );
   @override
   void dispose() {

@@ -181,24 +181,39 @@ class ApiService {
     }
   }
 
-  /// Fetches AI matched jobs for the current user.
+  /// Fetches AI matched and raw jobs for the current user matching specified filter parameters.
   Future<List<MatchedJob>> fetchMatchedJobs({
     int minScore = 0,
+    int maxScore = 100,
+    int? days,
+    String matchScope = 'all',
+    bool remoteOnly = false,
     bool viewedOnly = false,
     bool unviewedOnly = false,
+    String sortBy = 'score_desc',
     int limit = 50,
     int offset = 0,
   }) async {
     try {
+      final queryParams = <String, dynamic>{
+        'min_score': minScore,
+        'max_score': maxScore,
+        'match_scope': matchScope,
+        'viewed_only': viewedOnly,
+        'unviewed_only': unviewedOnly,
+        'remote_only': remoteOnly,
+        'sort_by': sortBy,
+        'limit': limit,
+        'offset': offset,
+      };
+
+      if (days != null && days > 0) {
+        queryParams['days'] = days;
+      }
+
       final response = await _dio.get(
         '/jobs/matched',
-        queryParameters: {
-          'min_score': minScore,
-          'viewed_only': viewedOnly,
-          'unviewed_only': unviewedOnly,
-          'limit': limit,
-          'offset': offset,
-        },
+        queryParameters: queryParams,
       );
 
       final data = response.data;

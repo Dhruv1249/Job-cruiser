@@ -755,18 +755,21 @@ func (s *GeminiBatchMatchService) buildMultiJobPrompt(userProfiles []UserProfile
 	var builder strings.Builder
 	currentTimeText := time.Now().Format("January 2006")
 
-	builder.WriteString("Return ONLY a raw JSON object formatted according to the schema:\n")
-	builder.WriteString("{\n  \"results\": [\n    {\n      \"job_id\": \"<job_id verbatim>\",\n      \"user_id\": \"<user_id verbatim>\",\n      \"match_score\": 85,\n      \"match_reasoning\": \"Detailed 2-3 line reasoning specifying exact tech stack overlap, candidate base location vs job requirement, and YoE comparison.\",\n      \"inferred_required_yoe\": 4,\n      \"is_matched\": true\n    }\n  ]\n}\n\n")
-	fmt.Fprintf(&builder, "IMPORTANT: You MUST return exactly %d entries in the \"results\" array — one for every (job × candidate) pair listed below.\n\n", expectedResultCount)
+	builder.WriteString("Return ONLY a raw JSON object formatted as follows:\n")
+	builder.WriteString("{\n  \"results\": [\n    {\n      \"job_id\": \"<job_id string copied verbatim from JOB LISTINGS below>\",\n      \"user_id\": \"<user_id string copied verbatim from CANDIDATE PROFILES below>\",\n      \"match_score\": 85,\n      \"match_reasoning\": \"Highly detailed 2-3 line reasoning specifying exact tech stack overlap, candidate base location vs job requirement, and YoE comparison details.\",\n      \"inferred_required_yoe\": 4,\n      \"is_matched\": true\n    }\n  ]\n}\n\n")
+	fmt.Fprintf(&builder, "IMPORTANT: You MUST return exactly %d entries in the \"results\" array — one for every (job × candidate) pair listed below. An empty array or partial array is invalid.\n\n", expectedResultCount)
 
-	builder.WriteString("SCORING RULES:\n")
-	builder.WriteString("1. LOCATION MISMATCH (HARD CAP): Candidate is India-based. Any job that is US Onsite, US Hybrid, or US-only Remote (explicitly excludes non-US applicants) -> cap score at 0-15.\n")
-	builder.WriteString("2. EXPERIENCE GAP (HARD CAP):\n")
-	fmt.Fprintf(&builder, "   - Use Candidate YoE calculated from resume relative to %s. Infer job minimum required YoE from the JD.\n", currentTimeText)
-	builder.WriteString("   - If required YoE > (candidate YoE + 3): cap score at 0-25.\n")
-	builder.WriteString("   - If required YoE is (candidate YoE + 1) to (candidate YoE + 2): cap score at 45-65.\n")
-	builder.WriteString("   - If candidate YoE meets or exceeds required YoE: bonus +15 to +20 points if tech stack matches.\n")
-	builder.WriteString("3. HIGH MATCH (75-100): ONLY when YoE meets requirements, location matches, and tech stack strongly overlaps.\n\n")
+	builder.WriteString("SCORING RULES — apply in strict priority order; a higher-priority penalty overrides skill match entirely:\n")
+	builder.WriteString("1. LOCATION MISMATCH (HARD CAP): Candidate is India-based. Any job that is US Onsite, US Hybrid, or US-only Remote (explicitly excludes non-US applicants) → cap score at 0–15, regardless of any other signal.\n")
+	builder.WriteString("2. EXPERIENCE GAP (HARD CAP — highest priority penalty):\n")
+	fmt.Fprintf(&builder, "   - Use the provided Candidate Years of Experience (YoE) calculated from their resume, or infer it from the profile/resume relative to the current evaluation date: %s. Infer job's minimum required YoE from the JD (look for phrases like '4+ years', '5-7 years experience', etc.).\n", currentTimeText)
+	builder.WriteString("   - If no explicit years of experience are mentioned, infer the required YoE based on the role level norms: Intern/Co-op/Apprentice = 0 YoE; Junior/Associate = 0-2 YoE; Mid-Level/SWE = 2-4 YoE; Senior/Lead/Manager = 4-6 YoE; Staff/Architect = 6-8 YoE; Principal/Director/VP = 8+ YoE.\n")
+	builder.WriteString("   - If the job's minimum required YoE > (candidate YoE + 3): cap score at 0–25. Skill match is IRRELEVANT — a candidate cannot overcome a 3+ year experience deficit.\n")
+	builder.WriteString("   - If the job's minimum required YoE is (candidate YoE + 1) to (candidate YoE + 2): cap score at 45–65. This is a stretch role the candidate cannot realistically get.\n")
+	builder.WriteString("   - If candidate YoE is perfectly aligned with the required range (candidate YoE >= minimum required YoE), award a strong bonus (+15 to +20 points) to the match score if the tech stack matches.\n")
+	builder.WriteString("3. HIGH MATCH (75–100): ONLY for roles where candidate YoE meets or exceeds the minimum, role location matches, the candidate has a strong tech stack overlap, and they receive the experience range alignment bonus.\n")
+	builder.WriteString("4. DETAILED REASONING REQUIREMENT: The 'match_reasoning' must be a minimum of 4-5 lines of text explaining location verification, tech stack match, and YoE ranges.\n\n")
+
 
 	builder.WriteString("### CANDIDATE PROFILES\n")
 	for _, profile := range userProfiles {
