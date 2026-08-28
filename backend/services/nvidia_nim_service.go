@@ -80,12 +80,14 @@ type JobSnippetData struct {
 
 // BatchMatchResultItem encapsulates an evaluated job match output for a specific candidate.
 type BatchMatchResultItem struct {
-	JobID               string `json:"job_id"`
-	UserID              string `json:"user_id"`
-	MatchScore          int    `json:"match_score"`
-	MatchReasoning      string `json:"match_reasoning"`
-	InferredRequiredYoE int    `json:"inferred_required_yoe"`
-	IsMatched           bool   `json:"is_matched"`
+	JobID                string `json:"job_id"`
+	UserID               string `json:"user_id"`
+	MatchScore           int    `json:"match_score"`
+	MatchReasoning       string `json:"match_reasoning"`
+	InferredRequiredYoE  int    `json:"inferred_required_yoe"`
+	StandardizedLocation string `json:"standardized_location"`
+	WorkModel            string `json:"work_model"`
+	IsMatched            bool   `json:"is_matched"`
 }
 
 // BatchMatchResponse defines the structured JSON array envelope emitted by AI matching engines.
@@ -130,9 +132,11 @@ func buildBatchJobMatchSchema(expectedCount int) map[string]any {
 						"match_score":           map[string]any{"type": "integer"},
 						"match_reasoning":       map[string]any{"type": "string"},
 						"inferred_required_yoe": map[string]any{"type": "integer"},
+						"standardized_location": map[string]any{"type": "string"},
+						"work_model":            map[string]any{"type": "string"},
 						"is_matched":            map[string]any{"type": "boolean"},
 					},
-					"required": []string{"job_id", "user_id", "match_score", "match_reasoning", "inferred_required_yoe", "is_matched"},
+					"required": []string{"job_id", "user_id", "match_score", "match_reasoning", "inferred_required_yoe", "standardized_location", "work_model", "is_matched"},
 				},
 			},
 		},
@@ -908,6 +912,7 @@ func (s *NvidiaNimService) evaluateJobBatchWithBackoff(
 		if upsertErr != nil {
 			log.Printf("[Worker-%d] Upsert error for user %s job %s: %v", workerID, res.UserID, res.JobID, upsertErr)
 		}
+		_ = updateJobStandardizedLocationAndWorkModel(ctx, s.DB, res.JobID, res.StandardizedLocation, res.WorkModel)
 		syncMutex.Lock()
 		evaluatedJobIDs[res.JobID] = true
 		syncMutex.Unlock()
@@ -1195,12 +1200,28 @@ func buildMultiJobPrompt(userProfiles []UserProfileData, jobsBatch []JobSnippetD
       "match_score": 85,
       "match_reasoning": "Detailed 2-3 line reasoning specifying exact tech stack overlap, location compatibility, and YoE comparison.",
       "inferred_required_yoe": 4,
+      "standardized_location": "Bengaluru, India",
+      "work_model": "hybrid",
       "is_matched": true
     }
   ]
 }
 
 IMPORTANT: You MUST return exactly %d entries in the "results" array — one for every (job x candidate) pair listed below. An empty array or partial array is invalid.
+
+STANDARDIZED LOCATION & WORK MODEL GUIDELINES:
+1. "standardized_location": Extract and standardize the location from the job's title, location, and description:
+   - Canonical format: "City, Country" or "City, State, USA" (e.g. "Bengaluru, India", "Pune, India", "London, United Kingdom", "San Francisco, CA, USA", "New York, NY, USA").
+   - If multiple distinct cities/offices are offered, join them with semicolons (e.g. "Bengaluru, India; Hyderabad, India" or "San Francisco, CA, USA; New York, NY, USA").
+   - If 100%% unrestricted global remote: write "Remote (Global)".
+   - If remote with country/region restrictions: write "Remote (US)", "Remote (India)", "Remote (Europe)", "Remote (APAC)", or "Remote (LatAm)".
+   - If city-specific remote: write "Bengaluru, India (Remote)" or "San Francisco, CA, USA (Remote)".
+
+2. "work_model": Extract the work arrangement permitted for the role:
+   - "remote": Role can be performed 100%% from home (globally or within a specified region).
+   - "hybrid": Role requires regular in-office presence (e.g. 2-3 days in office/week).
+   - "onsite": Role requires 100%% physical presence in office/facility.
+   - If multiple options are offered (e.g. employee choice): join with commas (e.g. "hybrid, remote" or "onsite, hybrid, remote").
 
 SCORING INSTRUCTIONS & RULES:
 Score each candidate from 0 to 100 based on technical skill match, strictly penalized by location mismatch and experience gaps.
@@ -1419,6 +1440,24 @@ func upsertUserJobMatchRecord(ctx context.Context, databasePool *pgxpool.Pool, u
 			evaluated_at = NOW();
 	`
 	_, errExec := databasePool.Exec(ctx, sqlQuery, userID, jobID, score, reasoning, isMatch, modelName)
+	return errExec
+}
+
+func updateJobStandardizedLocationAndWorkModel(ctx context.Context, databasePool *pgxpool.Pool, jobID string, standardizedLocation string, workModel string) error {
+	if databasePool == nil || jobID == "" || (standardizedLocation == "" && workModel == "") {
+		return nil
+	}
+	cleanLocation := strings.TrimSpace(standardizedLocation)
+	cleanWorkModel := strings.TrimSpace(strings.ToLower(workModel))
+	isRemote := strings.Contains(cleanWorkModel, "remote") || strings.Contains(strings.ToLower(cleanLocation), "remote")
+
+	sqlQuery := `
+		UPDATE jobs
+		SET location = CASE WHEN $1 <> '' THEN $1 ELSE location END,
+		    is_remote = CASE WHEN $2 THEN true ELSE is_remote END
+		WHERE id = $3;
+	`
+	_, errExec := databasePool.Exec(ctx, sqlQuery, cleanLocation, isRemote, jobID)
 	return errExec
 }
 

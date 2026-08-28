@@ -39,10 +39,12 @@ var GeminiBatchJobMatchSchemaJSON = `{
           "match_score": {"type": "integer"},
           "match_reasoning": {"type": "string"},
           "inferred_required_yoe": {"type": "integer"},
+          "standardized_location": {"type": "string"},
+          "work_model": {"type": "string"},
           "is_matched": {"type": "boolean"}
         },
-        "required": ["job_id", "user_id", "match_score", "match_reasoning", "inferred_required_yoe", "is_matched"],
-        "propertyOrdering": ["job_id", "user_id", "match_score", "match_reasoning", "inferred_required_yoe", "is_matched"]
+        "required": ["job_id", "user_id", "match_score", "match_reasoning", "inferred_required_yoe", "standardized_location", "work_model", "is_matched"],
+        "propertyOrdering": ["job_id", "user_id", "match_score", "match_reasoning", "inferred_required_yoe", "standardized_location", "work_model", "is_matched"]
       }
     }
   },
@@ -587,6 +589,7 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 		if upsertErr != nil {
 			log.Printf("[GeminiBatchMatchService] Upsert error for user %s job %s: %v", resultItem.UserID, resultItem.JobID, upsertErr)
 		}
+		_ = updateJobStandardizedLocationAndWorkModel(ctx, s.DB, resultItem.JobID, resultItem.StandardizedLocation, resultItem.WorkModel)
 
 		evaluatedJobIDs[resultItem.JobID] = true
 	}
