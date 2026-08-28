@@ -22,7 +22,7 @@ REQUEST_DELAY = 0.25
 USER_AGENT = "JobCruiser/1.0"
 RETRY_COUNT = 5
 BACKEND_API_URL = os.environ.get("BACKEND_API_URL", "http://localhost:8080/api")
-INGEST_API_KEY = os.environ.get("INGEST_API_KEY", "dev-ingest-key-12345")
+INGEST_API_KEY = os.environ.get("INGEST_API_KEY") or os.environ.get("INGEST_KEY", "dev-ingest-key-12345")
 
 
 def parse_proxy_configuration(raw_proxy_string: str) -> list[str]:
