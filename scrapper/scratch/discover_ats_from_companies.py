@@ -2,6 +2,8 @@
 Automated career page ATS discovery scanner that probes database companies for ATS board integrations.
 """
 
+from __future__ import annotations
+
 import os
 import re
 import time
