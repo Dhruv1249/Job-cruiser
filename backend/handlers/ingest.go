@@ -455,6 +455,82 @@ func (h *IngestHandler) FinishRun(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Scraper run recorded as completed"})
 }
 
+// GetATSSlugs retrieves all active ATS platform and slug configurations.
+func (handler *IngestHandler) GetATSSlugs(contextInstance *gin.Context) {
+	rows, queryError := handler.DB.Query(
+		context.Background(),
+		`SELECT platform, slug FROM company_ats_boards WHERE is_active = true ORDER BY platform, slug`,
+	)
+	if queryError != nil {
+		contextInstance.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query ATS slugs"})
+		return
+	}
+	defer rows.Close()
+
+	platformSlugMap := make(map[string][]string)
+	for rows.Next() {
+		var platformName string
+		var companySlug string
+		if scanError := rows.Scan(&platformName, &companySlug); scanError != nil {
+			continue
+		}
+		platformSlugMap[platformName] = append(platformSlugMap[platformName], companySlug)
+	}
+
+	contextInstance.JSON(http.StatusOK, gin.H{"data": platformSlugMap})
+}
+
+// RegisterATSSlug registers or reactivates an ATS board slug.
+func (handler *IngestHandler) RegisterATSSlug(contextInstance *gin.Context) {
+	var requestPayload struct {
+		Platform string `json:"platform" binding:"required"`
+		Slug     string `json:"slug" binding:"required"`
+	}
+	if bindError := contextInstance.ShouldBindJSON(&requestPayload); bindError != nil {
+		contextInstance.JSON(http.StatusBadRequest, gin.H{"error": "platform and slug are required"})
+		return
+	}
+
+	_, executionError := handler.DB.Exec(
+		context.Background(),
+		`INSERT INTO company_ats_boards (platform, slug)
+		 VALUES ($1, $2)
+		 ON CONFLICT (platform, slug) DO UPDATE
+		     SET is_active = true, last_seen_at = CURRENT_TIMESTAMP`,
+		requestPayload.Platform,
+		requestPayload.Slug,
+	)
+	if executionError != nil {
+		contextInstance.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register ATS slug"})
+		return
+	}
+
+	contextInstance.JSON(http.StatusOK, gin.H{"message": "ATS slug registered successfully"})
+}
+
+// GetAllCompanyNames retrieves distinct company names from the database for career page probing.
+func (handler *IngestHandler) GetAllCompanyNames(contextInstance *gin.Context) {
+	rows, queryError := handler.DB.Query(
+		context.Background(),
+		`SELECT DISTINCT name FROM companies WHERE name != '' ORDER BY name`,
+	)
+	if queryError != nil {
+		contextInstance.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query companies"})
+		return
+	}
+	defer rows.Close()
+
+	var companyNamesList []string
+	for rows.Next() {
+		var companyName string
+		if scanError := rows.Scan(&companyName); scanError == nil && companyName != "" {
+			companyNamesList = append(companyNamesList, companyName)
+		}
+	}
+
+	contextInstance.JSON(http.StatusOK, gin.H{"data": companyNamesList, "count": len(companyNamesList)})
+}
+
 // ==========================================================
 // TECH STACK KEYWORD EXTRACTION HELPERS
 // ==========================================================

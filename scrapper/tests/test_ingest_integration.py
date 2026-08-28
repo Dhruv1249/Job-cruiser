@@ -376,7 +376,7 @@ class TestIngestPipelineEndToEnd(unittest.TestCase):
         """
         mock_start_run.return_value = None
 
-        with patch("scrape_all.load_yaml_config", return_value={}), \
+        with patch("scrape_all.fetch_ats_slugs", return_value={}), \
              patch("scrape_all.scrape_jobs") as mock_scrape, \
              patch("scrape_all.save_json"), \
              patch("scrape_all.finish_run") as mock_finish:

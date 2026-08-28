@@ -176,6 +176,9 @@ func main() {
 		scraperIngest.POST("/ingest-raw", ingestHandler.IngestRaw)
 		scraperIngest.POST("/ingest", ingestHandler.IngestJobs)
 		scraperIngest.POST("/finish", ingestHandler.FinishRun)
+		scraperIngest.GET("/ats-slugs", ingestHandler.GetATSSlugs)
+		scraperIngest.POST("/register-ats-slug", ingestHandler.RegisterATSSlug)
+		scraperIngest.GET("/companies", ingestHandler.GetAllCompanyNames)
 	}
 
 	// Protected Routes (Requires JWT)

@@ -1,10 +1,11 @@
 """
-Unified scraper orchestrator running custom ATS clients and JobSpy scrapers with twin Gemma 4 AI parallel evaluation and self-growing ATS discovery.
+Unified scraper orchestrator running ATS company boards and JobSpy job sources with automated ATS discovery.
 """
 
 import json
 import os
 import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -17,14 +18,13 @@ from config import (
     MAX_WORKERS,
     BACKEND_API_URL,
     INGEST_API_KEY,
-    USER_AGENT
+    USER_AGENT,
+    PROXIES,
 )
-from job_sources.utils import load_yaml_config
 
 from jobspy import scrape_jobs
 from jobspy.model import Site
 
-THROTTLE_SENSITIVE_KEYWORD = "software engineer"
 DEFAULT_KEYWORDS = [
     "backend engineer",
     "backend developer",
@@ -145,27 +145,27 @@ DEFAULT_KEYWORDS = [
     "software engineer",
 ]
 
-def fetch_master_keywords():
+
+def fetch_master_keywords() -> list[str]:
+    """
+    Fetches the latest approved master search keywords from the backend API.
+    """
     try:
-        resp = requests.get(f"{BACKEND_API_URL}/api/keywords", timeout=5)
-        if resp.status_code == 200:
-            data = resp.json().get("data", [])
-            if data:
-                return data
-    except Exception as e:
+        response = requests.get(f"{BACKEND_API_URL}/keywords", timeout=5)
+        if response.status_code == 200:
+            received_keywords = response.json().get("data", [])
+            if received_keywords:
+                return received_keywords
+    except Exception:
         pass
     return DEFAULT_KEYWORDS
 
+
 KEYWORDS = fetch_master_keywords()
-JOBSPY_SITES = [
-    Site.LINKEDIN,
-    Site.INDEED,
-    Site.GLASSDOOR,
-    Site.GOOGLE,
-    Site.NAUKRI,
+
+SINGLE_CALL_FEED_SITES = [
     Site.REMOTEOK,
     Site.WEWORKREMOTELY,
-    Site.HN_HIRING,
     Site.THE_MUSE,
     Site.HIMALAYAS,
     Site.JOBSPRESSO,
@@ -173,157 +173,186 @@ JOBSPY_SITES = [
     Site.WORKING_NOMADS,
     Site.WEB3_CAREER,
     Site.CRYPTO_JOBS,
-    Site.WELLFOUND,
-    Site.DICE,
-    Site.BUILTIN,
-    Site.SIMPLYHIRED,
-    Site.OTTA,
-    Site.LEVELSFYI,
-    Site.CORD
 ]
 
-companies_yaml_lock = threading.Lock()
+KEYWORD_SEARCHABLE_INDIA_SITES = [
+    Site.INDEED,
+    Site.LINKEDIN,
+]
+
+KEYWORD_SEARCHABLE_REMOTE_SITES = [
+    Site.INDEED,
+    Site.DICE,
+    Site.AMAZON,
+    Site.LINKEDIN,
+]
+
+PROXY_REQUIRED_SITES = {
+    Site.LINKEDIN,
+}
 
 
-def start_run() -> str:
+def fetch_ats_slugs() -> dict[str, list[str]]:
     """
-    Register a new scraper run with the backend telemetry.
+    Fetches active ATS platform and slug configurations from the backend API.
     """
-    headers = {
+    request_headers = {
         "X-Ingest-Key": INGEST_API_KEY,
-        "Content-Type": "application/json"
     }
     try:
-        url = f"{BACKEND_API_URL}/scraper/start"
-        response = requests.post(url, headers=headers, timeout=20)
+        response = requests.get(
+            f"{BACKEND_API_URL}/scraper/ats-slugs",
+            headers=request_headers,
+            timeout=10,
+        )
+        if response.status_code == 200:
+            return response.json().get("data", {})
+    except Exception:
+        pass
+    return {}
+
+
+def register_discovered_ats_slug(platform_name: str, company_slug: str) -> None:
+    """
+    Registers a newly discovered ATS company slug with the backend API.
+    """
+    if not company_slug:
+        return
+    request_headers = {
+        "X-Ingest-Key": INGEST_API_KEY,
+        "Content-Type": "application/json",
+    }
+    request_payload = {
+        "platform": platform_name,
+        "slug": company_slug,
+    }
+    try:
+        requests.post(
+            f"{BACKEND_API_URL}/scraper/register-ats-slug",
+            json=request_payload,
+            headers=request_headers,
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
+def start_run() -> str | None:
+    """
+    Registers a new scraper run with the backend telemetry system.
+    """
+    request_headers = {
+        "X-Ingest-Key": INGEST_API_KEY,
+        "Content-Type": "application/json",
+    }
+    try:
+        target_endpoint = f"{BACKEND_API_URL}/scraper/start"
+        response = requests.post(target_endpoint, headers=request_headers, timeout=20)
         if response.status_code == 200:
             return response.json().get("run_id")
     except Exception:
         pass
     return None
 
-def finish_run(run_id: str, status: str, error_message: str = None):
+
+def finish_run(run_id: str, run_status: str, error_message: str | None = None) -> None:
     """
-    Notify the backend telemetry that the scraper run has finished.
+    Notifies the backend telemetry system that the scraper run has concluded.
     """
-    headers = {
+    request_headers = {
         "X-Ingest-Key": INGEST_API_KEY,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
-    payload = {
+    request_payload = {
         "run_id": run_id,
-        "status": status,
-        "error_message": error_message
+        "status": run_status,
+        "error_message": error_message,
     }
     try:
-        url = f"{BACKEND_API_URL}/scraper/finish"
-        requests.post(url, json=payload, headers=headers, timeout=20)
+        target_endpoint = f"{BACKEND_API_URL}/scraper/finish"
+        requests.post(target_endpoint, json=request_payload, headers=request_headers, timeout=20)
     except Exception:
         pass
 
-def save_json(data, file_path: Path):
-    """
-    Save the given data to a JSON file (unindented for fast serialization).
-    """
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
 
-def ensure_dir(path: Path):
+def save_json(data_payload, target_file_path: Path) -> None:
     """
-    Ensure that the given directory path exists.
+    Serializes data to a local JSON file without whitespace indentation for high throughput.
     """
-    path.mkdir(parents=True, exist_ok=True)
+    with open(target_file_path, "w", encoding="utf-8") as file_stream:
+        json.dump(data_payload, file_stream, ensure_ascii=False)
 
-def sanitize_company_name(name) -> str:
+
+def ensure_dir(directory_path: Path) -> None:
     """
-    Sanitize and limit the length of a company name for filesystem safety.
+    Ensures that the specified directory exists on the filesystem.
     """
-    if not name or not isinstance(name, (str, bytes)):
+    directory_path.mkdir(parents=True, exist_ok=True)
+
+
+def sanitize_company_name(raw_company_name) -> str:
+    """
+    Sanitizes raw company names into safe strings suitable for indexing.
+    """
+    if not raw_company_name or not isinstance(raw_company_name, (str, bytes)):
         return "Unknown"
-    
-    name_str = name.strip()
-    if not name_str or name_str.lower() == "nan":
-        return "Unknown"
-    
-    soup = BeautifulSoup(name_str, "html.parser")
-    clean_name = soup.get_text()
-    
-    if "http://" in clean_name or "https://" in clean_name:
-        clean_name = clean_name.split("http")[0].strip()
-        
-    for char in ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]:
-        clean_name = clean_name.replace(char, " ")
-        
-    clean_name = clean_name.strip()[:50].strip()
-    return clean_name if clean_name else "Unknown"
 
-def extract_ats_slug(url: str) -> tuple[str, str] | None:
+    company_string = str(raw_company_name).strip()
+    if not company_string or company_string.lower() == "nan":
+        return "Unknown"
+
+    parsed_html_text = BeautifulSoup(company_string, "html.parser").get_text()
+    if "http://" in parsed_html_text or "https://" in parsed_html_text:
+        parsed_html_text = parsed_html_text.split("http")[0].strip()
+
+    for invalid_character in ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]:
+        parsed_html_text = parsed_html_text.replace(invalid_character, " ")
+
+    cleaned_company_name = parsed_html_text.strip()[:50].strip()
+    return cleaned_company_name if cleaned_company_name else "Unknown"
+
+
+def extract_ats_slug(job_url: str) -> tuple[str, str] | None:
     """
-    Extract ATS platform and company slug from a job board or career page URL.
+    Extracts ATS platform name and company slug from a job posting URL.
     """
-    if not url:
+    if not job_url:
         return None
-        
-    url_lower = url.lower()
-    
-    if "boards.greenhouse.io/" in url_lower or "boards-api.greenhouse.io/" in url_lower:
-        parts = [p for p in url.split("/") if p]
-        for i, part in enumerate(parts):
-            if "greenhouse.io" in part and i + 1 < len(parts):
-                return "greenhouse", parts[i+1].split("?")[0].split("#")[0].strip()
-                
-    if "jobs.lever.co/" in url_lower:
-        parts = [p for p in url.split("/") if p]
-        for i, part in enumerate(parts):
-            if "lever.co" in part and i + 1 < len(parts):
-                return "lever", parts[i+1].split("?")[0].split("#")[0].strip()
-                
-    if "jobs.ashbyhq.com/" in url_lower:
-        parts = [p for p in url.split("/") if p]
-        for i, part in enumerate(parts):
-            if "ashbyhq.com" in part and i + 1 < len(parts):
-                return "ashby", parts[i+1].split("?")[0].split("#")[0].strip()
-                
-    if "jobs.smartrecruiters.com/" in url_lower:
-        parts = [p for p in url.split("/") if p]
-        for i, part in enumerate(parts):
-            if "smartrecruiters.com" in part and i + 1 < len(parts):
-                return "smartrecruiters", parts[i+1].split("?")[0].split("#")[0].strip()
-                
-    if ".myworkdaysite.com/" in url_lower:
-        domain = url.split("://")[-1].split("/")[0]
-        if "myworkdaysite.com" in domain:
-            return "workday", domain.split(".")[0].strip()
-            
+
+    normalized_url = job_url.lower()
+
+    if "boards.greenhouse.io/" in normalized_url or "boards-api.greenhouse.io/" in normalized_url:
+        url_components = [component for component in job_url.split("/") if component]
+        for index, component in enumerate(url_components):
+            if "greenhouse.io" in component and index + 1 < len(url_components):
+                return "greenhouse", url_components[index + 1].split("?")[0].split("#")[0].strip().lower()
+
+    if "jobs.lever.co/" in normalized_url:
+        url_components = [component for component in job_url.split("/") if component]
+        for index, component in enumerate(url_components):
+            if "lever.co" in component and index + 1 < len(url_components):
+                return "lever", url_components[index + 1].split("?")[0].split("#")[0].strip().lower()
+
+    if "jobs.ashbyhq.com/" in normalized_url:
+        url_components = [component for component in job_url.split("/") if component]
+        for index, component in enumerate(url_components):
+            if "ashbyhq.com" in component and index + 1 < len(url_components):
+                return "ashby", url_components[index + 1].split("?")[0].split("#")[0].strip().lower()
+
+    if "jobs.smartrecruiters.com/" in normalized_url:
+        url_components = [component for component in job_url.split("/") if component]
+        for index, component in enumerate(url_components):
+            if "smartrecruiters.com" in component and index + 1 < len(url_components):
+                return "smartrecruiters", url_components[index + 1].split("?")[0].split("#")[0].strip().lower()
+
+    if ".myworkdaysite.com/" in normalized_url:
+        host_domain = job_url.split("://")[-1].split("/")[0]
+        if "myworkdaysite.com" in host_domain:
+            return "workday", host_domain.split(".")[0].strip().lower()
+
     return None
 
-def register_discovered_company(platform: str, slug: str):
-    """
-    Register a discovered company slug in companies.yaml if not already present.
-    """
-    if not slug:
-        return
-        
-    with companies_yaml_lock:
-        config_path = Path(__file__).resolve().parent / "companies.yaml"
-        config = load_yaml_config(str(config_path))
-        
-        if platform not in config:
-            config[platform] = []
-            
-        if slug not in config[platform]:
-            config[platform].append(slug)
-            with open(config_path, "w", encoding="utf-8") as f:
-                for p in ["greenhouse", "lever", "ashby", "smartrecruiters", "workday"]:
-                    f.write(f"{p}:\n")
-                    slugs = sorted(list(set(config.get(p, []))))
-                    for s in slugs:
-                        if s:
-                            f.write(f"  - {s}\n")
-                    f.write("\n")
 
-
-        
 INDIAN_LOCATIONS = [
     "india", "bengaluru", "bangalore", "hyderabad", "pune", "mumbai", "delhi", "noida",
     "gurgaon", "gurugram", "chennai", "kolkata", "ahmedabad", "indore", "kochi", "trivandrum",
@@ -346,345 +375,310 @@ EXPLICIT_NON_INDIA_RESTRICTIONS = [
     "uk remote only", "eu remote only", "europe remote only"
 ]
 
-NON_INDIA_ONSITE_LOCATIONS = [
-    "san francisco", "new york", "austin", "seattle", "boston", "chicago", "los angeles",
-    "london", "berlin", "paris", "toronto", "vancouver", "sydney", "singapore", "amsterdam",
-    "madrid", "united states", "united kingdom", "germany", "france", "canada", "australia",
-    "netherlands", "spain"
-]
 
-def is_location_in_scope(location_str: str, is_remote: bool = False) -> bool:
+def is_location_in_scope(location_string: str, is_remote_position: bool = False) -> bool:
     """
-    Classify if a job location is in scope (India or Global Remote).
-
-    Accept only when:
-      - location is empty/unknown (benefit of the doubt)
-      - location explicitly names an Indian city/state/region
-      - job carries a remote/WFH indicator AND is not restricted to a non-India country via
-        an explicit phrase (e.g. "US Remote Only"), city names alone do not block remote jobs
-
-    Reject everything else by default, including any non-empty location with no India/remote signal.
+    Evaluates whether a job position is in scope for Indian candidates or global remote seekers.
     """
-    if not location_str:
+    if not location_string:
         return True
 
-    loc_lower = location_str.lower()
+    if is_remote_position:
+        return True
 
-    if any(excl in loc_lower for excl in EXPLICIT_NON_INDIA_RESTRICTIONS):
+    normalized_location = location_string.lower()
+
+    if any(restriction in normalized_location for restriction in EXPLICIT_NON_INDIA_RESTRICTIONS):
         return False
 
-    for indian_loc in INDIAN_LOCATIONS:
-        if indian_loc in loc_lower:
+    for indian_region in INDIAN_LOCATIONS:
+        if indian_region in normalized_location:
             return True
 
-    has_remote_indicator = is_remote or any(rem in loc_lower for rem in REMOTE_INDICATORS)
-    if has_remote_indicator:
+    if any(indicator in normalized_location for indicator in REMOTE_INDICATORS):
         return True
 
     return False
 
 
-def normalize_job_post(job, source: str, company_name: str = None) -> dict:
+def normalize_job_post(raw_job_record, source_identifier: str, company_name: str | None = None) -> dict:
     """
-    Normalize a job post from any source format into the standard schema.
+    Normalizes a job listing from diverse source objects into a uniform dictionary representation.
     """
-    if isinstance(job, dict):
-        job_id = job.get("job_id") or job.get("id") or ""
-        title = job.get("title") or ""
-        company = company_name or job.get("company") or job.get("company_name") or ""
-        url = job.get("absolute_url") or job.get("job_url") or ""
-        location = job.get("location") or ""
-        description = job.get("description_text") or job.get("description") or ""
-        updated_at = job.get("updated_at") or job.get("date_posted") or ""
-        departments = job.get("departments") or []
-        offices = job.get("offices") or []
+    if isinstance(raw_job_record, dict):
+        job_identifier = raw_job_record.get("job_id") or raw_job_record.get("id") or ""
+        job_title = raw_job_record.get("title") or ""
+        extracted_company = company_name or raw_job_record.get("company") or raw_job_record.get("company_name") or ""
+        job_url = raw_job_record.get("absolute_url") or raw_job_record.get("job_url") or ""
+        job_location = raw_job_record.get("location") or ""
+        job_description = raw_job_record.get("description_text") or raw_job_record.get("description") or ""
+        updated_timestamp = raw_job_record.get("updated_at") or raw_job_record.get("date_posted") or ""
+        job_departments = raw_job_record.get("departments") or []
+        job_offices = raw_job_record.get("offices") or []
     else:
-        job_id = getattr(job, "id", "") or getattr(job, "job_id", "") or ""
-        title = getattr(job, "title", "")
-        company = company_name or getattr(job, "company_name", "") or getattr(job, "company", "") or ""
-        url = getattr(job, "job_url", "") or getattr(job, "absolute_url", "") or ""
-        
-        location_obj = getattr(job, "location", None)
-        if location_obj and hasattr(location_obj, "display_location"):
-            location = location_obj.display_location()
-        else:
-            location = str(location_obj) if location_obj else ""
+        job_identifier = getattr(raw_job_record, "id", "") or getattr(raw_job_record, "job_id", "") or ""
+        job_title = getattr(raw_job_record, "title", "")
+        extracted_company = company_name or getattr(raw_job_record, "company_name", "") or getattr(raw_job_record, "company", "") or ""
+        job_url = getattr(raw_job_record, "job_url", "") or getattr(raw_job_record, "absolute_url", "") or ""
 
-        description = getattr(job, "description", "") or getattr(job, "description_text", "") or ""
-        
-        date_posted_val = getattr(job, "date_posted", None)
-        if date_posted_val:
-            if hasattr(date_posted_val, "isoformat"):
-                updated_at = date_posted_val.isoformat() + "T00:00:00Z"
-            else:
-                updated_at = str(date_posted_val)
+        location_attribute = getattr(raw_job_record, "location", None)
+        if location_attribute and hasattr(location_attribute, "display_location"):
+            job_location = location_attribute.display_location()
         else:
-            updated_at = getattr(job, "updated_at", "") or ""
-            
-        departments = getattr(job, "departments", [])
-        offices = getattr(job, "offices", [])
+            job_location = str(location_attribute) if location_attribute else ""
+
+        job_description = getattr(raw_job_record, "description", "") or getattr(raw_job_record, "description_text", "") or ""
+
+        date_posted_attribute = getattr(raw_job_record, "date_posted", None)
+        if date_posted_attribute:
+            if hasattr(date_posted_attribute, "isoformat"):
+                updated_timestamp = date_posted_attribute.isoformat() + "T00:00:00Z"
+            else:
+                updated_timestamp = str(date_posted_attribute)
+        else:
+            updated_timestamp = getattr(raw_job_record, "updated_at", "") or ""
+
+        job_departments = getattr(raw_job_record, "departments", [])
+        job_offices = getattr(raw_job_record, "offices", [])
 
     return {
-        "job_id": str(job_id),
-        "title": title,
-        "updated_at": updated_at,
-        "absolute_url": url,
-        "location": location,
-        "departments": departments,
-        "offices": offices,
-        "description_text": description,
-        "company": sanitize_company_name(company),
-        "source": source
+        "job_id": str(job_identifier),
+        "title": job_title,
+        "updated_at": updated_timestamp,
+        "absolute_url": job_url,
+        "location": job_location,
+        "departments": job_departments,
+        "offices": job_offices,
+        "description_text": job_description,
+        "company": sanitize_company_name(extracted_company),
+        "source": source_identifier,
     }
 
-def deduplicate_jobs(jobs: list[dict]) -> list[dict]:
-    """
-    Remove duplicate jobs based on company, title, and location.
-    """
-    seen = set()
-    unique_jobs = []
-    for job in jobs:
-        key = (
-            (job.get("company") or "").strip().lower(),
-            (job.get("title") or "").strip().lower(),
-            (job.get("location") or "").strip().lower()
-        )
-        if key not in seen:
-            seen.add(key)
-            unique_jobs.append(job)
-    return unique_jobs
 
-def process_company(company: str, platform: str, run_id: str = None) -> dict:
+def deduplicate_jobs(jobs_collection: list[dict]) -> list[dict]:
     """
-    Fetch and normalize jobs for a company from an ATS platform using JobSpy.
+    Deduplicates a collection of normalized job records based on company, title, and location.
+    """
+    seen_identifiers = set()
+    unique_job_records = []
+    for job_record in jobs_collection:
+        deduplication_key = (
+            (job_record.get("company") or "").strip().lower(),
+            (job_record.get("title") or "").strip().lower(),
+            (job_record.get("location") or "").strip().lower(),
+        )
+        if deduplication_key not in seen_identifiers:
+            seen_identifiers.add(deduplication_key)
+            unique_job_records.append(job_record)
+    return unique_job_records
+
+
+def process_company(company_slug: str, platform_name: str, run_id: str | None = None) -> dict:
+    """
+    Scrapes job listings for a designated company slug on a specific ATS platform.
     """
     try:
-        df = scrape_jobs(
-            site_name=[platform],
-            search_term=company,
-            results_wanted=100
+        scraped_dataframe = scrape_jobs(
+            site_name=[platform_name],
+            search_term=company_slug,
+            results_wanted=100,
         )
-        jobs = []
-        for row in df.itertuples():
-            normalized = normalize_job_post(row, platform, company)
-            is_remote_flag = getattr(row, "is_remote", False) or "remote" in normalized["location"].lower()
-            if is_location_in_scope(normalized["location"], is_remote_flag):
-                jobs.append(normalized)
-        status = "success"
+        extracted_jobs = []
+        for job_row in scraped_dataframe.itertuples():
+            normalized_post = normalize_job_post(job_row, platform_name, company_slug)
+            is_remote_flag = getattr(job_row, "is_remote", False) or "remote" in normalized_post["location"].lower()
+            if is_location_in_scope(normalized_post["location"], is_remote_flag):
+                extracted_jobs.append(normalized_post)
+        execution_status = "success"
     except Exception:
-        jobs = []
-        status = "failed"
+        extracted_jobs = []
+        execution_status = "failed"
 
     return {
-        "company": company,
-        "platform": platform,
-        "jobs": jobs,
-        "status": status
+        "company": company_slug,
+        "platform": platform_name,
+        "jobs": extracted_jobs,
+        "status": execution_status,
     }
+
 
 def run_orchestration() -> dict:
     """
-    Execute the full scraping pipeline and return execution status.
+    Executes the entire job scraping and ingestion pipeline across ATS boards and board aggregators.
     """
     ensure_dir(DATA_DIR)
-    
-    existing_jobs_cache = {}
-    jobs_flat_path = DATA_DIR / "jobs_flat.json"
-    if jobs_flat_path.exists():
-        try:
-            with open(jobs_flat_path, "r") as f:
-                for job in json.load(f):
-                    url = job.get("absolute_url")
-                    if url:
-                        existing_jobs_cache[url] = job
-        except Exception:
-            pass
 
-    config_file_path = Path(__file__).resolve().parent / "companies.yaml"
-    config = load_yaml_config(str(config_file_path))
-
-    run_id = start_run()
-    all_raw_jobs = []
-    manifest = []
+    active_ats_platform_slugs = fetch_ats_slugs()
+    run_identifier = start_run()
+    aggregated_raw_jobs = []
+    run_manifest = []
 
     try:
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futures = []
-            for platform, companies in config.items():
-                for company in companies:
-                    futures.append(
-                        executor.submit(process_company, company, platform, run_id)
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as company_executor:
+            company_futures = []
+            for platform_name, company_slugs in active_ats_platform_slugs.items():
+                for company_slug in company_slugs:
+                    company_futures.append(
+                        company_executor.submit(process_company, company_slug, platform_name, run_identifier)
                     )
-            for future in as_completed(futures):
-                res = future.result()
-                manifest.append({
-                    "company": res["company"],
-                    "platform": res["platform"],
-                    "job_count": len(res.get("jobs", [])),
-                    "status": res["status"]
-                })
-                if res["status"] == "success":
-                    all_raw_jobs.extend(res["jobs"])
-
-        throttle_sensitive_india_sites = [
-            Site.LINKEDIN,
-            Site.GLASSDOOR,
-            Site.NAUKRI,
-        ]
-        throttle_sensitive_remote_sites = [
-            Site.LINKEDIN,
-            Site.GLASSDOOR,
-        ]
-        high_volume_india_sites = [
-            Site.INDEED,
-            Site.GOOGLE,
-            Site.AMAZON,
-            Site.MICROSOFT,
-        ]
-        high_volume_remote_sites = [
-            Site.INDEED,
-            Site.DICE,
-            Site.SIMPLYHIRED,
-            Site.BUILTIN,
-            Site.WELLFOUND,
-            Site.LEVELSFYI,
-        ]
-        niche_remote_sites = [
-            Site.REMOTEOK,
-            Site.WEWORKREMOTELY,
-            Site.HN_HIRING,
-            Site.THE_MUSE,
-            Site.HIMALAYAS,
-            Site.JOBSPRESSO,
-            Site.RUST_CAREERS,
-            Site.WORKING_NOMADS,
-            Site.WEB3_CAREER,
-            Site.CRYPTO_JOBS,
-            Site.OTTA,
-            Site.CORD,
-            Site.DIRECT_CAREERS,
-        ]
+            for completed_future in as_completed(company_futures):
+                execution_result = completed_future.result()
+                run_manifest.append(
+                    {
+                        "company": execution_result["company"],
+                        "platform": execution_result["platform"],
+                        "job_count": len(execution_result.get("jobs", [])),
+                        "status": execution_result["status"],
+                    }
+                )
+                if execution_result["status"] == "success":
+                    aggregated_raw_jobs.extend(execution_result["jobs"])
 
         board_raw_jobs_lock = threading.Lock()
 
-        def scrape_board_site_keyword(site: Site, keyword: str, location: str | None, is_remote: bool) -> None:
+        def scrape_board_site_keyword(
+            target_site: Site,
+            search_query: str,
+            target_location: str | None,
+            is_remote_search: bool,
+        ) -> None:
             """
-            Scrape a single board site for one keyword and append results to all_raw_jobs.
-            Enforces a 15-second hard timeout per keyword search without blocking worker shutdown on hanging sockets.
+            Scrapes a single job board for a designated search query and location.
             """
-            sub_exec = ThreadPoolExecutor(max_workers=1)
-            df = None
+            sub_executor = ThreadPoolExecutor(max_workers=1)
+            scraped_dataframe = None
             try:
-                kwargs = {
-                    "site_name": [site],
-                    "search_term": keyword,
+                scraping_arguments = {
+                    "site_name": [target_site],
+                    "search_term": search_query,
                     "results_wanted": 200,
                     "hours_old": 24,
                 }
-                if location:
-                    kwargs["location"] = location
-                if is_remote:
-                    kwargs["is_remote"] = True
+                if target_location:
+                    scraping_arguments["location"] = target_location
+                if is_remote_search:
+                    scraping_arguments["is_remote"] = True
+                if target_site == Site.INDEED and target_location == "India":
+                    scraping_arguments["country_indeed"] = "india"
+                if target_site in PROXY_REQUIRED_SITES and PROXIES:
+                    scraping_arguments["proxies"] = PROXIES
 
-                future = sub_exec.submit(scrape_jobs, **kwargs)
-                df = future.result(timeout=15)
-                sub_exec.shutdown(wait=False)
+                future_result = sub_executor.submit(scrape_jobs, **scraping_arguments)
+                scraped_dataframe = future_result.result(timeout=45)
+                sub_executor.shutdown(wait=False)
             except Exception:
-                sub_exec.shutdown(wait=False, cancel_futures=True)
+                sub_executor.shutdown(wait=False, cancel_futures=True)
                 return
 
-            if df is None or df.empty:
+            if scraped_dataframe is None or scraped_dataframe.empty:
                 return
 
-            scraped = []
-            for row in df.itertuples():
-                source = getattr(row, "site", site.value)
-                normalized = normalize_job_post(row, source)
-                is_remote_flag = is_remote or getattr(row, "is_remote", False) or "remote" in normalized["location"].lower()
-                if is_location_in_scope(normalized["location"], is_remote_flag):
-                    scraped.append(normalized)
+            parsed_posts = []
+            for job_row in scraped_dataframe.itertuples():
+                site_source = getattr(job_row, "site", target_site.value)
+                normalized_post = normalize_job_post(job_row, site_source)
+                is_remote_flag = (
+                    is_remote_search
+                    or getattr(job_row, "is_remote", False)
+                    or "remote" in normalized_post["location"].lower()
+                )
+                if is_location_in_scope(normalized_post["location"], is_remote_flag):
+                    parsed_posts.append(normalized_post)
 
-            if scraped:
+            if parsed_posts:
                 with board_raw_jobs_lock:
-                    all_raw_jobs.extend(scraped)
+                    aggregated_raw_jobs.extend(parsed_posts)
 
         board_futures = []
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as board_executor:
-            for site in throttle_sensitive_india_sites:
+            for feed_site in SINGLE_CALL_FEED_SITES:
                 board_futures.append(
-                    board_executor.submit(scrape_board_site_keyword, site, THROTTLE_SENSITIVE_KEYWORD, "India", False)
+                    board_executor.submit(
+                        scrape_board_site_keyword, feed_site, "software engineer", None, True
+                    )
                 )
-            for site in throttle_sensitive_remote_sites:
-                board_futures.append(
-                    board_executor.submit(scrape_board_site_keyword, site, THROTTLE_SENSITIVE_KEYWORD, None, True)
-                )
-            for keyword in KEYWORDS:
-                for site in high_volume_india_sites:
+
+            for search_term in KEYWORDS:
+                for india_site in KEYWORD_SEARCHABLE_INDIA_SITES:
                     board_futures.append(
-                        board_executor.submit(scrape_board_site_keyword, site, keyword, "India", False)
+                        board_executor.submit(
+                            scrape_board_site_keyword, india_site, search_term, "India", False
+                        )
                     )
-                for site in high_volume_remote_sites:
+                for remote_site in KEYWORD_SEARCHABLE_REMOTE_SITES:
                     board_futures.append(
-                        board_executor.submit(scrape_board_site_keyword, site, keyword, None, True)
+                        board_executor.submit(
+                            scrape_board_site_keyword, remote_site, search_term, None, True
+                        )
                     )
-                for site in niche_remote_sites:
-                    board_futures.append(
-                        board_executor.submit(scrape_board_site_keyword, site, keyword, None, True)
-                    )
-            for future in as_completed(board_futures):
-                future.result()
 
+            for completed_future in as_completed(board_futures):
+                completed_future.result()
 
-        unique_raw_jobs = deduplicate_jobs(all_raw_jobs)
-        
-        for job in unique_raw_jobs:
-            ats_info = extract_ats_slug(job["absolute_url"])
-            if ats_info:
-                register_discovered_company(ats_info[0], ats_info[1])
+        deduplicated_job_records = deduplicate_jobs(aggregated_raw_jobs)
 
-        save_json(unique_raw_jobs, DATA_DIR / "raw_jobs.json")
-        print(f"[Scraper] Saved {len(unique_raw_jobs)} raw scraped jobs to raw_jobs.json", flush=True)
+        for job_record in deduplicated_job_records:
+            discovered_ats_details = extract_ats_slug(job_record["absolute_url"])
+            if discovered_ats_details:
+                register_discovered_ats_slug(discovered_ats_details[0], discovered_ats_details[1])
 
-        if not run_id:
-            run_id = start_run()
+        save_json(deduplicated_job_records, DATA_DIR / "raw_jobs.json")
+        print(f"[Scraper] Saved {len(deduplicated_job_records)} raw scraped jobs to raw_jobs.json", flush=True)
 
-        if run_id:
-            ingest_headers = {
+        if not run_identifier:
+            run_identifier = start_run()
+
+        if run_identifier:
+            ingest_request_headers = {
                 "X-Ingest-Key": INGEST_API_KEY,
                 "Content-Type": "application/json",
             }
-            ingest_url = f"{BACKEND_API_URL}/scraper/ingest-raw"
-            chunk_size = 500
-            total_added = 0
-            for i in range(0, len(unique_raw_jobs), chunk_size):
-                chunk = unique_raw_jobs[i:i + chunk_size]
+            ingest_endpoint_url = f"{BACKEND_API_URL}/scraper/ingest-raw"
+            batch_chunk_size = 500
+            total_jobs_added = 0
+            for chunk_offset in range(0, len(deduplicated_job_records), batch_chunk_size):
+                job_batch_chunk = deduplicated_job_records[chunk_offset:chunk_offset + batch_chunk_size]
                 try:
-                    res = requests.post(ingest_url, json={"run_id": run_id, "jobs": chunk}, headers=ingest_headers, timeout=120)
-                    if res.status_code == 200:
-                        added = res.json().get("jobs_added", 0)
-                        total_added += added
-                        print(f"[Scraper] Ingested batch {i // chunk_size + 1}/{(len(unique_raw_jobs) + chunk_size - 1) // chunk_size} ({added} jobs)", flush=True)
+                    ingest_response = requests.post(
+                        ingest_endpoint_url,
+                        json={"run_id": run_identifier, "jobs": job_batch_chunk},
+                        headers=ingest_request_headers,
+                        timeout=120,
+                    )
+                    if ingest_response.status_code == 200:
+                        added_count = ingest_response.json().get("jobs_added", 0)
+                        total_jobs_added += added_count
+                        print(
+                            f"[Scraper] Ingested batch {chunk_offset // batch_chunk_size + 1}/{(len(deduplicated_job_records) + batch_chunk_size - 1) // batch_chunk_size} ({added_count} jobs)",
+                            flush=True,
+                        )
                     else:
-                        print(f"[Scraper] Batch {i // chunk_size + 1} returned {res.status_code}: {res.text[:200]}", flush=True)
-                except Exception as ingest_error:
-                    print(f"[Scraper] Failed to POST chunk {i // chunk_size + 1}: {ingest_error}", flush=True)
-            print(f"[Scraper] Backend raw ingestion complete. Total jobs added: {total_added}", flush=True)
+                        print(
+                            f"[Scraper] Batch {chunk_offset // batch_chunk_size + 1} returned {ingest_response.status_code}: {ingest_response.text[:200]}",
+                            flush=True,
+                        )
+                except Exception as batch_error:
+                    print(
+                        f"[Scraper] Failed to POST chunk {chunk_offset // batch_chunk_size + 1}: {batch_error}",
+                        flush=True,
+                    )
+            print(f"[Scraper] Backend raw ingestion complete. Total jobs added: {total_jobs_added}", flush=True)
 
-        save_json(manifest, DATA_DIR / "manifest.json")
+        save_json(run_manifest, DATA_DIR / "manifest.json")
 
-        if run_id:
-            finish_run(run_id, "success")
+        if run_identifier:
+            finish_run(run_identifier, "success")
 
-        return {"status": "success", "manifest": manifest}
+        return {"status": "success", "manifest": run_manifest}
 
-    except Exception as e:
-        if run_id:
-            finish_run(run_id, "failed", str(e))
-        raise e
+    except Exception as execution_exception:
+        if run_identifier:
+            finish_run(run_identifier, "failed", str(execution_exception))
+        raise execution_exception
+
 
 if __name__ == "__main__":
-    import sys
     if "--test" in sys.argv:
-        KEYWORDS[:] = ["golang developer", "go developer", "backend engineer"]
+        KEYWORDS[:] = ["golang developer", "backend engineer"]
         print(f"[Scraper] Running in TEST mode. Keywords reduced to: {KEYWORDS}", flush=True)
     run_orchestration()
