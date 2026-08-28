@@ -1,6 +1,8 @@
 """
-Unified scraper orchestrator running ATS company boards and JobSpy job sources with automated ATS discovery.
+Unified scraper orchestrator running ATS company boards, job board sources, and automated career page ATS discovery.
 """
+
+from __future__ import annotations
 
 import json
 import os
@@ -16,6 +18,7 @@ from bs4 import BeautifulSoup
 from config import (
     DATA_DIR,
     MAX_WORKERS,
+    REQUEST_TIMEOUT,
     BACKEND_API_URL,
     INGEST_API_KEY,
     USER_AGENT,
@@ -151,7 +154,7 @@ def fetch_master_keywords() -> list[str]:
     Fetches the latest approved master search keywords from the backend API.
     """
     try:
-        response = requests.get(f"{BACKEND_API_URL}/keywords", timeout=5)
+        response = requests.get(f"{BACKEND_API_URL}/keywords", timeout=10)
         if response.status_code == 200:
             received_keywords = response.json().get("data", [])
             if received_keywords:
@@ -191,6 +194,26 @@ PROXY_REQUIRED_SITES = {
     Site.LINKEDIN,
 }
 
+ATS_DETECTION_PATTERNS = [
+    (re.compile(r"(?:boards|job-boards|boards\.eu)\.greenhouse\.io/([^/?#]+)"), "greenhouse"),
+    (re.compile(r"jobs\.lever\.co/([^/?#]+)"), "lever"),
+    (re.compile(r"jobs\.ashbyhq\.com/([^/?#]+)"), "ashby"),
+    (re.compile(r"jobs\.smartrecruiters\.com/([^/?#]+)"), "smartrecruiters"),
+    (re.compile(r"([a-z0-9-]+)\.wd\d+\.myworkdaysite\.com"), "workday"),
+]
+
+CAREER_PATH_PATTERNS = ["/jobs", "/careers", "/career", "/work-with-us", "/join-us", "/openings"]
+CAREER_SUBDOMAIN_PATTERNS = ["careers", "jobs"]
+
+HTTP_PROBE_SESSION = requests.Session()
+HTTP_PROBE_SESSION.headers.update(
+    {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+)
+HTTP_PROBE_SESSION.max_redirects = 5
+
 
 def fetch_ats_slugs() -> dict[str, list[str]]:
     """
@@ -203,7 +226,7 @@ def fetch_ats_slugs() -> dict[str, list[str]]:
         response = requests.get(
             f"{BACKEND_API_URL}/scraper/ats-slugs",
             headers=request_headers,
-            timeout=10,
+            timeout=15,
         )
         if response.status_code == 200:
             return response.json().get("data", {})
@@ -224,7 +247,7 @@ def register_discovered_ats_slug(platform_name: str, company_slug: str) -> None:
     }
     request_payload = {
         "platform": platform_name,
-        "slug": company_slug,
+        "slug": company_slug.strip().lower(),
     }
     try:
         requests.post(
@@ -235,6 +258,86 @@ def register_discovered_ats_slug(platform_name: str, company_slug: str) -> None:
         )
     except Exception:
         pass
+
+
+def generate_career_page_candidates(company_name: str) -> list[str]:
+    """
+    Generates candidate career URLs from a company name by stripping common suffixes and building standard paths.
+    """
+    sanitized = re.sub(
+        r"\b(inc\.?|llc\.?|ltd\.?|corp\.?|co\.?|plc\.?|technologies|solutions|services|group)\b",
+        "",
+        company_name,
+        flags=re.IGNORECASE,
+    )
+    url_slug = re.sub(r"[^a-z0-9]", "", sanitized.lower().strip())
+    if not url_slug or len(url_slug) < 3:
+        return []
+
+    candidates = []
+    for path in CAREER_PATH_PATTERNS:
+        candidates.append(f"https://{url_slug}.com{path}")
+    for subdomain in CAREER_SUBDOMAIN_PATTERNS:
+        candidates.append(f"https://{subdomain}.{url_slug}.com")
+
+    return candidates
+
+
+def probe_single_career_page(company_name: str) -> tuple[str, str] | None:
+    """
+    Probes candidate URLs for a company and extracts ATS configuration details if matched.
+    """
+    for candidate_url in generate_career_page_candidates(company_name):
+        try:
+            response = HTTP_PROBE_SESSION.get(candidate_url, timeout=8, allow_redirects=True)
+            for pattern, platform_name in ATS_DETECTION_PATTERNS:
+                if pattern.search(response.url):
+                    return platform_name, pattern.search(response.url).group(1).lower().strip("/")
+                if response.status_code == 200 and pattern.search(response.text):
+                    return platform_name, pattern.search(response.text).group(1).lower().strip("/")
+        except Exception:
+            continue
+    return None
+
+
+def probe_unmapped_companies(concurrency: int = 20, max_probes_per_run: int = 500) -> int:
+    """
+    Probes a batch of unmapped companies from the backend and registers newly found ATS integrations.
+    """
+    request_headers = {
+        "X-Ingest-Key": INGEST_API_KEY,
+    }
+    try:
+        api_response = requests.get(
+            f"{BACKEND_API_URL}/scraper/companies",
+            headers=request_headers,
+            timeout=15,
+        )
+        if api_response.status_code != 200:
+            return 0
+        company_names = api_response.json().get("data", [])
+    except Exception:
+        return 0
+
+    probed_batch = company_names[:max_probes_per_run]
+    discovered_count = 0
+
+    with ThreadPoolExecutor(max_workers=concurrency) as probe_executor:
+        future_map = {
+            probe_executor.submit(probe_single_career_page, name): name
+            for name in probed_batch
+        }
+        for future in as_completed(future_map):
+            try:
+                result = future.result()
+                if result:
+                    platform_name, company_slug = result
+                    register_discovered_ats_slug(platform_name, company_slug)
+                    discovered_count += 1
+            except Exception:
+                pass
+
+    return discovered_count
 
 
 def start_run() -> str | None:
@@ -504,7 +607,7 @@ def process_company(company_slug: str, platform_name: str, run_id: str | None = 
 
 def run_orchestration() -> dict:
     """
-    Executes the entire job scraping and ingestion pipeline across ATS boards and board aggregators.
+    Executes the entire job scraping, career page discovery, and ingestion pipeline concurrently.
     """
     ensure_dir(DATA_DIR)
 
@@ -514,13 +617,94 @@ def run_orchestration() -> dict:
     run_manifest = []
 
     try:
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as company_executor:
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as primary_executor:
+            discovery_future = primary_executor.submit(probe_unmapped_companies, MAX_WORKERS, 500)
+
             company_futures = []
             for platform_name, company_slugs in active_ats_platform_slugs.items():
                 for company_slug in company_slugs:
                     company_futures.append(
-                        company_executor.submit(process_company, company_slug, platform_name, run_identifier)
+                        primary_executor.submit(process_company, company_slug, platform_name, run_identifier)
                     )
+
+            board_raw_jobs_lock = threading.Lock()
+
+            def scrape_board_site_keyword(
+                target_site: Site,
+                search_query: str,
+                target_location: str | None,
+                is_remote_search: bool,
+            ) -> None:
+                """
+                Scrapes a single job board for a designated search query and location with 5-minute timeout.
+                """
+                sub_executor = ThreadPoolExecutor(max_workers=1)
+                scraped_dataframe = None
+                try:
+                    scraping_arguments = {
+                        "site_name": [target_site],
+                        "search_term": search_query,
+                        "results_wanted": 200,
+                        "hours_old": 24,
+                    }
+                    if target_location:
+                        scraping_arguments["location"] = target_location
+                    if is_remote_search:
+                        scraping_arguments["is_remote"] = True
+                    if target_site == Site.INDEED and target_location == "India":
+                        scraping_arguments["country_indeed"] = "india"
+                    if target_site in PROXY_REQUIRED_SITES and PROXIES:
+                        scraping_arguments["proxies"] = PROXIES
+
+                    future_result = sub_executor.submit(scrape_jobs, **scraping_arguments)
+                    scraped_dataframe = future_result.result(timeout=REQUEST_TIMEOUT)
+                    sub_executor.shutdown(wait=False)
+                except Exception:
+                    sub_executor.shutdown(wait=False, cancel_futures=True)
+                    return
+
+                if scraped_dataframe is None or scraped_dataframe.empty:
+                    return
+
+                parsed_posts = []
+                for job_row in scraped_dataframe.itertuples():
+                    site_source = getattr(job_row, "site", target_site.value)
+                    normalized_post = normalize_job_post(job_row, site_source)
+                    is_remote_flag = (
+                        is_remote_search
+                        or getattr(job_row, "is_remote", False)
+                        or "remote" in normalized_post["location"].lower()
+                    )
+                    if is_location_in_scope(normalized_post["location"], is_remote_flag):
+                        parsed_posts.append(normalized_post)
+
+                if parsed_posts:
+                    with board_raw_jobs_lock:
+                        aggregated_raw_jobs.extend(parsed_posts)
+
+            board_futures = []
+
+            for feed_site in SINGLE_CALL_FEED_SITES:
+                board_futures.append(
+                    primary_executor.submit(
+                        scrape_board_site_keyword, feed_site, "software engineer", None, True
+                    )
+                )
+
+            for search_term in KEYWORDS:
+                for india_site in KEYWORD_SEARCHABLE_INDIA_SITES:
+                    board_futures.append(
+                        primary_executor.submit(
+                            scrape_board_site_keyword, india_site, search_term, "India", False
+                        )
+                    )
+                for remote_site in KEYWORD_SEARCHABLE_REMOTE_SITES:
+                    board_futures.append(
+                        primary_executor.submit(
+                            scrape_board_site_keyword, remote_site, search_term, None, True
+                        )
+                    )
+
             for completed_future in as_completed(company_futures):
                 execution_result = completed_future.result()
                 run_manifest.append(
@@ -534,86 +718,15 @@ def run_orchestration() -> dict:
                 if execution_result["status"] == "success":
                     aggregated_raw_jobs.extend(execution_result["jobs"])
 
-        board_raw_jobs_lock = threading.Lock()
-
-        def scrape_board_site_keyword(
-            target_site: Site,
-            search_query: str,
-            target_location: str | None,
-            is_remote_search: bool,
-        ) -> None:
-            """
-            Scrapes a single job board for a designated search query and location.
-            """
-            sub_executor = ThreadPoolExecutor(max_workers=1)
-            scraped_dataframe = None
-            try:
-                scraping_arguments = {
-                    "site_name": [target_site],
-                    "search_term": search_query,
-                    "results_wanted": 200,
-                    "hours_old": 24,
-                }
-                if target_location:
-                    scraping_arguments["location"] = target_location
-                if is_remote_search:
-                    scraping_arguments["is_remote"] = True
-                if target_site == Site.INDEED and target_location == "India":
-                    scraping_arguments["country_indeed"] = "india"
-                if target_site in PROXY_REQUIRED_SITES and PROXIES:
-                    scraping_arguments["proxies"] = PROXIES
-
-                future_result = sub_executor.submit(scrape_jobs, **scraping_arguments)
-                scraped_dataframe = future_result.result(timeout=45)
-                sub_executor.shutdown(wait=False)
-            except Exception:
-                sub_executor.shutdown(wait=False, cancel_futures=True)
-                return
-
-            if scraped_dataframe is None or scraped_dataframe.empty:
-                return
-
-            parsed_posts = []
-            for job_row in scraped_dataframe.itertuples():
-                site_source = getattr(job_row, "site", target_site.value)
-                normalized_post = normalize_job_post(job_row, site_source)
-                is_remote_flag = (
-                    is_remote_search
-                    or getattr(job_row, "is_remote", False)
-                    or "remote" in normalized_post["location"].lower()
-                )
-                if is_location_in_scope(normalized_post["location"], is_remote_flag):
-                    parsed_posts.append(normalized_post)
-
-            if parsed_posts:
-                with board_raw_jobs_lock:
-                    aggregated_raw_jobs.extend(parsed_posts)
-
-        board_futures = []
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as board_executor:
-            for feed_site in SINGLE_CALL_FEED_SITES:
-                board_futures.append(
-                    board_executor.submit(
-                        scrape_board_site_keyword, feed_site, "software engineer", None, True
-                    )
-                )
-
-            for search_term in KEYWORDS:
-                for india_site in KEYWORD_SEARCHABLE_INDIA_SITES:
-                    board_futures.append(
-                        board_executor.submit(
-                            scrape_board_site_keyword, india_site, search_term, "India", False
-                        )
-                    )
-                for remote_site in KEYWORD_SEARCHABLE_REMOTE_SITES:
-                    board_futures.append(
-                        board_executor.submit(
-                            scrape_board_site_keyword, remote_site, search_term, None, True
-                        )
-                    )
-
             for completed_future in as_completed(board_futures):
                 completed_future.result()
+
+            try:
+                discovered_count = discovery_future.result()
+                if discovered_count > 0:
+                    print(f"[Discovery] Successfully identified and registered {discovered_count} new ATS boards during run.")
+            except Exception:
+                pass
 
         deduplicated_job_records = deduplicate_jobs(aggregated_raw_jobs)
 
@@ -643,7 +756,7 @@ def run_orchestration() -> dict:
                         ingest_endpoint_url,
                         json={"run_id": run_identifier, "jobs": job_batch_chunk},
                         headers=ingest_request_headers,
-                        timeout=120,
+                        timeout=REQUEST_TIMEOUT,
                     )
                     if ingest_response.status_code == 200:
                         added_count = ingest_response.json().get("jobs_added", 0)

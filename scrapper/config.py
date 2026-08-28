@@ -16,8 +16,8 @@ if env_file_path.exists():
 
 BASE_URL = "https://boards-api.greenhouse.io/v1/boards"
 DATA_DIR = Path(__file__).resolve().parent / "data"
-MAX_WORKERS = 10
-REQUEST_TIMEOUT = 60
+MAX_WORKERS = 20
+REQUEST_TIMEOUT = 300
 REQUEST_DELAY = 0.25
 USER_AGENT = "JobCruiser/1.0"
 RETRY_COUNT = 5
