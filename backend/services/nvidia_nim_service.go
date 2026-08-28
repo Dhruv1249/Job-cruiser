@@ -1184,24 +1184,54 @@ func capBackoff(duration time.Duration) time.Duration {
 
 // buildMultiJobPrompt constructs the evaluation prompt for a batch of jobs against a set of user profiles.
 func buildMultiJobPrompt(userProfiles []UserProfileData, jobsBatch []JobSnippetData, expectedResultCount int) string {
-	var builder strings.Builder
-
 	currentTimeText := time.Now().Format("January 2006")
 
-	builder.WriteString("Return ONLY a raw JSON object formatted as follows:\n")
-	builder.WriteString("{\n  \"results\": [\n    {\n      \"job_id\": \"<job_id string copied verbatim from JOB LISTINGS below>\",\n      \"user_id\": \"<user_id string copied verbatim from CANDIDATE PROFILES below>\",\n      \"match_score\": 85,\n      \"match_reasoning\": \"Highly detailed 2-3 line reasoning specifying exact tech stack overlap, candidate base location vs job requirement, and YoE comparison details.\",\n      \"inferred_required_yoe\": 4,\n      \"is_matched\": true\n    }\n  ]\n}\n\n")
-	fmt.Fprintf(&builder, "IMPORTANT: You MUST return exactly %d entries in the \"results\" array — one for every (job × candidate) pair listed below. An empty array or partial array is invalid.\n\n", expectedResultCount)
+	promptTemplate := `Return ONLY a raw JSON object formatted as follows:
+{
+  "results": [
+    {
+      "job_id": "<job_id string copied verbatim from JOB LISTINGS below>",
+      "user_id": "<user_id string copied verbatim from CANDIDATE PROFILES below>",
+      "match_score": 85,
+      "match_reasoning": "Detailed 2-3 line reasoning specifying exact tech stack overlap, location compatibility, and YoE comparison.",
+      "inferred_required_yoe": 4,
+      "is_matched": true
+    }
+  ]
+}
 
-	builder.WriteString("SCORING RULES — apply in strict priority order; a higher-priority penalty overrides skill match entirely:\n")
-	builder.WriteString("1. LOCATION MISMATCH (HARD CAP): Candidate is India-based. Any job that is US Onsite, US Hybrid, or US-only Remote (explicitly excludes non-US applicants) → cap score at 0–15, regardless of any other signal.\n")
-	builder.WriteString("2. EXPERIENCE GAP (HARD CAP — highest priority penalty):\n")
-	fmt.Fprintf(&builder, "   - Use the provided Candidate Years of Experience (YoE) calculated from their resume, or infer it from the profile/resume relative to the current evaluation date: %s. Infer job's minimum required YoE from the JD (look for phrases like '4+ years', '5-7 years experience', etc.).\n", currentTimeText)
-	builder.WriteString("   - If no explicit years of experience are mentioned, infer the required YoE based on the role level norms: Intern/Co-op/Apprentice = 0 YoE; Junior/Associate = 0-2 YoE; Mid-Level/SWE = 2-4 YoE; Senior/Lead/Manager = 4-6 YoE; Staff/Architect = 6-8 YoE; Principal/Director/VP = 8+ YoE.\n")
-	builder.WriteString("   - If the job's minimum required YoE > (candidate YoE + 3): cap score at 0–25. Skill match is IRRELEVANT — a candidate cannot overcome a 3+ year experience deficit.\n")
-	builder.WriteString("   - If the job's minimum required YoE is (candidate YoE + 1) to (candidate YoE + 2): cap score at 45–65. This is a stretch role the candidate cannot realistically get.\n")
-	builder.WriteString("   - If candidate YoE is perfectly aligned with the required range (candidate YoE >= minimum required YoE), award a strong bonus (+15 to +20 points) to the match score if the tech stack matches.\n")
-	builder.WriteString("3. HIGH MATCH (75–100): ONLY for roles where candidate YoE meets or exceeds the minimum, role location matches, the candidate has a strong tech stack overlap, and they receive the experience range alignment bonus.\n")
-	builder.WriteString("4. DETAILED REASONING REQUIREMENT: The 'match_reasoning' must be a minimum of 4-5 lines of text explaining location verification, tech stack match, and YoE ranges.\n\n")
+IMPORTANT: You MUST return exactly %d entries in the "results" array — one for every (job x candidate) pair listed below. An empty array or partial array is invalid.
+
+SCORING INSTRUCTIONS & RULES:
+Score each candidate from 0 to 100 based on technical skill match, strictly penalized by location mismatch and experience gaps.
+A "Score Cap" means the MAXIMUM ALLOWABLE score. Even if a candidate has a 100%% technical skill match, their final match_score CANNOT exceed the cap if a constraint is violated.
+
+1. LOCATION COMPATIBILITY (STRICTEST FILTER):
+   - Check the candidate's Preferred Locations and Work Model Preference against the job's location and description.
+   - FULL MISMATCH: If a job requires on-site/hybrid attendance in a country/city the candidate is NOT located in (or did not list as preferred), or requires local citizenship/work authorization the candidate lacks (e.g., "US Only", "Must reside in the US", "US Work Authorization required without sponsorship") -> MAXIMUM SCORE CAP: 0-15.
+   - REGIONAL REMOTE: If a job is remote but limited to a region/timezone compatible with the candidate (e.g., "Remote - APAC" or "Remote - Asia" for an India candidate) -> MAXIMUM SCORE CAP: 60-85.
+   - EXACT MATCH / GLOBAL REMOTE: If the job is in the candidate's preferred location OR is 100%% unrestricted global remote ("Worldwide", "Anywhere", "Global Remote") -> No location penalty. Full technical score allowed.
+
+2. EXPERIENCE GAP (HARD SCORE CAPS):
+   - Compare the candidate's Years of Experience (YoE) against the job's minimum required YoE stated in the JD. Current date: %s.
+   - If no explicit YoE is stated, infer from level: Intern = 0 | Junior/Associate = 0-2 | Mid-Level = 2-4 | Senior/Lead = 4-6 | Staff/Architect = 6-8 | Principal/Director = 8+.
+   - If Job Required YoE > (Candidate YoE + 3): MAXIMUM SCORE CAP: 0-25. Skill match cannot overcome a 3+ year experience deficit.
+   - If Job Required YoE is (Candidate YoE + 1) to (Candidate YoE + 2): MAXIMUM SCORE CAP: 55-70. Stretch role.
+   - If Candidate YoE >= Job Required YoE: Award +10 to +15 bonus points to the technical match score.
+
+3. HIGH MATCH (90-100):
+   - ONLY for jobs where location matches cleanly (Exact Match / Global Remote), candidate meets or exceeds required YoE, and strong tech stack overlap exists.
+
+4. IS_MATCHED FLAG:
+   - Set is_matched to true IF AND ONLY IF match_score >= 30.
+
+5. REASONING:
+   - "match_reasoning" must be 2-3 clear, natural sentences explaining: (1) location verification & compatibility, (2) technical stack overlap & missing skills, and (3) experience comparison.
+
+`
+
+	var builder strings.Builder
+	fmt.Fprintf(&builder, promptTemplate, expectedResultCount, currentTimeText)
 
 	builder.WriteString("### CANDIDATE PROFILES\n")
 	for _, profile := range userProfiles {
@@ -1209,8 +1239,8 @@ func buildMultiJobPrompt(userProfiles []UserProfileData, jobsBatch []JobSnippetD
 		if profile.MasterCVText != "" {
 			combinedProfileText += "\n\nMaster CV / Full Experience Context:\n" + profile.MasterCVText
 		}
-		fmt.Fprintf(&builder, "User ID: %s\nCandidate Years of Experience (YoE): %d\nProfile & Resume Context:\n%s\nPreferred Roles: %s\nPreferred Locations: %s\nWork Model: %s\n\n",
-			profile.UserID, profile.ExperienceYears, combinedProfileText, strings.Join(profile.PreferredRoles, ", "), strings.Join(profile.PreferredLocations, ", "), profile.WorkModel)
+		fmt.Fprintf(&builder, "User ID: %s\nCandidate YoE: %d\nPreferred Locations: %s\nWork Model Preference: %s\nPreferred Roles: %s\nProfile & Resume Context:\n%s\n\n",
+			profile.UserID, profile.ExperienceYears, strings.Join(profile.PreferredLocations, ", "), profile.WorkModel, strings.Join(profile.PreferredRoles, ", "), combinedProfileText)
 	}
 
 	builder.WriteString("### JOB LISTINGS TO EVALUATE\n")
@@ -1219,7 +1249,7 @@ func buildMultiJobPrompt(userProfiles []UserProfileData, jobsBatch []JobSnippetD
 			job.JobID, job.Title, job.Company, job.Location, truncateTextString(job.Description, maxJobDescriptionLength))
 	}
 
-	fmt.Fprintf(&builder, "NOW OUTPUT THE JSON. Exactly %d entries. No other text. Start your response with '{' and end it with '}'.\n", expectedResultCount)
+	fmt.Fprintf(&builder, "NOW OUTPUT THE JSON. Exactly %d entries. No other text. Start with '{' and end with '}'.\n", expectedResultCount)
 
 	return builder.String()
 }
