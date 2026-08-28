@@ -20,19 +20,10 @@ import (
 )
 
 // GeminiMatchResult encapsulates an evaluated job match output for a specific candidate.
-type GeminiMatchResult struct {
-	JobID               string `json:"job_id"`
-	UserID              string `json:"user_id"`
-	MatchScore          int    `json:"match_score"`
-	MatchReasoning      string `json:"match_reasoning"`
-	InferredRequiredYoE int    `json:"inferred_required_yoe"`
-	IsMatched           bool   `json:"is_matched"`
-}
+type GeminiMatchResult = BatchMatchResultItem
 
 // GeminiBatchResponse defines the structured JSON array envelope emitted by Gemini models.
-type GeminiBatchResponse struct {
-	Results []GeminiMatchResult `json:"results"`
-}
+type GeminiBatchResponse = BatchMatchResponse
 
 // GeminiBatchJobMatchSchemaJSON defines the structured schema for Gemini batch match evaluations.
 var GeminiBatchJobMatchSchemaJSON = `{
@@ -71,14 +62,14 @@ type GeminiBatchMatchService struct {
 	RateLimitInterval      time.Duration
 	lastRequestTime        time.Time
 	rateLimitMutex         sync.Mutex
-	queueMutex                    sync.RWMutex
-	isQueuePaused                 bool
-	isEvaluationInProgress        bool
-	isPipelinePermanentlyStopped  bool
-	OnPipelineShutdown            func()
-	modelErrorMutex               sync.RWMutex
-	modelConsecutiveErrors        map[string]int
-	disabledModels                map[string]bool
+	queueMutex             sync.RWMutex
+	isQueuePaused          bool
+	isEvaluationInProgress bool
+	isPipelinePermanentlyStopped bool
+	OnPipelineShutdown     func()
+	modelErrorMutex        sync.RWMutex
+	modelConsecutiveErrors map[string]int
+	disabledModels         map[string]bool
 }
 
 const maxConsecutiveModelErrors = 5
@@ -224,7 +215,7 @@ func (s *GeminiBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context
 		return
 	}
 
-	userProfiles, errProfiles := s.fetchAllUserProfiles(ctx)
+	userProfiles, errProfiles := fetchAllActiveUserProfiles(ctx, s.DB)
 	if errProfiles != nil {
 		log.Printf("[GeminiBatchMatchService] Failed to fetch user profiles: %v", errProfiles)
 		return
@@ -234,7 +225,7 @@ func (s *GeminiBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context
 		return
 	}
 
-	pendingJobs, errJobs := s.fetchUnevaluatedJobs(ctx)
+	pendingJobs, errJobs := fetchRecentUnevaluatedJobs(ctx, s.DB)
 	if errJobs != nil {
 		log.Printf("[GeminiBatchMatchService] Failed to fetch unevaluated jobs: %v", errJobs)
 		return
@@ -244,7 +235,7 @@ func (s *GeminiBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context
 		return
 	}
 
-	jobBatches := s.buildMultiJobTokenBatches(ctx, pendingJobs, s.TargetTokenBudget)
+	jobBatches := buildMultiJobTokenBatches(ctx, pendingJobs, s.TargetTokenBudget)
 	if len(jobBatches) == 0 {
 		return
 	}
@@ -288,7 +279,7 @@ func (s *GeminiBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context
 			}
 		} else {
 			if len(currentBatchEvaluatedIDs) > 0 {
-				markErr := s.markJobsEvaluated(ctx, currentBatchEvaluatedIDs)
+				markErr := markJobsAsEvaluatedInDatabase(ctx, s.DB, currentBatchEvaluatedIDs)
 				if markErr != nil {
 					log.Printf("[GeminiBatchMatchService] Failed marking batch of %d jobs as evaluated: %v", len(currentBatchEvaluatedIDs), markErr)
 				} else {
@@ -313,13 +304,13 @@ func (s *GeminiBatchMatchService) EvaluateForSingleUser(ctx context.Context, tar
 		return
 	}
 
-	profile, errProfile := s.fetchSingleUserProfile(ctx, targetUserID)
+	profile, errProfile := fetchSingleUserProfileByID(ctx, s.DB, targetUserID)
 	if errProfile != nil {
 		log.Printf("[GeminiBatchMatchService] Failed to fetch profile for user %s: %v", targetUserID, errProfile)
 		return
 	}
 
-	unmatchedJobs, errJobs := s.fetchJobsUnmatchedForUser(ctx, targetUserID)
+	unmatchedJobs, errJobs := fetchUnmatchedJobsForSingleUser(ctx, s.DB, targetUserID)
 	if errJobs != nil {
 		log.Printf("[GeminiBatchMatchService] Failed to fetch unmatched jobs for user %s: %v", targetUserID, errJobs)
 		return
@@ -328,7 +319,7 @@ func (s *GeminiBatchMatchService) EvaluateForSingleUser(ctx context.Context, tar
 		return
 	}
 
-	jobBatches := s.buildMultiJobTokenBatches(ctx, unmatchedJobs, s.TargetTokenBudget)
+	jobBatches := buildMultiJobTokenBatches(ctx, unmatchedJobs, s.TargetTokenBudget)
 	userProfiles := []UserProfileData{*profile}
 
 	batchIteration := 0
@@ -521,7 +512,7 @@ func (s *GeminiBatchMatchService) CountTokens(ctx context.Context, modelName str
 
 	client, errClient := s.createGenAIClient(ctx)
 	if errClient != nil {
-		return s.calculateExactSubwordTokens(text), nil
+		return calculateExactSubwordTokens(text), nil
 	}
 
 	contents := []*genai.Content{
@@ -535,53 +526,10 @@ func (s *GeminiBatchMatchService) CountTokens(ctx context.Context, modelName str
 
 	response, errCount := client.Models.CountTokens(ctx, modelName, contents, nil)
 	if errCount != nil || response == nil {
-		return s.calculateExactSubwordTokens(text), nil
+		return calculateExactSubwordTokens(text), nil
 	}
 
 	return int(response.TotalTokens), nil
-}
-
-func (s *GeminiBatchMatchService) calculateExactSubwordTokens(text string) int {
-	words := strings.Fields(text)
-	totalTokens := 0
-	for _, word := range words {
-		subwords := len(word) / 3
-		if subwords < 1 {
-			subwords = 1
-		}
-		totalTokens += subwords
-	}
-	return totalTokens
-}
-
-func (s *GeminiBatchMatchService) buildMultiJobTokenBatches(ctx context.Context, allJobs []JobSnippetData, targetTokenBudget int) [][]JobSnippetData {
-	var resultBatches [][]JobSnippetData
-	var currentBatch []JobSnippetData
-	currentTokens := 0
-
-	for _, job := range allJobs {
-		snippetText := fmt.Sprintf("ID: %s\nTitle: %s\nCompany: %s\nLocation: %s\nDescription: %s\n",
-			job.JobID, job.Title, job.Company, job.Location, truncateTextString(job.Description, maxJobDescriptionLength))
-
-		itemTokens := s.calculateExactSubwordTokens(snippetText)
-
-		tokenBudgetExceeded := len(currentBatch) > 0 && currentTokens+itemTokens > targetTokenBudget
-		jobCountExceeded := len(currentBatch) >= maxJobsPerBatch
-		if tokenBudgetExceeded || jobCountExceeded {
-			resultBatches = append(resultBatches, currentBatch)
-			currentBatch = []JobSnippetData{}
-			currentTokens = 0
-		}
-
-		currentBatch = append(currentBatch, job)
-		currentTokens += itemTokens
-	}
-
-	if len(currentBatch) > 0 {
-		resultBatches = append(resultBatches, currentBatch)
-	}
-
-	return resultBatches
 }
 
 func (s *GeminiBatchMatchService) evaluateJobBatch(
@@ -592,7 +540,7 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 	modelName string,
 ) bool {
 	expectedResultCount := len(batch) * len(userProfiles)
-	promptText := s.buildMultiJobPrompt(userProfiles, batch, expectedResultCount)
+	promptText := buildMultiJobPrompt(userProfiles, batch, expectedResultCount)
 
 	requestStart := time.Now()
 	rawOutput, errGenerate := s.generateBatchContent(ctx, modelName, promptText)
@@ -631,11 +579,11 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 		}
 
 		if matchedProfile != nil {
-			s.applyExperienceAndLocationCaps(&resultItem, matchedProfile)
+			applyExperienceAndLocationCaps(&resultItem, matchedProfile)
 		}
 
 		isMatch := resultItem.MatchScore >= matchScoreMinThreshold
-		upsertErr := s.upsertUserMatch(ctx, resultItem.UserID, resultItem.JobID, resultItem.MatchScore, resultItem.MatchReasoning, isMatch, modelName)
+		upsertErr := upsertUserJobMatchRecord(ctx, s.DB, resultItem.UserID, resultItem.JobID, resultItem.MatchScore, resultItem.MatchReasoning, isMatch, modelName)
 		if upsertErr != nil {
 			log.Printf("[GeminiBatchMatchService] Upsert error for user %s job %s: %v", resultItem.UserID, resultItem.JobID, upsertErr)
 		}
@@ -730,200 +678,6 @@ func (s *GeminiBatchMatchService) createGenAIClient(ctx context.Context) (*genai
 	return genai.NewClient(ctx, clientConfig)
 }
 
-func (s *GeminiBatchMatchService) applyExperienceAndLocationCaps(result *GeminiMatchResult, profile *UserProfileData) {
-	candidateYears := profile.ExperienceYears
-	jobMinimumYears := result.InferredRequiredYoE
-
-	if jobMinimumYears > 0 {
-		if jobMinimumYears > (candidateYears + 2) {
-			if result.MatchScore > 25 {
-				result.MatchScore = 25
-				result.MatchReasoning = fmt.Sprintf("[Experience Gap Cap] Job requires %d+ YoE, candidate has %d YoE. Tech fit scored %d%%. %s",
-					jobMinimumYears, candidateYears, result.MatchScore, result.MatchReasoning)
-			}
-		} else if jobMinimumYears > candidateYears {
-			if result.MatchScore > 45 {
-				result.MatchScore = 45
-				result.MatchReasoning = fmt.Sprintf("[Stretch Role Cap] Job requires %d+ YoE, candidate has %d YoE. Tech fit scored %d%%. %s",
-					jobMinimumYears, candidateYears, result.MatchScore, result.MatchReasoning)
-			}
-		}
-	}
-}
-
-func (s *GeminiBatchMatchService) buildMultiJobPrompt(userProfiles []UserProfileData, jobsBatch []JobSnippetData, expectedResultCount int) string {
-	var builder strings.Builder
-	currentTimeText := time.Now().Format("January 2006")
-
-	builder.WriteString("Return ONLY a raw JSON object formatted as follows:\n")
-	builder.WriteString("{\n  \"results\": [\n    {\n      \"job_id\": \"<job_id string copied verbatim from JOB LISTINGS below>\",\n      \"user_id\": \"<user_id string copied verbatim from CANDIDATE PROFILES below>\",\n      \"match_score\": 85,\n      \"match_reasoning\": \"Highly detailed 2-3 line reasoning specifying exact tech stack overlap, candidate base location vs job requirement, and YoE comparison details.\",\n      \"inferred_required_yoe\": 4,\n      \"is_matched\": true\n    }\n  ]\n}\n\n")
-	fmt.Fprintf(&builder, "IMPORTANT: You MUST return exactly %d entries in the \"results\" array — one for every (job × candidate) pair listed below. An empty array or partial array is invalid.\n\n", expectedResultCount)
-
-	builder.WriteString("SCORING RULES — apply in strict priority order; a higher-priority penalty overrides skill match entirely:\n")
-	builder.WriteString("1. LOCATION MISMATCH (HARD CAP): Candidate is India-based. Any job that is US Onsite, US Hybrid, or US-only Remote (explicitly excludes non-US applicants) → cap score at 0–15, regardless of any other signal.\n")
-	builder.WriteString("2. EXPERIENCE GAP (HARD CAP — highest priority penalty):\n")
-	fmt.Fprintf(&builder, "   - Use the provided Candidate Years of Experience (YoE) calculated from their resume, or infer it from the profile/resume relative to the current evaluation date: %s. Infer job's minimum required YoE from the JD (look for phrases like '4+ years', '5-7 years experience', etc.).\n", currentTimeText)
-	builder.WriteString("   - If no explicit years of experience are mentioned, infer the required YoE based on the role level norms: Intern/Co-op/Apprentice = 0 YoE; Junior/Associate = 0-2 YoE; Mid-Level/SWE = 2-4 YoE; Senior/Lead/Manager = 4-6 YoE; Staff/Architect = 6-8 YoE; Principal/Director/VP = 8+ YoE.\n")
-	builder.WriteString("   - If the job's minimum required YoE > (candidate YoE + 3): cap score at 0–25. Skill match is IRRELEVANT — a candidate cannot overcome a 3+ year experience deficit.\n")
-	builder.WriteString("   - If the job's minimum required YoE is (candidate YoE + 1) to (candidate YoE + 2): cap score at 45–65. This is a stretch role the candidate cannot realistically get.\n")
-	builder.WriteString("   - If candidate YoE is perfectly aligned with the required range (candidate YoE >= minimum required YoE), award a strong bonus (+15 to +20 points) to the match score if the tech stack matches.\n")
-	builder.WriteString("3. HIGH MATCH (75–100): ONLY for roles where candidate YoE meets or exceeds the minimum, role location matches, the candidate has a strong tech stack overlap, and they receive the experience range alignment bonus.\n")
-	builder.WriteString("4. DETAILED REASONING REQUIREMENT: The 'match_reasoning' must be a minimum of 4-5 lines of text explaining location verification, tech stack match, and YoE ranges.\n\n")
-
-
-	builder.WriteString("### CANDIDATE PROFILES\n")
-	for _, profile := range userProfiles {
-		combinedProfileText := profile.ParsedBio
-		if profile.MasterCVText != "" {
-			combinedProfileText += "\n\nMaster CV / Full Experience Context:\n" + profile.MasterCVText
-		}
-		fmt.Fprintf(&builder, "User ID: %s\nCandidate YoE: %d\nProfile & Resume Context:\n%s\nPreferred Roles: %s\nPreferred Locations: %s\nWork Model: %s\n\n",
-			profile.UserID, profile.ExperienceYears, combinedProfileText, strings.Join(profile.PreferredRoles, ", "), strings.Join(profile.PreferredLocations, ", "), profile.WorkModel)
-	}
-
-	builder.WriteString("### JOB LISTINGS TO EVALUATE\n")
-	for _, job := range jobsBatch {
-		fmt.Fprintf(&builder, "---\nID: %s\nTitle: %s\nCompany: %s\nLocation: %s\nDescription:\n%s\n\n",
-			job.JobID, job.Title, job.Company, job.Location, truncateTextString(job.Description, maxJobDescriptionLength))
-	}
-
-	fmt.Fprintf(&builder, "NOW OUTPUT THE STRUCTURED JSON. Exactly %d entries.\n", expectedResultCount)
-	return builder.String()
-}
-
-func (s *GeminiBatchMatchService) fetchAllUserProfiles(ctx context.Context) ([]UserProfileData, error) {
-	sqlQuery := `
-		SELECT u.id, u.primary_email, COALESCE(up.bio_experience_text, ''), COALESCE(up.master_cv_text, ''), COALESCE(up.target_roles, '[]'),
-		       COALESCE(up.target_locations, '[]'), COALESCE(up.work_models->>0, ''), 0
-		FROM users u
-		LEFT JOIN user_preferences up ON u.id = up.user_id
-		WHERE u.ai_matching_enabled = true;
-	`
-	rows, errQuery := s.DB.Query(ctx, sqlQuery)
-	if errQuery != nil {
-		return nil, errQuery
-	}
-	defer rows.Close()
-
-	var profiles []UserProfileData
-	for rows.Next() {
-		var item UserProfileData
-		scanErr := rows.Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.MasterCVText, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears)
-		if scanErr == nil {
-			item.ExperienceYears = calculateTotalExperienceYears(item.MasterCVText)
-			profiles = append(profiles, item)
-		}
-	}
-	return profiles, nil
-}
-
-func (s *GeminiBatchMatchService) fetchSingleUserProfile(ctx context.Context, targetUserID string) (*UserProfileData, error) {
-	sqlQuery := `
-		SELECT u.id, u.primary_email, COALESCE(up.bio_experience_text, ''), COALESCE(up.master_cv_text, ''), COALESCE(up.target_roles, '[]'),
-		       COALESCE(up.target_locations, '[]'), COALESCE(up.work_models->>0, ''), 0
-		FROM users u
-		LEFT JOIN user_preferences up ON u.id = up.user_id
-		WHERE u.id = $1;
-	`
-	var item UserProfileData
-	scanErr := s.DB.QueryRow(ctx, sqlQuery, targetUserID).Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.MasterCVText, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears)
-	if scanErr != nil {
-		return nil, scanErr
-	}
-	item.ExperienceYears = calculateTotalExperienceYears(item.MasterCVText)
-	return &item, nil
-}
-
-func (s *GeminiBatchMatchService) fetchUnevaluatedJobs(ctx context.Context) ([]JobSnippetData, error) {
-	sqlQuery := `
-		SELECT j.id, j.title, COALESCE(c.name, ''), COALESCE(j.location, ''), COALESCE(j.raw_desc, '')
-		FROM jobs j
-		LEFT JOIN companies c ON j.company_id = c.id
-		WHERE j.ai_evaluated = false
-		  AND j.scraped_at >= NOW() - INTERVAL '14 days'
-		ORDER BY j.scraped_at DESC;
-	`
-	rows, errQuery := s.DB.Query(ctx, sqlQuery)
-	if errQuery != nil {
-		return nil, errQuery
-	}
-	defer rows.Close()
-
-	var snippets []JobSnippetData
-	for rows.Next() {
-		var snippet JobSnippetData
-		scanErr := rows.Scan(&snippet.JobID, &snippet.Title, &snippet.Company, &snippet.Location, &snippet.Description)
-		if scanErr == nil {
-			snippets = append(snippets, snippet)
-		}
-	}
-	return snippets, nil
-}
-
-func (s *GeminiBatchMatchService) fetchJobsUnmatchedForUser(ctx context.Context, targetUserID string) ([]JobSnippetData, error) {
-	sqlQuery := `
-		SELECT j.id, j.title, COALESCE(c.name, ''), COALESCE(j.location, ''), COALESCE(j.raw_desc, '')
-		FROM jobs j
-		LEFT JOIN companies c ON j.company_id = c.id
-		WHERE j.ai_evaluated = true
-		  AND j.scraped_at >= NOW() - INTERVAL '14 days'
-		  AND NOT EXISTS (
-			SELECT 1 FROM user_job_matches ujm
-			WHERE ujm.job_id = j.id AND ujm.user_id = $1
-		)
-		ORDER BY j.scraped_at DESC;
-	`
-	rows, errQuery := s.DB.Query(ctx, sqlQuery, targetUserID)
-	if errQuery != nil {
-		return nil, errQuery
-	}
-	defer rows.Close()
-
-	var snippets []JobSnippetData
-	for rows.Next() {
-		var snippet JobSnippetData
-		scanErr := rows.Scan(&snippet.JobID, &snippet.Title, &snippet.Company, &snippet.Location, &snippet.Description)
-		if scanErr == nil {
-			snippets = append(snippets, snippet)
-		}
-	}
-	return snippets, nil
-}
-
-func (s *GeminiBatchMatchService) upsertUserMatch(ctx context.Context, userID, jobID string, score int, reasoning string, isMatch bool, modelName string) error {
-	sqlQuery := `
-		INSERT INTO user_job_matches (user_id, job_id, match_score, match_reasoning, is_ai_matched, ai_model, evaluated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, NOW())
-		ON CONFLICT (user_id, job_id) DO UPDATE SET
-			match_score = EXCLUDED.match_score,
-			match_reasoning = EXCLUDED.match_reasoning,
-			is_ai_matched = EXCLUDED.is_ai_matched,
-			ai_model = EXCLUDED.ai_model,
-			evaluated_at = NOW();
-	`
-	_, errExec := s.DB.Exec(ctx, sqlQuery, userID, jobID, score, reasoning, isMatch, modelName)
-	return errExec
-}
-
-func (s *GeminiBatchMatchService) markJobsEvaluated(ctx context.Context, jobIDsMap map[string]bool) error {
-	if len(jobIDsMap) == 0 {
-		return nil
-	}
-
-	keysList := make([]string, 0, len(jobIDsMap))
-	for keyID := range jobIDsMap {
-		keysList = append(keysList, keyID)
-	}
-
-	sqlQuery := `
-		UPDATE jobs
-		SET ai_evaluated = true
-		WHERE id = ANY($1);
-	`
-	_, errExec := s.DB.Exec(ctx, sqlQuery, keysList)
-	return errExec
-}
-
 // GetNextModelNameForTest exposes getNextModelName for unit test verification.
 func (s *GeminiBatchMatchService) GetNextModelNameForTest() (string, error) {
 	return s.getNextModelName()
@@ -931,7 +685,7 @@ func (s *GeminiBatchMatchService) GetNextModelNameForTest() (string, error) {
 
 // BuildMultiJobTokenBatchesForTest exposes buildMultiJobTokenBatches for unit test verification.
 func (s *GeminiBatchMatchService) BuildMultiJobTokenBatchesForTest(ctx context.Context, allJobs []JobSnippetData, targetTokenBudget int) [][]JobSnippetData {
-	return s.buildMultiJobTokenBatches(ctx, allJobs, targetTokenBudget)
+	return buildMultiJobTokenBatches(ctx, allJobs, targetTokenBudget)
 }
 
 // GenerateBatchContentForTest exposes generateBatchContent for unit test verification.
@@ -951,5 +705,5 @@ func (s *GeminiBatchMatchService) ParseAndValidateBatchJSONForTest(rawJSON strin
 
 // ApplyExperienceAndLocationCapsForTest exposes applyExperienceAndLocationCaps for unit test verification.
 func (s *GeminiBatchMatchService) ApplyExperienceAndLocationCapsForTest(result *GeminiMatchResult, profile *UserProfileData) {
-	s.applyExperienceAndLocationCaps(result, profile)
+	applyExperienceAndLocationCaps(result, profile)
 }

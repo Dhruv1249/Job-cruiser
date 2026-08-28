@@ -36,21 +36,25 @@ const (
 	retryBackoffMaxSeconds          = 300
 	retryBackoffJitterFraction      = 0.55
 	maxOutputTokensPerBatch         = 90000
+	httpTimeoutDuration             = 10 * time.Minute
+	probeRetryDelaySeconds          = 60
+	maxProbeAttempts                = 3
 )
 
 // NvidiaNimService manages single-key AI job matching, CV parsing, and queue preemption for NVIDIA NIM API.
 type NvidiaNimService struct {
-	DB                  *pgxpool.Pool
-	APIKey              string
-	Endpoint            string
-	ModelName           string
-	HTTPClient          *http.Client
-	queueMutex          sync.RWMutex
-	isQueuePaused       bool
+	DB                           *pgxpool.Pool
+	APIKey                       string
+	Endpoint                     string
+	ModelName                    string
+	HTTPClient                   *http.Client
+	queueMutex                   sync.RWMutex
+	isQueuePaused                bool
 	isEvaluationInProgress       bool
 	isPipelinePermanentlyStopped bool
 	tokenBucket                  chan struct{}
 	consecutiveFailures          atomic.Int64
+	ProbeRetryDelayDuration      time.Duration
 }
 
 // UserProfileData contains parsed candidate background data for job matching prompts.
@@ -74,7 +78,8 @@ type JobSnippetData struct {
 	Description string `json:"description"`
 }
 
-type nvidiaMatchResult struct {
+// BatchMatchResultItem encapsulates an evaluated job match output for a specific candidate.
+type BatchMatchResultItem struct {
 	JobID               string `json:"job_id"`
 	UserID              string `json:"user_id"`
 	MatchScore          int    `json:"match_score"`
@@ -83,9 +88,13 @@ type nvidiaMatchResult struct {
 	IsMatched           bool   `json:"is_matched"`
 }
 
-type nvidiaBatchResponse struct {
-	Results []nvidiaMatchResult `json:"results"`
+// BatchMatchResponse defines the structured JSON array envelope emitted by AI matching engines.
+type BatchMatchResponse struct {
+	Results []BatchMatchResultItem `json:"results"`
 }
+
+type nvidiaMatchResult = BatchMatchResultItem
+type nvidiaBatchResponse = BatchMatchResponse
 
 type nvidiaRequestMessage struct {
 	Role    string `json:"role"`
@@ -105,8 +114,6 @@ type NvidiaNvExt struct {
 }
 
 // buildBatchJobMatchSchema returns a JSON schema for the batch job match evaluation output.
-// The expectedCount is the exact number of result objects the model must emit, enforced via
-// minItems and maxItems so the model cannot satisfy the schema with an empty or partial array.
 func buildBatchJobMatchSchema(expectedCount int) map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -262,7 +269,7 @@ type nvidiaStreamChunk struct {
 // NewNvidiaNimService initializes the single-key NVIDIA NIM service using provided environment values
 // and starts a background token-bucket goroutine that emits one token every (60/tokenBucketRatePerMinute)
 // seconds, enforcing the global outbound request rate across all concurrent workers.
-func NewNvidiaNimService(db *pgxpool.Pool, rawApiKey string) *NvidiaNimService {
+func NewNvidiaNimService(databasePool *pgxpool.Pool, rawApiKey string) *NvidiaNimService {
 	apiKey := strings.TrimSpace(rawApiKey)
 	if apiKey == "" {
 		apiKey = strings.TrimSpace(os.Getenv("NVIDIA_API_KEY"))
@@ -276,7 +283,7 @@ func NewNvidiaNimService(db *pgxpool.Pool, rawApiKey string) *NvidiaNimService {
 	tokenInterval := time.Duration(tokenIntervalSeconds * float64(time.Second))
 
 	service := &NvidiaNimService{
-		DB:          db,
+		DB:          databasePool,
 		APIKey:      apiKey,
 		Endpoint:    defaultNvidiaNimEndpoint,
 		ModelName:   modelName,
@@ -337,15 +344,20 @@ func (s *NvidiaNimService) SetPipelinePermanentlyStopped(stopped bool) {
 	s.isPipelinePermanentlyStopped = stopped
 }
 
-// FillTokenBucketForTest refills the rate limiter token bucket immediately for non-blocking unit tests.
+// FillTokenBucketForTest refills the rate limiter token bucket continuously for non-blocking unit tests.
 func (s *NvidiaNimService) FillTokenBucketForTest() {
-	select {
-	case s.tokenBucket <- struct{}{}:
-	default:
-	}
+	go func() {
+		for iteration := 0; iteration < 50; iteration++ {
+			select {
+			case s.tokenBucket <- struct{}{}:
+			default:
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
 }
 
-// StartBackgroundScheduler starts a 15-second ticker executing up to 5 concurrent worker goroutines.
+// StartBackgroundScheduler starts a 10-minute periodic background ticker executing pending job evaluations.
 func (s *NvidiaNimService) StartBackgroundScheduler(ctx context.Context) {
 	ticker := time.NewTicker(time.Duration(backgroundTickerIntervalSeconds) * time.Second)
 	log.Printf("[NvidiaNimService] Started %d-second background ticker scheduler.", backgroundTickerIntervalSeconds)
@@ -371,17 +383,22 @@ func (s *NvidiaNimService) StartBackgroundScheduler(ctx context.Context) {
 	}()
 }
 
-// EvaluatePendingForAllUsers fetches unevaluated jobs, packs them into multi-job token batches using exact token counts (up to 500k tokens), and dispatches a 5-goroutine worker pool.
+// EvaluatePendingForAllUsers fetches unevaluated jobs, packs them into multi-job token batches, and dispatches a worker pool.
 func (s *NvidiaNimService) EvaluatePendingForAllUsers(ctx context.Context) {
+	_ = s.EvaluatePendingForAllUsersWithResult(ctx)
+}
+
+// EvaluatePendingForAllUsersWithResult executes the worker pool and returns true if completed without circuit breaker abort.
+func (s *NvidiaNimService) EvaluatePendingForAllUsersWithResult(ctx context.Context) bool {
 	s.queueMutex.Lock()
 	if s.isPipelinePermanentlyStopped {
 		s.queueMutex.Unlock()
 		log.Println("[NvidiaNimService] Pipeline is permanently shut down. Skipping evaluation.")
-		return
+		return false
 	}
 	if s.isEvaluationInProgress {
 		s.queueMutex.Unlock()
-		return
+		return true
 	}
 	s.isEvaluationInProgress = true
 	s.queueMutex.Unlock()
@@ -392,34 +409,22 @@ func (s *NvidiaNimService) EvaluatePendingForAllUsers(ctx context.Context) {
 		s.queueMutex.Unlock()
 	}()
 
-	userProfiles, errProfiles := s.fetchAllUserProfiles(ctx)
-	if errProfiles != nil {
-		log.Printf("[NvidiaNimService] Failed to fetch user profiles: %v", errProfiles)
-		return
-	}
-	if len(userProfiles) == 0 {
-		log.Println("[NvidiaNimService] No active user profiles found in database to evaluate against.")
-		return
+	userProfiles, errProfiles := fetchAllActiveUserProfiles(ctx, s.DB)
+	if errProfiles != nil || len(userProfiles) == 0 {
+		return true
 	}
 
-	pendingJobs, errJobs := s.fetchUnevaluatedJobs(ctx)
-	if errJobs != nil {
-		log.Printf("[NvidiaNimService] Failed to fetch unevaluated jobs: %v", errJobs)
-		return
+	pendingJobs, errJobs := fetchRecentUnevaluatedJobs(ctx, s.DB)
+	if errJobs != nil || len(pendingJobs) == 0 {
+		return true
 	}
-	if len(pendingJobs) == 0 {
-		log.Println("[NvidiaNimService] Zero unevaluated jobs found in database.")
-		return
+
+	jobBatches := buildMultiJobTokenBatches(ctx, pendingJobs, maxTargetTokensPerPrompt)
+	if len(jobBatches) == 0 {
+		return true
 	}
 
 	log.Printf("[NvidiaNimService] Starting evaluation pass for %d active users across %d pending jobs...", len(userProfiles), len(pendingJobs))
-
-	jobBatches := s.buildMultiJobTokenBatches(ctx, pendingJobs, maxTargetTokensPerPrompt)
-	if len(jobBatches) == 0 {
-		log.Println("[NvidiaNimService] No valid batches created from pending jobs.")
-		return
-	}
-
 	log.Printf("[NvidiaNimService] Dispatching continuous pipeline: %d max concurrent workers across %d total batches...", backgroundWorkerBatchSize, len(jobBatches))
 
 	workerCtx, cancelWorkers := context.WithCancel(ctx)
@@ -468,7 +473,7 @@ func (s *NvidiaNimService) EvaluatePendingForAllUsers(ctx context.Context) {
 				for _, item := range batch {
 					batchJobIDs[item.JobID] = true
 				}
-				_ = s.markJobsEvaluated(ctx, batchJobIDs)
+				_ = markJobsAsEvaluatedInDatabase(ctx, s.DB, batchJobIDs)
 			}
 		}(singleBatch, workerID)
 	}
@@ -476,104 +481,12 @@ func (s *NvidiaNimService) EvaluatePendingForAllUsers(ctx context.Context) {
 	workerWaitGroup.Wait()
 
 	if len(evaluatedJobIDs) > 0 {
-		markErr := s.markJobsEvaluated(ctx, evaluatedJobIDs)
+		markErr := markJobsAsEvaluatedInDatabase(ctx, s.DB, evaluatedJobIDs)
 		if markErr != nil {
 			log.Printf("[NvidiaNimService] Failed marking jobs as evaluated: %v", markErr)
 		} else {
 			log.Printf("[NvidiaNimService] Pass complete: Marked %d jobs as evaluated in database.", len(evaluatedJobIDs))
 		}
-	}
-}
-
-// EvaluatePendingForAllUsersWithResult executes the worker pool and returns true if completed without circuit breaker abort.
-func (s *NvidiaNimService) EvaluatePendingForAllUsersWithResult(ctx context.Context) bool {
-	s.queueMutex.Lock()
-	if s.isPipelinePermanentlyStopped {
-		s.queueMutex.Unlock()
-		log.Println("[NvidiaNimService] Pipeline is permanently shut down. Skipping evaluation.")
-		return false
-	}
-	if s.isEvaluationInProgress {
-		s.queueMutex.Unlock()
-		return true
-	}
-	s.isEvaluationInProgress = true
-	s.queueMutex.Unlock()
-
-	defer func() {
-		s.queueMutex.Lock()
-		s.isEvaluationInProgress = false
-		s.queueMutex.Unlock()
-	}()
-
-	userProfiles, errProfiles := s.fetchAllUserProfiles(ctx)
-	if errProfiles != nil || len(userProfiles) == 0 {
-		return true
-	}
-
-	pendingJobs, errJobs := s.fetchUnevaluatedJobs(ctx)
-	if errJobs != nil || len(pendingJobs) == 0 {
-		return true
-	}
-
-	jobBatches := s.buildMultiJobTokenBatches(ctx, pendingJobs, maxTargetTokensPerPrompt)
-	if len(jobBatches) == 0 {
-		return true
-	}
-
-	workerCtx, cancelWorkers := context.WithCancel(ctx)
-	defer cancelWorkers()
-
-	var hasCircuitBroken atomic.Bool
-	evaluatedJobIDs := make(map[string]bool)
-	var syncMutex sync.Mutex
-	var workerWaitGroup sync.WaitGroup
-
-	workerPool := make(chan int, backgroundWorkerBatchSize)
-	for i := 1; i <= backgroundWorkerBatchSize; i++ {
-		workerPool <- i
-	}
-
-	for _, singleBatch := range jobBatches {
-		if workerCtx.Err() != nil || hasCircuitBroken.Load() {
-			break
-		}
-
-		workerID := <-workerPool
-		workerWaitGroup.Add(1)
-
-		go func(batch []JobSnippetData, id int) {
-			defer workerWaitGroup.Done()
-			defer func() { workerPool <- id }()
-
-			if workerCtx.Err() != nil || hasCircuitBroken.Load() {
-				return
-			}
-
-			success := s.evaluateJobBatchWithBackoff(workerCtx, userProfiles, batch, evaluatedJobIDs, &syncMutex, id)
-			if !success {
-				failureCount := s.consecutiveFailures.Add(1)
-				log.Printf("[NvidiaNimWorker-%d] Batch failed. Consecutive failure count across all workers: %d/4", id, failureCount)
-				if failureCount >= 4 {
-					log.Println("[NvidiaNimService] 4 continuous worker errors reached. Circuit breaker triggered.")
-					hasCircuitBroken.Store(true)
-					cancelWorkers()
-				}
-			} else {
-				s.consecutiveFailures.Store(0)
-				batchJobIDs := make(map[string]bool)
-				for _, item := range batch {
-					batchJobIDs[item.JobID] = true
-				}
-				_ = s.markJobsEvaluated(ctx, batchJobIDs)
-			}
-		}(singleBatch, workerID)
-	}
-
-	workerWaitGroup.Wait()
-
-	if len(evaluatedJobIDs) > 0 {
-		_ = s.markJobsEvaluated(ctx, evaluatedJobIDs)
 	}
 
 	return !hasCircuitBroken.Load()
@@ -594,17 +507,17 @@ func (s *NvidiaNimService) EvaluateForSingleUserWithResult(ctx context.Context, 
 	}
 	s.queueMutex.RUnlock()
 
-	profile, errProfile := s.fetchSingleUserProfile(ctx, targetUserID)
+	profile, errProfile := fetchSingleUserProfileByID(ctx, s.DB, targetUserID)
 	if errProfile != nil || profile == nil {
 		return true
 	}
 
-	unmatchedJobs, errJobs := s.fetchJobsUnmatchedForUser(ctx, targetUserID)
+	unmatchedJobs, errJobs := fetchUnmatchedJobsForSingleUser(ctx, s.DB, targetUserID)
 	if errJobs != nil || len(unmatchedJobs) == 0 {
 		return true
 	}
 
-	jobBatches := s.buildMultiJobTokenBatches(ctx, unmatchedJobs, maxTargetTokensPerPrompt)
+	jobBatches := buildMultiJobTokenBatches(ctx, unmatchedJobs, maxTargetTokensPerPrompt)
 	evaluatedJobIDs := make(map[string]bool)
 	var syncMutex sync.Mutex
 	var workerWaitGroup sync.WaitGroup
@@ -647,6 +560,146 @@ func (s *NvidiaNimService) EvaluateForSingleUserWithResult(ctx context.Context, 
 
 	workerWaitGroup.Wait()
 	return !hasCircuitBroken.Load()
+}
+
+// ProbeHealth verifies that NVIDIA NIM is reachable and generating valid output with a lightweight test prompt.
+func (s *NvidiaNimService) ProbeHealth(ctx context.Context) bool {
+	if s.IsPipelinePermanentlyStopped() || s.APIKey == "" {
+		return false
+	}
+
+	probePayload := nvidiaRequest{
+		Model: s.ModelName,
+		Messages: []nvidiaRequestMessage{
+			{
+				Role:    "system",
+				Content: "You are a JSON-only ping responder. Return ONLY valid JSON: {\"status\":\"ok\"}",
+			},
+			{
+				Role:    "user",
+				Content: "Respond with {\"status\":\"ok\"}",
+			},
+		},
+		Temperature: 0.1,
+		TopP:        0.95,
+		MaxTokens:   50,
+		Stream:      false,
+		ChatTemplateKwargs: &nvidiaChatTemplateKwargs{
+			ThinkingMode: "disabled",
+		},
+	}
+
+	for attempt := 1; attempt <= maxProbeAttempts; attempt++ {
+		select {
+		case <-s.tokenBucket:
+		case <-ctx.Done():
+			return false
+		}
+
+		log.Printf("[NvidiaNimProbe] Probing NVIDIA NIM health (Model: %s, Attempt %d/%d)...",
+			s.ModelName, attempt, maxProbeAttempts)
+		requestStart := time.Now()
+
+		jsonBytes, errMarshal := json.Marshal(probePayload)
+		if errMarshal != nil {
+			log.Printf("[NvidiaNimProbe] Failed marshaling probe payload: %v", errMarshal)
+			return false
+		}
+
+		probeCtx, cancelProbe := context.WithTimeout(ctx, httpTimeoutDuration)
+		httpRequest, errReq := http.NewRequestWithContext(probeCtx, http.MethodPost, s.Endpoint, bytes.NewBuffer(jsonBytes))
+		if errReq != nil {
+			cancelProbe()
+			log.Printf("[NvidiaNimProbe] Failed creating HTTP probe request: %v", errReq)
+			return false
+		}
+
+		httpRequest.Header.Set("Content-Type", "application/json")
+		httpRequest.Header.Set("Accept", "application/json")
+		httpRequest.Header.Set("Authorization", "Bearer "+s.APIKey)
+
+		httpResponse, errDo := s.HTTPClient.Do(httpRequest)
+		if errDo != nil {
+			cancelProbe()
+			log.Printf("[NvidiaNimProbe] Probe network error after %v (Attempt %d/%d): %v",
+				time.Since(requestStart).Truncate(time.Millisecond), attempt, maxProbeAttempts, errDo)
+			if attempt < maxProbeAttempts {
+				log.Printf("[NvidiaNimProbe] Retrying probe in %d seconds (fixed 1m retry)...", probeRetryDelaySeconds)
+				select {
+				case <-time.After(time.Duration(probeRetryDelaySeconds) * time.Second):
+				case <-ctx.Done():
+					return false
+				}
+			}
+			continue
+		}
+
+		bodyBytes, errRead := io.ReadAll(httpResponse.Body)
+		httpResponse.Body.Close()
+		cancelProbe()
+
+		if httpResponse.StatusCode == http.StatusUnauthorized || httpResponse.StatusCode == http.StatusForbidden {
+			log.Printf("[NvidiaNimProbe] Probe returned unrecoverable HTTP %d after %v (Attempt %d/%d): %s. Failing probe.",
+				httpResponse.StatusCode, time.Since(requestStart).Truncate(time.Millisecond), attempt, maxProbeAttempts, string(bodyBytes))
+			return false
+		}
+
+		if errRead != nil || httpResponse.StatusCode != http.StatusOK {
+			log.Printf("[NvidiaNimProbe] Probe returned HTTP %d after %v (Attempt %d/%d): %s",
+				httpResponse.StatusCode, time.Since(requestStart).Truncate(time.Millisecond), attempt, maxProbeAttempts, string(bodyBytes))
+			if attempt < maxProbeAttempts {
+				delay := s.ProbeRetryDelayDuration
+				if delay <= 0 {
+					delay = time.Duration(probeRetryDelaySeconds) * time.Second
+				}
+				log.Printf("[NvidiaNimProbe] Retrying probe in %v (fixed 1m retry)...", delay)
+				select {
+				case <-time.After(delay):
+				case <-ctx.Done():
+					return false
+				}
+			}
+			continue
+		}
+
+		var parsedResponse nvidiaAPIResponse
+		if errUnmarshal := json.Unmarshal(bodyBytes, &parsedResponse); errUnmarshal == nil && len(parsedResponse.Choices) > 0 {
+			cleanText := strings.ToLower(sanitizeJSONResponse(parsedResponse.Choices[0].Message.Content))
+			if strings.Contains(cleanText, "ok") || strings.Contains(cleanText, "status") {
+				log.Printf("[NvidiaNimProbe] NVIDIA NIM health probe succeeded in %v.", time.Since(requestStart).Truncate(time.Millisecond))
+				return true
+			}
+		}
+
+		bodyText := strings.ToLower(sanitizeJSONResponse(string(bodyBytes)))
+		if strings.Contains(bodyText, "ok") || strings.Contains(bodyText, "status") || strings.Contains(bodyText, "results") {
+			log.Printf("[NvidiaNimProbe] NVIDIA NIM health probe succeeded in %v.", time.Since(requestStart).Truncate(time.Millisecond))
+			return true
+		}
+
+		log.Printf("[NvidiaNimProbe] Unexpected probe response content (Attempt %d/%d): %s",
+			attempt, maxProbeAttempts, string(bodyBytes))
+		if attempt < maxProbeAttempts {
+			delay := s.ProbeRetryDelayDuration
+			if delay <= 0 {
+				delay = time.Duration(probeRetryDelaySeconds) * time.Second
+			}
+			log.Printf("[NvidiaNimProbe] Retrying probe in %v (fixed 1m retry)...", delay)
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return false
+			}
+		}
+	}
+
+	log.Printf("[NvidiaNimProbe] Health probe failed after %d attempts.", maxProbeAttempts)
+	return false
+}
+
+// EvaluatePilotBatch tests NVIDIA NIM availability using the fast health probe.
+func (s *NvidiaNimService) EvaluatePilotBatch(ctx context.Context, userProfiles []UserProfileData, pilotBatch []JobSnippetData) bool {
+	return s.ProbeHealth(ctx)
 }
 
 // GenerateCompletion executes a synchronous API request for CV parsing or Overleaf interactive tasks.
@@ -725,12 +778,12 @@ func (s *NvidiaNimService) CountTokens(ctx context.Context, text string) (int, e
 
 	jsonBytes, errMarshal := json.Marshal(payload)
 	if errMarshal != nil {
-		return s.calculateExactSubwordTokens(text), nil
+		return calculateExactSubwordTokens(text), nil
 	}
 
 	httpRequest, errReq := http.NewRequestWithContext(ctx, http.MethodPost, tokenizeEndpoint, bytes.NewBuffer(jsonBytes))
 	if errReq != nil {
-		return s.calculateExactSubwordTokens(text), nil
+		return calculateExactSubwordTokens(text), nil
 	}
 
 	httpRequest.Header.Set("Content-Type", "application/json")
@@ -741,17 +794,17 @@ func (s *NvidiaNimService) CountTokens(ctx context.Context, text string) (int, e
 
 	httpResponse, errDo := s.HTTPClient.Do(httpRequest)
 	if errDo != nil {
-		return s.calculateExactSubwordTokens(text), nil
+		return calculateExactSubwordTokens(text), nil
 	}
 	defer httpResponse.Body.Close()
 
 	if httpResponse.StatusCode != http.StatusOK {
-		return s.calculateExactSubwordTokens(text), nil
+		return calculateExactSubwordTokens(text), nil
 	}
 
 	bodyBytes, errRead := io.ReadAll(httpResponse.Body)
 	if errRead != nil {
-		return s.calculateExactSubwordTokens(text), nil
+		return calculateExactSubwordTokens(text), nil
 	}
 
 	var parsedResp nvidiaTokenizeResponse
@@ -764,10 +817,10 @@ func (s *NvidiaNimService) CountTokens(ctx context.Context, text string) (int, e
 		}
 	}
 
-	return s.calculateExactSubwordTokens(text), nil
+	return calculateExactSubwordTokens(text), nil
 }
 
-func (s *NvidiaNimService) calculateExactSubwordTokens(text string) int {
+func calculateExactSubwordTokens(text string) int {
 	words := strings.Fields(text)
 	totalTokens := 0
 	for _, word := range words {
@@ -780,7 +833,7 @@ func (s *NvidiaNimService) calculateExactSubwordTokens(text string) int {
 	return totalTokens
 }
 
-func (s *NvidiaNimService) buildMultiJobTokenBatches(ctx context.Context, allJobs []JobSnippetData, targetTokenBudget int) [][]JobSnippetData {
+func buildMultiJobTokenBatches(ctx context.Context, allJobs []JobSnippetData, targetTokenBudget int) [][]JobSnippetData {
 	var resultBatches [][]JobSnippetData
 	var currentBatch []JobSnippetData
 	currentTokens := 0
@@ -789,7 +842,7 @@ func (s *NvidiaNimService) buildMultiJobTokenBatches(ctx context.Context, allJob
 		snippetText := fmt.Sprintf("ID: %s\nTitle: %s\nCompany: %s\nLocation: %s\nDescription: %s\n",
 			job.JobID, job.Title, job.Company, job.Location, truncateTextString(job.Description, maxJobDescriptionLength))
 
-		itemTokens := s.calculateExactSubwordTokens(snippetText)
+		itemTokens := calculateExactSubwordTokens(snippetText)
 
 		tokenBudgetExceeded := len(currentBatch) > 0 && currentTokens+itemTokens > targetTokenBudget
 		jobCountExceeded := len(currentBatch) >= maxJobsPerBatch
@@ -847,26 +900,11 @@ func (s *NvidiaNimService) evaluateJobBatchWithBackoff(
 		}
 
 		if matchedProfile != nil {
-			candidateYears := matchedProfile.ExperienceYears
-			jobMinimumYears := res.InferredRequiredYoE
-
-			if jobMinimumYears > 0 {
-				if jobMinimumYears > (candidateYears + 2) {
-					if res.MatchScore > 25 {
-						res.MatchScore = 25
-						res.MatchReasoning = fmt.Sprintf("[Experience Gap Cap] Job requires %d+ YoE (AI inferred), but candidate has %d YoE. Tech stack fit originally scored %d%%. %s", jobMinimumYears, candidateYears, res.MatchScore, res.MatchReasoning)
-					}
-				} else if jobMinimumYears > candidateYears {
-					if res.MatchScore > 45 {
-						res.MatchScore = 45
-						res.MatchReasoning = fmt.Sprintf("[Stretch Role Cap] Job requires %d+ YoE (AI inferred), but candidate has %d YoE. Tech stack fit originally scored %d%%. %s", jobMinimumYears, candidateYears, res.MatchScore, res.MatchReasoning)
-					}
-				}
-			}
+			applyExperienceAndLocationCaps(&res, matchedProfile)
 		}
 
 		isMatch := res.MatchScore >= matchScoreMinThreshold
-		upsertErr := s.upsertUserMatch(ctx, res.UserID, res.JobID, res.MatchScore, res.MatchReasoning, isMatch)
+		upsertErr := upsertUserJobMatchRecord(ctx, s.DB, res.UserID, res.JobID, res.MatchScore, res.MatchReasoning, isMatch, s.ModelName)
 		if upsertErr != nil {
 			log.Printf("[Worker-%d] Upsert error for user %s job %s: %v", workerID, res.UserID, res.JobID, upsertErr)
 		}
@@ -887,7 +925,7 @@ func (s *NvidiaNimService) callBatchEvaluationAPI(
 	expectedResultCount int,
 	workerID int,
 ) (nvidiaBatchResponse, string, string, bool) {
-	promptText := s.buildMultiJobPrompt(userProfiles, batch, expectedResultCount)
+	promptText := buildMultiJobPrompt(userProfiles, batch, expectedResultCount)
 	messages := []nvidiaRequestMessage{
 		{
 			Role: "system",
@@ -1144,11 +1182,8 @@ func capBackoff(duration time.Duration) time.Duration {
 	return duration
 }
 
-// buildMultiJobPrompt constructs the evaluation prompt for a batch of jobs against a set of
-// user profiles. expectedResultCount is injected explicitly so the model knows the exact number
-// of entries it must emit in the results array, acting as a belt-and-suspenders guard alongside
-// the minItems/maxItems constraint in the guided_json schema.
-func (s *NvidiaNimService) buildMultiJobPrompt(userProfiles []UserProfileData, jobsBatch []JobSnippetData, expectedResultCount int) string {
+// buildMultiJobPrompt constructs the evaluation prompt for a batch of jobs against a set of user profiles.
+func buildMultiJobPrompt(userProfiles []UserProfileData, jobsBatch []JobSnippetData, expectedResultCount int) string {
 	var builder strings.Builder
 
 	currentTimeText := time.Now().Format("January 2006")
@@ -1189,27 +1224,28 @@ func (s *NvidiaNimService) buildMultiJobPrompt(userProfiles []UserProfileData, j
 	return builder.String()
 }
 
-// EvaluatePilotBatch evaluates a small pilot batch of jobs to verify NVIDIA NIM health before full dispatch.
-func (s *NvidiaNimService) EvaluatePilotBatch(ctx context.Context, userProfiles []UserProfileData, pilotBatch []JobSnippetData) bool {
-	if s.IsPipelinePermanentlyStopped() || s.APIKey == "" || len(pilotBatch) == 0 || len(userProfiles) == 0 {
-		return false
-	}
-	evaluatedJobIDs := make(map[string]bool)
-	var syncMutex sync.Mutex
-	success := s.evaluateJobBatchWithBackoff(ctx, userProfiles, pilotBatch, evaluatedJobIDs, &syncMutex, 1)
-	if success && len(evaluatedJobIDs) > 0 {
-		_ = s.markJobsEvaluated(ctx, evaluatedJobIDs)
-	}
-	return success
-}
-
 // FetchAllUserProfiles retrieves all users with AI matching enabled.
 func (s *NvidiaNimService) FetchAllUserProfiles(ctx context.Context) ([]UserProfileData, error) {
-	return s.fetchAllUserProfiles(ctx)
+	return fetchAllActiveUserProfiles(ctx, s.DB)
 }
 
-func (s *NvidiaNimService) fetchAllUserProfiles(ctx context.Context) ([]UserProfileData, error) {
-	if s.DB == nil {
+// FetchSingleUserProfile retrieves candidate background data for a specific user ID.
+func (s *NvidiaNimService) FetchSingleUserProfile(ctx context.Context, targetUserID string) (*UserProfileData, error) {
+	return fetchSingleUserProfileByID(ctx, s.DB, targetUserID)
+}
+
+// FetchUnevaluatedJobs retrieves recent unevaluated job listings from the database.
+func (s *NvidiaNimService) FetchUnevaluatedJobs(ctx context.Context) ([]JobSnippetData, error) {
+	return fetchRecentUnevaluatedJobs(ctx, s.DB)
+}
+
+// FetchJobsUnmatchedForUser retrieves unevaluated jobs specific to a given user.
+func (s *NvidiaNimService) FetchJobsUnmatchedForUser(ctx context.Context, targetUserID string) ([]JobSnippetData, error) {
+	return fetchUnmatchedJobsForSingleUser(ctx, s.DB, targetUserID)
+}
+
+func fetchAllActiveUserProfiles(ctx context.Context, databasePool *pgxpool.Pool) ([]UserProfileData, error) {
+	if databasePool == nil {
 		return nil, fmt.Errorf("database pool is not initialized")
 	}
 	sqlQuery := `
@@ -1219,7 +1255,7 @@ func (s *NvidiaNimService) fetchAllUserProfiles(ctx context.Context) ([]UserProf
 		LEFT JOIN user_preferences up ON u.id = up.user_id
 		WHERE u.ai_matching_enabled = true;
 	`
-	rows, errQuery := s.DB.Query(ctx, sqlQuery)
+	rows, errQuery := databasePool.Query(ctx, sqlQuery)
 	if errQuery != nil {
 		return nil, errQuery
 	}
@@ -1237,13 +1273,8 @@ func (s *NvidiaNimService) fetchAllUserProfiles(ctx context.Context) ([]UserProf
 	return profiles, nil
 }
 
-// FetchSingleUserProfile retrieves candidate background data for a specific user ID.
-func (s *NvidiaNimService) FetchSingleUserProfile(ctx context.Context, targetUserID string) (*UserProfileData, error) {
-	return s.fetchSingleUserProfile(ctx, targetUserID)
-}
-
-func (s *NvidiaNimService) fetchSingleUserProfile(ctx context.Context, targetUserID string) (*UserProfileData, error) {
-	if s.DB == nil {
+func fetchSingleUserProfileByID(ctx context.Context, databasePool *pgxpool.Pool, targetUserID string) (*UserProfileData, error) {
+	if databasePool == nil {
 		return nil, fmt.Errorf("database pool is not initialized")
 	}
 	sqlQuery := `
@@ -1254,7 +1285,7 @@ func (s *NvidiaNimService) fetchSingleUserProfile(ctx context.Context, targetUse
 		WHERE u.id = $1;
 	`
 	var item UserProfileData
-	scanErr := s.DB.QueryRow(ctx, sqlQuery, targetUserID).Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.MasterCVText, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears)
+	scanErr := databasePool.QueryRow(ctx, sqlQuery, targetUserID).Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.MasterCVText, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears)
 	if scanErr != nil {
 		return nil, scanErr
 	}
@@ -1262,13 +1293,8 @@ func (s *NvidiaNimService) fetchSingleUserProfile(ctx context.Context, targetUse
 	return &item, nil
 }
 
-// FetchUnevaluatedJobs retrieves recent unevaluated job listings from the database.
-func (s *NvidiaNimService) FetchUnevaluatedJobs(ctx context.Context) ([]JobSnippetData, error) {
-	return s.fetchUnevaluatedJobs(ctx)
-}
-
-func (s *NvidiaNimService) fetchUnevaluatedJobs(ctx context.Context) ([]JobSnippetData, error) {
-	if s.DB == nil {
+func fetchRecentUnevaluatedJobs(ctx context.Context, databasePool *pgxpool.Pool) ([]JobSnippetData, error) {
+	if databasePool == nil {
 		return nil, fmt.Errorf("database pool is not initialized")
 	}
 	sqlQuery := `
@@ -1279,7 +1305,7 @@ func (s *NvidiaNimService) fetchUnevaluatedJobs(ctx context.Context) ([]JobSnipp
 		  AND j.scraped_at >= NOW() - INTERVAL '14 days'
 		ORDER BY j.scraped_at DESC;
 	`
-	rows, errQuery := s.DB.Query(ctx, sqlQuery)
+	rows, errQuery := databasePool.Query(ctx, sqlQuery)
 	if errQuery != nil {
 		return nil, errQuery
 	}
@@ -1296,13 +1322,8 @@ func (s *NvidiaNimService) fetchUnevaluatedJobs(ctx context.Context) ([]JobSnipp
 	return snippets, nil
 }
 
-// FetchJobsUnmatchedForUser retrieves unevaluated jobs specific to a given user.
-func (s *NvidiaNimService) FetchJobsUnmatchedForUser(ctx context.Context, targetUserID string) ([]JobSnippetData, error) {
-	return s.fetchJobsUnmatchedForUser(ctx, targetUserID)
-}
-
-func (s *NvidiaNimService) fetchJobsUnmatchedForUser(ctx context.Context, targetUserID string) ([]JobSnippetData, error) {
-	if s.DB == nil {
+func fetchUnmatchedJobsForSingleUser(ctx context.Context, databasePool *pgxpool.Pool, targetUserID string) ([]JobSnippetData, error) {
+	if databasePool == nil {
 		return nil, fmt.Errorf("database pool is not initialized")
 	}
 	sqlQuery := `
@@ -1317,7 +1338,7 @@ func (s *NvidiaNimService) fetchJobsUnmatchedForUser(ctx context.Context, target
 		)
 		ORDER BY j.scraped_at DESC;
 	`
-	rows, errQuery := s.DB.Query(ctx, sqlQuery, targetUserID)
+	rows, errQuery := databasePool.Query(ctx, sqlQuery, targetUserID)
 	if errQuery != nil {
 		return nil, errQuery
 	}
@@ -1334,26 +1355,8 @@ func (s *NvidiaNimService) fetchJobsUnmatchedForUser(ctx context.Context, target
 	return snippets, nil
 }
 
-func (s *NvidiaNimService) upsertUserMatch(ctx context.Context, userID, jobID string, score int, reasoning string, isMatch bool) error {
-	if s.DB == nil {
-		return nil
-	}
-	sqlQuery := `
-		INSERT INTO user_job_matches (user_id, job_id, match_score, match_reasoning, is_ai_matched, ai_model, evaluated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, NOW())
-		ON CONFLICT (user_id, job_id) DO UPDATE SET
-			match_score = EXCLUDED.match_score,
-			match_reasoning = EXCLUDED.match_reasoning,
-			is_ai_matched = EXCLUDED.is_ai_matched,
-			ai_model = EXCLUDED.ai_model,
-			evaluated_at = NOW();
-	`
-	_, errExec := s.DB.Exec(ctx, sqlQuery, userID, jobID, score, reasoning, isMatch, s.ModelName)
-	return errExec
-}
-
-func (s *NvidiaNimService) markJobsEvaluated(ctx context.Context, jobIDsMap map[string]bool) error {
-	if s.DB == nil || len(jobIDsMap) == 0 {
+func markJobsAsEvaluatedInDatabase(ctx context.Context, databasePool *pgxpool.Pool, jobIDsMap map[string]bool) error {
+	if databasePool == nil || len(jobIDsMap) == 0 {
 		return nil
 	}
 
@@ -1367,7 +1370,25 @@ func (s *NvidiaNimService) markJobsEvaluated(ctx context.Context, jobIDsMap map[
 		SET ai_evaluated = true
 		WHERE id = ANY($1);
 	`
-	_, errExec := s.DB.Exec(ctx, sqlQuery, keysList)
+	_, errExec := databasePool.Exec(ctx, sqlQuery, keysList)
+	return errExec
+}
+
+func upsertUserJobMatchRecord(ctx context.Context, databasePool *pgxpool.Pool, userID, jobID string, score int, reasoning string, isMatch bool, modelName string) error {
+	if databasePool == nil {
+		return nil
+	}
+	sqlQuery := `
+		INSERT INTO user_job_matches (user_id, job_id, match_score, match_reasoning, is_ai_matched, ai_model, evaluated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW())
+		ON CONFLICT (user_id, job_id) DO UPDATE SET
+			match_score = EXCLUDED.match_score,
+			match_reasoning = EXCLUDED.match_reasoning,
+			is_ai_matched = EXCLUDED.is_ai_matched,
+			ai_model = EXCLUDED.ai_model,
+			evaluated_at = NOW();
+	`
+	_, errExec := databasePool.Exec(ctx, sqlQuery, userID, jobID, score, reasoning, isMatch, modelName)
 	return errExec
 }
 
@@ -1537,6 +1558,30 @@ func parseDateString(dateStr string) time.Time {
 		return time.Time{}
 	}
 	return time.Date(yearVal, time.Month(monthVal), 1, 0, 0, 0, 0, time.UTC)
+}
+
+func applyExperienceAndLocationCaps(result *BatchMatchResultItem, profile *UserProfileData) {
+	if profile == nil {
+		return
+	}
+	candidateYears := profile.ExperienceYears
+	jobMinimumYears := result.InferredRequiredYoE
+
+	if jobMinimumYears > 0 {
+		if jobMinimumYears > (candidateYears + 2) {
+			if result.MatchScore > 25 {
+				result.MatchScore = 25
+				result.MatchReasoning = fmt.Sprintf("[Experience Gap Cap] Job requires %d+ YoE, candidate has %d YoE. Tech fit scored %d%%. %s",
+					jobMinimumYears, candidateYears, result.MatchScore, result.MatchReasoning)
+			}
+		} else if jobMinimumYears > candidateYears {
+			if result.MatchScore > 45 {
+				result.MatchScore = 45
+				result.MatchReasoning = fmt.Sprintf("[Stretch Role Cap] Job requires %d+ YoE, candidate has %d YoE. Tech fit scored %d%%. %s",
+					jobMinimumYears, candidateYears, result.MatchScore, result.MatchReasoning)
+			}
+		}
+	}
 }
 
 func CalculateTotalExperienceYearsForTest(cvText string) int {

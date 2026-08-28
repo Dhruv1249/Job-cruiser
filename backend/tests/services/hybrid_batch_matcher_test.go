@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Dhruv1249/Job-cruiser/backend/services"
 )
@@ -28,7 +29,16 @@ func TestHybridBatchMatchServiceFallbackToGemini(t *testing.T) {
 func TestHybridBatchMatchServiceAutomaticPilotProbingFallback(t *testing.T) {
 	t.Setenv("PRIMARY_AI_PROVIDER", "nvidia_nim")
 
+	mockServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.Error(writer, "Internal Server Error", http.StatusInternalServerError)
+	}))
+	defer mockServer.Close()
+
 	nvidiaService := services.NewNvidiaNimService(nil, "test-nvidia-key")
+	nvidiaService.Endpoint = mockServer.URL
+	nvidiaService.ProbeRetryDelayDuration = time.Millisecond
+	nvidiaService.FillTokenBucketForTest()
+
 	geminiService := services.NewGeminiBatchMatchService(nil, "test-gemini-key")
 	hybridService := services.NewHybridBatchMatchService(nvidiaService, geminiService)
 
@@ -47,6 +57,23 @@ func TestHybridBatchMatchServicePrimaryProviderGemini(t *testing.T) {
 	hybridService.EvaluateForSingleUser(context.Background(), "user-123")
 }
 
+func TestNvidiaNimServiceProbeHealthSuccess(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"choices":[{"message":{"content":"{\"status\":\"ok\"}"}}]}`))
+	}))
+	defer mockServer.Close()
+
+	nvidiaService := services.NewNvidiaNimService(nil, "test-api-key")
+	nvidiaService.Endpoint = mockServer.URL
+	nvidiaService.FillTokenBucketForTest()
+
+	probeSuccess := nvidiaService.ProbeHealth(context.Background())
+	if !probeSuccess {
+		t.Fatalf("expected ProbeHealth to succeed")
+	}
+}
+
 func TestNvidiaNimServiceSharedCircuitBreakerFourErrors(t *testing.T) {
 	var requestCount atomic.Int64
 
@@ -63,6 +90,7 @@ func TestNvidiaNimServiceSharedCircuitBreakerFourErrors(t *testing.T) {
 
 	nvidiaService := services.NewNvidiaNimService(nil, "test-api-key")
 	nvidiaService.Endpoint = mockServer.URL
+	nvidiaService.ProbeRetryDelayDuration = time.Millisecond
 
 	userProfiles := []services.UserProfileData{
 		{UserID: "11111111-1111-1111-1111-111111111111", Email: "test@example.com"},
@@ -99,7 +127,6 @@ func TestHybridBatchMatchServicePipelineShutdownDisablesNim(t *testing.T) {
 	geminiService := services.NewGeminiBatchMatchService(nil, "test-gemini-key")
 	hybridService := services.NewHybridBatchMatchService(nvidiaService, geminiService)
 
-	// Simulate 5 errors on gemini model to trigger pipeline shutdown
 	for i := 0; i < 5; i++ {
 		geminiService.RecordModelFailureForTest(context.Background(), "test-model-1", "mock quota error")
 	}
@@ -112,7 +139,6 @@ func TestHybridBatchMatchServicePipelineShutdownDisablesNim(t *testing.T) {
 		t.Fatalf("expected nvidia NIM engine to also be permanently stopped via shutdown hook")
 	}
 
-	// Invocations to hybrid matcher should safely return without running
 	hybridService.EvaluatePendingForAllUsers(context.Background())
 	hybridService.EvaluateForSingleUser(context.Background(), "user-123")
 }

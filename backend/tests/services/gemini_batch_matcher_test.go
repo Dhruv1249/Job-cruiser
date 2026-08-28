@@ -161,7 +161,6 @@ func TestGeminiBatchMatchServicePerModelFiveErrorsDisablesModel(t *testing.T) {
 
 	service := services.NewGeminiBatchMatchService(nil, "test-api-key")
 
-	// 1. Four errors do not disable model
 	for i := 0; i < 4; i++ {
 		service.RecordModelFailureForTest(context.Background(), "test-model-1", "mock timeout error")
 	}
@@ -169,13 +168,11 @@ func TestGeminiBatchMatchServicePerModelFiveErrorsDisablesModel(t *testing.T) {
 		t.Fatalf("expected model to remain enabled after 4 errors")
 	}
 
-	// 2. Success resets consecutive error count
 	service.RecordModelSuccessForTest("test-model-1")
 	if service.GetModelConsecutiveErrorsForTest("test-model-1") != 0 {
 		t.Fatalf("expected consecutive error count to reset to 0 upon success")
 	}
 
-	// 3. Five consecutive errors permanently disables model
 	for i := 0; i < 5; i++ {
 		service.RecordModelFailureForTest(context.Background(), "test-model-1", "mock 429 quota error")
 	}
@@ -183,7 +180,6 @@ func TestGeminiBatchMatchServicePerModelFiveErrorsDisablesModel(t *testing.T) {
 		t.Fatalf("expected model to be permanently disabled after 5 consecutive errors")
 	}
 
-	// 4. Remaining model-2 continues to be used exclusively
 	selectedModel1, err1 := service.GetNextModelNameForTest()
 	if err1 != nil || selectedModel1 != "test-model-2" {
 		t.Fatalf("expected only test-model-2 to be selected, got: %s (err: %v)", selectedModel1, err1)
@@ -200,7 +196,6 @@ func TestGeminiBatchMatchServiceAllModelsDisabledShutsDownPipeline(t *testing.T)
 
 	service := services.NewGeminiBatchMatchService(nil, "test-api-key")
 
-	// Disable both models with 5 consecutive errors each
 	for i := 0; i < 5; i++ {
 		service.RecordModelFailureForTest(context.Background(), "alpha-model", "mock 500 error")
 	}
