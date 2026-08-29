@@ -30,122 +30,37 @@ from jobspy.model import Site
 
 DEFAULT_KEYWORDS = [
     "backend engineer",
-    "backend developer",
-    "software engineer backend",
-    "backend intern",
-    "junior backend engineer",
-    "node.js developer",
-    "express.js developer",
-    "api developer",
-    "rest api developer",
-    "microservices engineer",
-    "distributed systems engineer",
-    "cloud backend engineer",
-    "server-side developer",
-    "platform backend engineer",
+    "software engineer",
+    "golang developer",
+    "python developer",
     "full stack engineer",
-    "full stack developer",
-    "fullstack developer",
-    "mern stack developer",
-    "next.js developer",
-    "react developer",
     "frontend engineer",
-    "javascript developer",
-    "typescript developer",
-    "software developer",
-    "web developer",
     "cloud engineer",
-    "cloud developer",
-    "cloud infrastructure engineer",
-    "cloud software engineer",
-    "aws engineer",
-    "aws developer",
-    "gcp engineer",
-    "google cloud engineer",
-    "cloud platform engineer",
     "devops engineer",
-    "devops intern",
-    "junior devops engineer",
+    "site reliability engineer",
     "platform engineer",
     "infrastructure engineer",
-    "site reliability engineer",
-    "sre intern",
-    "build engineer",
-    "release engineer",
-    "ci/cd engineer",
-    "kubernetes engineer",
-    "docker engineer",
-    "container platform engineer",
-    "cloud native engineer",
-    "kubernetes developer",
     "systems engineer",
-    "systems programmer",
-    "systems software engineer",
-    "kernel engineer",
-    "kernel developer",
-    "operating systems engineer",
-    "embedded systems engineer",
-    "low level software engineer",
-    "firmware engineer",
     "rust developer",
-    "rust systems engineer",
-    "rust backend engineer",
-    "rust systems developer",
-    "c developer",
-    "c systems programmer",
-    "systems research engineer",
-    "ai infrastructure engineer",
-    "ai platform engineer",
-    "ml infrastructure engineer",
+    "c++ engineer",
+    "distributed systems engineer",
+    "microservices engineer",
+    "data engineer",
     "mlops engineer",
-    "ml platform engineer",
-    "ai backend engineer",
-    "ai systems engineer",
-    "genai infrastructure engineer",
-    "python developer",
-    "python backend engineer",
-    "fastapi developer",
-    "python software engineer",
-    "observability engineer",
-    "monitoring engineer",
-    "reliability engineer",
-    "automation engineer",
-    "infrastructure automation engineer",
-    "devops automation engineer",
-    "forward deployed engineer",
-    "forward deployed software engineer",
+    "ai infrastructure engineer",
+    "genai engineer",
+    "kubernetes engineer",
+    "aws engineer",
+    "node.js developer",
+    "react developer",
+    "typescript developer",
     "founding engineer",
-    "founding software engineer",
-    "founding backend engineer",
-    "founding full stack engineer",
-    "early stage engineer",
-    "startup software engineer",
-    "startup backend engineer",
-    "software engineer i",
+    "software engineer intern",
     "graduate software engineer",
     "new grad software engineer",
-    "software engineer intern",
-    "software development engineer",
+    "junior backend engineer",
+    "junior devops engineer",
     "sde i",
-    "graduate backend engineer",
-    "graduate cloud engineer",
-    "graduate devops engineer",
-    "entry level software engineer",
-    "infrastructure software engineer",
-    "platform software engineer",
-    "cloud platform developer",
-    "infrastructure developer",
-    "reliability platform engineer",
-    "backend engineer new grad",
-    "cloud engineer entry level",
-    "devops engineer graduate",
-    "platform engineer new grad",
-    "sre new grad",
-    "kubernetes engineer junior",
-    "aws backend engineer",
-    "software engineer cloud",
-    "software engineer infrastructure",
-    "software engineer",
 ]
 
 
@@ -174,10 +89,7 @@ SINGLE_CALL_FEED_SITES = [
     Site.THE_MUSE,
     Site.HIMALAYAS,
     Site.JOBSPRESSO,
-    Site.RUST_CAREERS,
     Site.WORKING_NOMADS,
-    Site.WEB3_CAREER,
-    Site.CRYPTO_JOBS,
 ]
 
 KEYWORD_SEARCHABLE_INDIA_SITES = [
@@ -210,7 +122,7 @@ CAREER_SUBDOMAIN_PATTERNS = ["careers", "jobs"]
 HTTP_PROBE_SESSION = requests.Session()
 HTTP_PROBE_SESSION.headers.update(
     {
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
 )
@@ -262,10 +174,20 @@ def register_discovered_ats_slug(platform_name: str, company_slug: str) -> None:
         pass
 
 
-def generate_career_page_candidates(company_name: str) -> list[str]:
+def generate_career_page_candidates(company_name: str, company_domain: str = "") -> list[str]:
     """
-    Generates candidate career URLs from a company name by stripping common suffixes and building standard paths.
+    Generates candidate career URLs from a company name and optional verified domain.
     """
+    candidates = []
+
+    if company_domain:
+        cleaned_domain = company_domain.strip().lower().replace("http://", "").replace("https://", "").rstrip("/")
+        if cleaned_domain:
+            for path in CAREER_PATH_PATTERNS:
+                candidates.append(f"https://{cleaned_domain}{path}")
+            for subdomain in CAREER_SUBDOMAIN_PATTERNS:
+                candidates.append(f"https://{subdomain}.{cleaned_domain}")
+
     sanitized = re.sub(
         r"\b(inc\.?|llc\.?|ltd\.?|corp\.?|co\.?|plc\.?|technologies|solutions|services|group)\b",
         "",
@@ -273,23 +195,27 @@ def generate_career_page_candidates(company_name: str) -> list[str]:
         flags=re.IGNORECASE,
     )
     url_slug = re.sub(r"[^a-z0-9]", "", sanitized.lower().strip())
-    if not url_slug or len(url_slug) < 3:
-        return []
+    if url_slug and len(url_slug) >= 3:
+        for path in CAREER_PATH_PATTERNS:
+            candidates.append(f"https://{url_slug}.com{path}")
+        for subdomain in CAREER_SUBDOMAIN_PATTERNS:
+            candidates.append(f"https://{subdomain}.{url_slug}.com")
 
-    candidates = []
-    for path in CAREER_PATH_PATTERNS:
-        candidates.append(f"https://{url_slug}.com{path}")
-    for subdomain in CAREER_SUBDOMAIN_PATTERNS:
-        candidates.append(f"https://{subdomain}.{url_slug}.com")
+    seen = set()
+    unique_candidates = []
+    for candidate in candidates:
+        if candidate not in seen:
+            seen.add(candidate)
+            unique_candidates.append(candidate)
 
-    return candidates
+    return unique_candidates
 
 
-def probe_single_career_page(company_name: str) -> tuple[str, str] | None:
+def probe_single_career_page(company_name: str, company_domain: str = "") -> tuple[str, str] | None:
     """
     Probes candidate URLs for a company and extracts ATS configuration details if matched.
     """
-    for candidate_url in generate_career_page_candidates(company_name):
+    for candidate_url in generate_career_page_candidates(company_name, company_domain):
         try:
             response = HTTP_PROBE_SESSION.get(candidate_url, timeout=8, allow_redirects=True)
             for pattern, platform_name in ATS_DETECTION_PATTERNS:
@@ -317,18 +243,27 @@ def probe_unmapped_companies(concurrency: int = 20, max_probes_per_run: int = 50
         )
         if api_response.status_code != 200:
             return 0
-        company_names = api_response.json().get("data", [])
+        raw_company_data = api_response.json().get("data", [])
     except Exception:
         return 0
 
-    probed_batch = company_names[:max_probes_per_run]
+    probed_batch = raw_company_data[:max_probes_per_run]
     discovered_count = 0
 
     with ThreadPoolExecutor(max_workers=concurrency) as probe_executor:
-        future_map = {
-            probe_executor.submit(probe_single_career_page, name): name
-            for name in probed_batch
-        }
+        future_map = {}
+        for target in probed_batch:
+            if isinstance(target, dict):
+                company_name = target.get("name", "")
+                company_domain = target.get("domain", "")
+            else:
+                company_name = str(target)
+                company_domain = ""
+
+            if company_name:
+                future = probe_executor.submit(probe_single_career_page, company_name, company_domain)
+                future_map[future] = company_name
+
         for future in as_completed(future_map):
             try:
                 result = future.result()
@@ -617,6 +552,16 @@ def run_orchestration() -> dict:
     run_identifier = start_run()
     aggregated_raw_jobs = []
     run_manifest = []
+    source_statistics = {}
+    source_stats_lock = threading.Lock()
+
+    def record_source_telemetry(source_key: str, jobs_count: int, elapsed_seconds: float, error_detail: str | None = None) -> None:
+        with source_stats_lock:
+            source_statistics[source_key] = {
+                "jobs_found": jobs_count,
+                "duration_seconds": round(elapsed_seconds, 2),
+                "error": error_detail,
+            }
 
     try:
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as primary_executor:
@@ -640,8 +585,12 @@ def run_orchestration() -> dict:
                 """
                 Scrapes a single job board for a designated search query and location with 5-minute timeout.
                 """
+                telemetry_key = f"{target_site.value}:{search_query}:{target_location or 'remote'}"
+                start_timestamp = time.time()
                 sub_executor = ThreadPoolExecutor(max_workers=1)
                 scraped_dataframe = None
+                caught_error = None
+
                 try:
                     scraping_arguments = {
                         "site_name": [target_site],
@@ -661,11 +610,14 @@ def run_orchestration() -> dict:
                     future_result = sub_executor.submit(scrape_jobs, **scraping_arguments)
                     scraped_dataframe = future_result.result(timeout=REQUEST_TIMEOUT)
                     sub_executor.shutdown(wait=False)
-                except Exception:
+                except Exception as execution_err:
+                    caught_error = str(execution_err)
                     sub_executor.shutdown(wait=False, cancel_futures=True)
-                    return
+
+                elapsed_time = time.time() - start_timestamp
 
                 if scraped_dataframe is None or scraped_dataframe.empty:
+                    record_source_telemetry(telemetry_key, 0, elapsed_time, caught_error)
                     return
 
                 parsed_posts = []
@@ -679,6 +631,8 @@ def run_orchestration() -> dict:
                     )
                     if is_location_in_scope(normalized_post["location"], is_remote_flag):
                         parsed_posts.append(normalized_post)
+
+                record_source_telemetry(telemetry_key, len(parsed_posts), elapsed_time, caught_error)
 
                 if parsed_posts:
                     with board_raw_jobs_lock:
@@ -738,7 +692,9 @@ def run_orchestration() -> dict:
                 register_discovered_ats_slug(discovered_ats_details[0], discovered_ats_details[1])
 
         save_json(deduplicated_job_records, DATA_DIR / "raw_jobs.json")
+        save_json(source_statistics, DATA_DIR / "source_stats.json")
         print(f"[Scraper] Saved {len(deduplicated_job_records)} raw scraped jobs to raw_jobs.json", flush=True)
+        print(f"[Scraper] Recorded telemetry across {len(source_statistics)} source search combinations.", flush=True)
 
         if not run_identifier:
             run_identifier = start_run()
@@ -784,7 +740,7 @@ def run_orchestration() -> dict:
         if run_identifier:
             finish_run(run_identifier, "success")
 
-        return {"status": "success", "manifest": run_manifest}
+        return {"status": "success", "manifest": run_manifest, "source_stats": source_statistics}
 
     except Exception as execution_exception:
         if run_identifier:

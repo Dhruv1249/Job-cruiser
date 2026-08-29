@@ -136,6 +136,11 @@ func (h *IngestHandler) IngestRaw(c *gin.Context) {
 			companyCache[cacheKey] = companyID
 		}
 
+		if inferredDomain := utils.ExtractCompanyDomain(job.AbsoluteURL); inferredDomain != "" {
+			updateDomainQuery := `UPDATE companies SET domain = $1 WHERE id = $2 AND (domain IS NULL OR domain = '')`
+			_, _ = tx.Exec(ctx, updateDomainQuery, inferredDomain, companyID)
+		}
+
 		loc := job.Location
 		isRemote := strings.Contains(strings.ToLower(loc), "remote") ||
 			strings.Contains(strings.ToLower(loc), "anywhere") ||
@@ -508,11 +513,24 @@ func (handler *IngestHandler) RegisterATSSlug(contextInstance *gin.Context) {
 	contextInstance.JSON(http.StatusOK, gin.H{"message": "ATS slug registered successfully"})
 }
 
-// GetAllCompanyNames retrieves distinct company names from the database for career page probing.
+// CompanyProbeTarget represents a company entry with optional domain for career page probing.
+type CompanyProbeTarget struct {
+	Name   string `json:"name"`
+	Domain string `json:"domain,omitempty"`
+}
+
+// GetAllCompanyNames retrieves distinct unmapped companies from the database for career page probing.
 func (handler *IngestHandler) GetAllCompanyNames(contextInstance *gin.Context) {
 	rows, queryError := handler.DB.Query(
 		context.Background(),
-		`SELECT DISTINCT name FROM companies WHERE name != '' ORDER BY name`,
+		`SELECT c.name, COALESCE(c.domain, '')
+		 FROM companies c
+		 WHERE c.name != ''
+		   AND NOT EXISTS (
+		       SELECT 1 FROM company_ats_boards b
+		       WHERE b.company_id = c.id OR LOWER(b.slug) = LOWER(c.name)
+		   )
+		 ORDER BY (c.domain IS NOT NULL AND c.domain != '') DESC, c.name`,
 	)
 	if queryError != nil {
 		contextInstance.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query companies"})
@@ -520,15 +538,15 @@ func (handler *IngestHandler) GetAllCompanyNames(contextInstance *gin.Context) {
 	}
 	defer rows.Close()
 
-	var companyNamesList []string
+	var targetsList []CompanyProbeTarget
 	for rows.Next() {
-		var companyName string
-		if scanError := rows.Scan(&companyName); scanError == nil && companyName != "" {
-			companyNamesList = append(companyNamesList, companyName)
+		var target CompanyProbeTarget
+		if scanError := rows.Scan(&target.Name, &target.Domain); scanError == nil && target.Name != "" {
+			targetsList = append(targetsList, target)
 		}
 	}
 
-	contextInstance.JSON(http.StatusOK, gin.H{"data": companyNamesList, "count": len(companyNamesList)})
+	contextInstance.JSON(http.StatusOK, gin.H{"data": targetsList, "count": len(targetsList)})
 }
 
 // ==========================================================

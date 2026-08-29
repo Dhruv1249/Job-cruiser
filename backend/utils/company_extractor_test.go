@@ -70,6 +70,18 @@ func TestExtractCompanyDomain(t *testing.T) {
 			url:      "https://proxify.io/careers/123",
 			expected: "proxify.io",
 		},
+		{
+			url:      "https://boards.greenhouse.io/stripe/jobs/123",
+			expected: "",
+		},
+		{
+			url:      "https://jobs.lever.co/notion/456",
+			expected: "",
+		},
+		{
+			url:      "https://in.indeed.com/viewjob?jk=789",
+			expected: "",
+		},
 	}
 
 	for _, tt := range tests {

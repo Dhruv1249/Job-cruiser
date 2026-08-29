@@ -6,7 +6,8 @@ import (
 )
 
 /*
-ExtractCompanyDomain extracts the root domain name from a job URL for logo fetching.
+ExtractCompanyDomain extracts the genuine root domain name of a company from a direct job URL,
+ignoring generic third-party job boards and ATS aggregator platforms.
 */
 func ExtractCompanyDomain(jobURL string) string {
 	cleanURL := strings.TrimSpace(jobURL)
@@ -24,10 +25,25 @@ func ExtractCompanyDomain(jobURL string) string {
 		host = strings.Split(host, ":")[0]
 	}
 
+	aggregatorDomains := []string{
+		"greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com",
+		"workdaysite.com", "myworkdaysite.com", "indeed.com", "linkedin.com",
+		"dice.com", "amazon.jobs", "ycombinator.com", "remoteok.com",
+		"weworkremotely.com", "themuse.com", "himalayas.app", "jobspresso.co",
+		"workingnomads.com", "news.ycombinator.com", "web3.career", "cryptojobslist.com",
+		"rust.careers", "simplyhired.com", "glassdoor.com", "ziprecruiter.com",
+	}
+
+	for _, aggregator := range aggregatorDomains {
+		if strings.Contains(host, aggregator) {
+			return ""
+		}
+	}
+
 	parts := strings.Split(host, ".")
 	if len(parts) >= 2 {
 		mainDomain := parts[len(parts)-2] + "." + parts[len(parts)-1]
-		if parts[len(parts)-2] == "co" || parts[len(parts)-2] == "com" || parts[len(parts)-2] == "org" {
+		if parts[len(parts)-2] == "co" || parts[len(parts)-2] == "com" || parts[len(parts)-2] == "org" || parts[len(parts)-2] == "gov" || parts[len(parts)-2] == "edu" {
 			if len(parts) >= 3 {
 				mainDomain = parts[len(parts)-3] + "." + parts[len(parts)-2] + "." + parts[len(parts)-1]
 			}
