@@ -156,16 +156,16 @@ func TestGeminiBatchMatchServiceLocationMismatchScoreCap(t *testing.T) {
 	}
 }
 
-func TestGeminiBatchMatchServicePerModelFiveErrorsDisablesModel(t *testing.T) {
+func TestGeminiBatchMatchServicePerModelSixErrorsDisablesModel(t *testing.T) {
 	t.Setenv("GEMINI_BATCH_MODELS", "test-model-1,test-model-2")
 
 	service := services.NewGeminiBatchMatchService(nil, "test-api-key")
 
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 5; i++ {
 		service.RecordModelFailureForTest(context.Background(), "test-model-1", "mock timeout error")
 	}
 	if service.IsModelDisabledForTest("test-model-1") {
-		t.Fatalf("expected model to remain enabled after 4 errors")
+		t.Fatalf("expected model to remain enabled after 5 errors")
 	}
 
 	service.RecordModelSuccessForTest("test-model-1")
@@ -173,11 +173,11 @@ func TestGeminiBatchMatchServicePerModelFiveErrorsDisablesModel(t *testing.T) {
 		t.Fatalf("expected consecutive error count to reset to 0 upon success")
 	}
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 6; i++ {
 		service.RecordModelFailureForTest(context.Background(), "test-model-1", "mock 429 quota error")
 	}
 	if !service.IsModelDisabledForTest("test-model-1") {
-		t.Fatalf("expected model to be permanently disabled after 5 consecutive errors")
+		t.Fatalf("expected model to be disabled after 6 errors in current run")
 	}
 
 	selectedModel1, err1 := service.GetNextModelNameForTest()
@@ -196,10 +196,10 @@ func TestGeminiBatchMatchServiceAllModelsDisabledShutsDownPipeline(t *testing.T)
 
 	service := services.NewGeminiBatchMatchService(nil, "test-api-key")
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 6; i++ {
 		service.RecordModelFailureForTest(context.Background(), "alpha-model", "mock 500 error")
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 6; i++ {
 		service.RecordModelFailureForTest(context.Background(), "beta-model", "mock 500 error")
 	}
 
@@ -210,5 +210,35 @@ func TestGeminiBatchMatchServiceAllModelsDisabledShutsDownPipeline(t *testing.T)
 	_, errModel := service.GetNextModelNameForTest()
 	if errModel == nil {
 		t.Fatalf("expected error when attempting to get next model after pipeline shutdown")
+	}
+}
+
+func TestGeminiBatchMatchServiceTurnBasedRecovery(t *testing.T) {
+	t.Setenv("GEMINI_BATCH_MODELS", "alpha-model,beta-model")
+
+	service := services.NewGeminiBatchMatchService(nil, "test-api-key")
+
+	for i := 0; i < 6; i++ {
+		service.RecordModelFailureForTest(context.Background(), "alpha-model", "mock rate limit error")
+	}
+
+	if !service.IsModelDisabledForTest("alpha-model") {
+		t.Fatalf("expected alpha-model to be disabled for current run")
+	}
+
+	selectedModel, errModel := service.GetNextModelNameForTest()
+	if errModel != nil || selectedModel != "beta-model" {
+		t.Fatalf("expected beta-model to be selected during current run, got %s (err: %v)", selectedModel, errModel)
+	}
+
+	service.ResetRunErrorsIfHealthyForTest()
+
+	if service.IsModelDisabledForTest("alpha-model") {
+		t.Fatalf("expected alpha-model to recover on next run")
+	}
+
+	firstModelNextRun, errNext := service.GetNextModelNameForTest()
+	if errNext != nil || (firstModelNextRun != "alpha-model" && firstModelNextRun != "beta-model") {
+		t.Fatalf("expected active model selection on next run, got %s (err: %v)", firstModelNextRun, errNext)
 	}
 }

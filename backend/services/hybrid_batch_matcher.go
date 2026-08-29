@@ -4,8 +4,7 @@ package services
 import (
 	"context"
 	"log"
-	"os"
-	"strings"
+	"sync"
 	"time"
 )
 
@@ -38,78 +37,84 @@ func NewHybridBatchMatchService(nvidiaNim *NvidiaNimService, geminiBatch *Gemini
 	return service
 }
 
-// EvaluatePendingForAllUsers probes NVIDIA NIM with a fast health check; if NIM fails, it automatically falls back to Gemini.
+// EvaluatePendingForAllUsers runs NVIDIA NIM and Gemini batch matchers concurrently in parallel.
 func (s *HybridBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context) {
 	if s.GeminiBatchService != nil && s.GeminiBatchService.IsPipelinePermanentlyStopped() {
 		log.Println("[HybridMatcher] AI evaluation pipeline is permanently shut down. Skipping evaluation pass.")
 		return
 	}
 
-	primaryProvider := strings.ToLower(strings.TrimSpace(os.Getenv("PRIMARY_AI_PROVIDER")))
+	nimActive := s.NvidiaNimService != nil && s.NvidiaNimService.APIKey != "" && !s.NvidiaNimService.IsPipelinePermanentlyStopped()
+	geminiActive := s.GeminiBatchService != nil && s.GeminiBatchService.APIKey != "" && !s.GeminiBatchService.IsPipelinePermanentlyStopped()
 
-	if primaryProvider == "gemini" {
-		if s.GeminiBatchService != nil {
-			log.Println("[HybridMatcher] PRIMARY_AI_PROVIDER is set to gemini. Delegating to Gemini Batch Service...")
+	if nimActive && geminiActive {
+		log.Println("[HybridMatcher] Running NVIDIA NIM and Gemini Batch Service concurrently in parallel...")
+		var waitGroup sync.WaitGroup
+		waitGroup.Add(2)
+
+		go func() {
+			defer waitGroup.Done()
+			s.NvidiaNimService.EvaluatePendingForAllUsers(ctx)
+		}()
+
+		go func() {
+			defer waitGroup.Done()
 			s.GeminiBatchService.EvaluatePendingForAllUsers(ctx)
-			return
-		}
+		}()
+
+		waitGroup.Wait()
+		return
 	}
 
-	if s.NvidiaNimService != nil && s.NvidiaNimService.APIKey != "" {
-		log.Println("[HybridMatcher] Probing NVIDIA NIM with fast health probe...")
-		probeSuccess := s.NvidiaNimService.ProbeHealth(ctx)
-		if probeSuccess {
-			log.Println("[HybridMatcher] NVIDIA NIM health probe succeeded. Dispatching full evaluation worker pool...")
-			fullPassSuccess := s.NvidiaNimService.EvaluatePendingForAllUsersWithResult(ctx)
-			if fullPassSuccess {
-				return
-			}
-			log.Println("[HybridMatcher] NVIDIA NIM encountered 4 continuous errors across workers. Automatically falling back to Gemini Batch Service...")
-		} else {
-			log.Println("[HybridMatcher] NVIDIA NIM health probe failed after retries. Automatically falling back to Gemini Batch Service...")
-		}
+	if nimActive {
+		log.Println("[HybridMatcher] Dispatching evaluation pass with NVIDIA NIM...")
+		s.NvidiaNimService.EvaluatePendingForAllUsers(ctx)
+		return
 	}
 
-	if s.GeminiBatchService != nil {
-		log.Println("[HybridMatcher] Delegating job evaluation pass to Gemini Batch Service fallback...")
+	if geminiActive {
+		log.Println("[HybridMatcher] Dispatching evaluation pass with Gemini Batch Service...")
 		s.GeminiBatchService.EvaluatePendingForAllUsers(ctx)
 	}
 }
 
-// EvaluateForSingleUser probes NVIDIA NIM with a fast health check; if NIM fails, it automatically falls back to Gemini.
+// EvaluateForSingleUser runs NVIDIA NIM and Gemini batch matchers concurrently in parallel for a single user.
 func (s *HybridBatchMatchService) EvaluateForSingleUser(ctx context.Context, targetUserID string) {
 	if s.GeminiBatchService != nil && s.GeminiBatchService.IsPipelinePermanentlyStopped() {
 		log.Printf("[HybridMatcher] AI evaluation pipeline is permanently shut down. Skipping evaluation for user %s.", targetUserID)
 		return
 	}
 
-	primaryProvider := strings.ToLower(strings.TrimSpace(os.Getenv("PRIMARY_AI_PROVIDER")))
+	nimActive := s.NvidiaNimService != nil && s.NvidiaNimService.APIKey != "" && !s.NvidiaNimService.IsPipelinePermanentlyStopped()
+	geminiActive := s.GeminiBatchService != nil && s.GeminiBatchService.APIKey != "" && !s.GeminiBatchService.IsPipelinePermanentlyStopped()
 
-	if primaryProvider == "gemini" {
-		if s.GeminiBatchService != nil {
-			log.Printf("[HybridMatcher] PRIMARY_AI_PROVIDER is set to gemini. Evaluating single user %s via Gemini...", targetUserID)
+	if nimActive && geminiActive {
+		log.Printf("[HybridMatcher] Running NVIDIA NIM and Gemini concurrently in parallel for single user %s...", targetUserID)
+		var waitGroup sync.WaitGroup
+		waitGroup.Add(2)
+
+		go func() {
+			defer waitGroup.Done()
+			s.NvidiaNimService.EvaluateForSingleUser(ctx, targetUserID)
+		}()
+
+		go func() {
+			defer waitGroup.Done()
 			s.GeminiBatchService.EvaluateForSingleUser(ctx, targetUserID)
-			return
-		}
+		}()
+
+		waitGroup.Wait()
+		return
 	}
 
-	if s.NvidiaNimService != nil && s.NvidiaNimService.APIKey != "" {
-		log.Printf("[HybridMatcher] Probing NVIDIA NIM before evaluating single user %s...", targetUserID)
-		probeSuccess := s.NvidiaNimService.ProbeHealth(ctx)
-		if probeSuccess {
-			log.Printf("[HybridMatcher] NVIDIA NIM health probe succeeded. Evaluating single user %s with NVIDIA NIM engine...", targetUserID)
-			userPassSuccess := s.NvidiaNimService.EvaluateForSingleUserWithResult(ctx, targetUserID)
-			if userPassSuccess {
-				return
-			}
-			log.Printf("[HybridMatcher] NVIDIA NIM encountered 4 continuous errors during evaluation for user %s. Automatically falling back to Gemini Batch Service...", targetUserID)
-		} else {
-			log.Printf("[HybridMatcher] NVIDIA NIM health probe failed. Automatically falling back to Gemini Batch Service for user %s...", targetUserID)
-		}
+	if nimActive {
+		log.Printf("[HybridMatcher] Evaluating single user %s with NVIDIA NIM...", targetUserID)
+		s.NvidiaNimService.EvaluateForSingleUser(ctx, targetUserID)
+		return
 	}
 
-	if s.GeminiBatchService != nil {
-		log.Printf("[HybridMatcher] Delegating single-user evaluation for user %s to Gemini Batch Service...", targetUserID)
+	if geminiActive {
+		log.Printf("[HybridMatcher] Evaluating single user %s with Gemini Batch Service...", targetUserID)
 		s.GeminiBatchService.EvaluateForSingleUser(ctx, targetUserID)
 	}
 }

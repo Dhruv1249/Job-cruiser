@@ -12,43 +12,7 @@ import (
 	"github.com/Dhruv1249/Job-cruiser/backend/services"
 )
 
-func TestHybridBatchMatchServiceFallbackToGemini(t *testing.T) {
-	t.Setenv("PRIMARY_AI_PROVIDER", "")
-
-	geminiService := services.NewGeminiBatchMatchService(nil, "test-gemini-key")
-	hybridService := services.NewHybridBatchMatchService(nil, geminiService)
-
-	if hybridService.GeminiBatchService == nil {
-		t.Fatalf("expected GeminiBatchService to be initialized in HybridBatchMatchService")
-	}
-
-	hybridService.EvaluatePendingForAllUsers(context.Background())
-	hybridService.EvaluateForSingleUser(context.Background(), "user-123")
-}
-
-func TestHybridBatchMatchServiceAutomaticPilotProbingFallback(t *testing.T) {
-	t.Setenv("PRIMARY_AI_PROVIDER", "nvidia_nim")
-
-	mockServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		http.Error(writer, "Internal Server Error", http.StatusInternalServerError)
-	}))
-	defer mockServer.Close()
-
-	nvidiaService := services.NewNvidiaNimService(nil, "test-nvidia-key")
-	nvidiaService.Endpoint = mockServer.URL
-	nvidiaService.ProbeRetryDelayDuration = time.Millisecond
-	nvidiaService.FillTokenBucketForTest()
-
-	geminiService := services.NewGeminiBatchMatchService(nil, "test-gemini-key")
-	hybridService := services.NewHybridBatchMatchService(nvidiaService, geminiService)
-
-	hybridService.EvaluatePendingForAllUsers(context.Background())
-	hybridService.EvaluateForSingleUser(context.Background(), "user-123")
-}
-
-func TestHybridBatchMatchServicePrimaryProviderGemini(t *testing.T) {
-	t.Setenv("PRIMARY_AI_PROVIDER", "gemini")
-
+func TestHybridBatchMatchServiceRunsInParallel(t *testing.T) {
 	nvidiaService := services.NewNvidiaNimService(nil, "test-nvidia-key")
 	geminiService := services.NewGeminiBatchMatchService(nil, "test-gemini-key")
 	hybridService := services.NewHybridBatchMatchService(nvidiaService, geminiService)
@@ -74,7 +38,7 @@ func TestNvidiaNimServiceProbeHealthSuccess(t *testing.T) {
 	}
 }
 
-func TestNvidiaNimServiceSharedCircuitBreakerFourErrors(t *testing.T) {
+func TestNvidiaNimServiceSharedCircuitBreakerSixErrors(t *testing.T) {
 	var requestCount atomic.Int64
 
 	mockServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -109,7 +73,7 @@ func TestNvidiaNimServiceSharedCircuitBreakerFourErrors(t *testing.T) {
 		{JobID: "00000000-0000-0000-0000-000000000002", Title: "Dev2", Company: "Co2", Location: "Remote", Description: "Go"},
 	}
 
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 6; i++ {
 		nvidiaService.FillTokenBucketForTest()
 		nvidiaService.EvaluatePilotBatch(context.Background(), userProfiles, failBatch)
 	}
@@ -127,7 +91,7 @@ func TestHybridBatchMatchServicePipelineShutdownDisablesNim(t *testing.T) {
 	geminiService := services.NewGeminiBatchMatchService(nil, "test-gemini-key")
 	hybridService := services.NewHybridBatchMatchService(nvidiaService, geminiService)
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 6; i++ {
 		geminiService.RecordModelFailureForTest(context.Background(), "test-model-1", "mock quota error")
 	}
 

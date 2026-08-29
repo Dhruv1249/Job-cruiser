@@ -54,27 +54,32 @@ var GeminiBatchJobMatchSchemaJSON = `{
 
 // GeminiBatchMatchService manages batch AI job evaluations sequentially across alternating Gemini models.
 type GeminiBatchMatchService struct {
-	DB                     *pgxpool.Pool
-	APIKey                 string
-	BaseURL                string
-	HTTPClient             *http.Client
-	Models                 []string
-	currentModelIndex      atomic.Int64
-	TargetTokenBudget      int
-	RateLimitInterval      time.Duration
-	lastRequestTime        time.Time
-	rateLimitMutex         sync.Mutex
-	queueMutex             sync.RWMutex
-	isQueuePaused          bool
-	isEvaluationInProgress bool
+	DB                           *pgxpool.Pool
+	APIKey                       string
+	BaseURL                      string
+	HTTPClient                   *http.Client
+	Models                       []string
+	currentModelIndex            atomic.Int64
+	TargetTokenBudget            int
+	RateLimitInterval            time.Duration
+	lastRequestTime              time.Time
+	rateLimitMutex               sync.Mutex
+	queueMutex                   sync.RWMutex
+	isQueuePaused                bool
+	isEvaluationInProgress       bool
 	isPipelinePermanentlyStopped bool
-	OnPipelineShutdown     func()
-	modelErrorMutex        sync.RWMutex
-	modelConsecutiveErrors map[string]int
-	disabledModels         map[string]bool
+	OnPipelineShutdown           func()
+	modelErrorMutex              sync.RWMutex
+	modelRunErrors               map[string]int
+	disabledModels               map[string]bool
+	runDisabledModels            map[string]bool
 }
 
-const maxConsecutiveModelErrors = 5
+const (
+	maxConsecutiveModelErrors   = 6
+	defaultFlashLiteTokenBudget = 100000
+	defaultStandardTokenBudget  = 250000
+)
 
 // NewGeminiBatchMatchService constructs a new GeminiBatchMatchService configured via environment variables.
 func NewGeminiBatchMatchService(databasePool *pgxpool.Pool, apiKey string) *GeminiBatchMatchService {
@@ -87,14 +92,15 @@ func NewGeminiBatchMatchService(databasePool *pgxpool.Pool, apiKey string) *Gemi
 	rateLimitDuration := parseConfiguredRateLimitDuration()
 
 	return &GeminiBatchMatchService{
-		DB:                     databasePool,
-		APIKey:                 apiKey,
-		HTTPClient:             &http.Client{Timeout: 15 * time.Minute},
-		Models:                 configuredModels,
-		TargetTokenBudget:      tokenBudget,
-		RateLimitInterval:      rateLimitDuration,
-		modelConsecutiveErrors: make(map[string]int),
-		disabledModels:         make(map[string]bool),
+		DB:                 databasePool,
+		APIKey:             apiKey,
+		HTTPClient:         &http.Client{Timeout: 15 * time.Minute},
+		Models:             configuredModels,
+		TargetTokenBudget:  tokenBudget,
+		RateLimitInterval:  rateLimitDuration,
+		modelRunErrors:     make(map[string]int),
+		disabledModels:     make(map[string]bool),
+		runDisabledModels:  make(map[string]bool),
 	}
 }
 
@@ -217,6 +223,8 @@ func (s *GeminiBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context
 		return
 	}
 
+	s.resetRunErrorsIfHealthy()
+
 	userProfiles, errProfiles := fetchAllActiveUserProfiles(ctx, s.DB)
 	if errProfiles != nil {
 		log.Printf("[GeminiBatchMatchService] Failed to fetch user profiles: %v", errProfiles)
@@ -237,12 +245,23 @@ func (s *GeminiBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context
 		return
 	}
 
-	jobBatches := buildMultiJobTokenBatches(ctx, pendingJobs, s.TargetTokenBudget)
+	effectiveBudget := s.TargetTokenBudget
+	if effectiveBudget <= 0 {
+		effectiveBudget = defaultStandardTokenBudget
+		for _, model := range s.Models {
+			if strings.Contains(strings.ToLower(model), "flash-lite") || strings.Contains(strings.ToLower(model), "3.1-flash-lite") {
+				effectiveBudget = defaultFlashLiteTokenBudget
+				break
+			}
+		}
+	}
+
+	jobBatches := buildMultiJobTokenBatches(ctx, pendingJobs, effectiveBudget)
 	if len(jobBatches) == 0 {
 		return
 	}
 
-	log.Printf("[GeminiBatchMatchService] Dispatching sequential Gemini pipeline across %d initial batches...", len(jobBatches))
+	log.Printf("[GeminiBatchMatchService] Dispatching sequential Gemini pipeline across %d initial batches (Token Budget: %d)...", len(jobBatches), effectiveBudget)
 
 	batchIteration := 0
 	for len(jobBatches) > 0 {
@@ -306,6 +325,8 @@ func (s *GeminiBatchMatchService) EvaluateForSingleUser(ctx context.Context, tar
 		return
 	}
 
+	s.resetRunErrorsIfHealthy()
+
 	profile, errProfile := fetchSingleUserProfileByID(ctx, s.DB, targetUserID)
 	if errProfile != nil {
 		log.Printf("[GeminiBatchMatchService] Failed to fetch profile for user %s: %v", targetUserID, errProfile)
@@ -321,7 +342,18 @@ func (s *GeminiBatchMatchService) EvaluateForSingleUser(ctx context.Context, tar
 		return
 	}
 
-	jobBatches := buildMultiJobTokenBatches(ctx, unmatchedJobs, s.TargetTokenBudget)
+	effectiveBudget := s.TargetTokenBudget
+	if effectiveBudget <= 0 {
+		effectiveBudget = defaultStandardTokenBudget
+		for _, model := range s.Models {
+			if strings.Contains(strings.ToLower(model), "flash-lite") || strings.Contains(strings.ToLower(model), "3.1-flash-lite") {
+				effectiveBudget = defaultFlashLiteTokenBudget
+				break
+			}
+		}
+	}
+
+	jobBatches := buildMultiJobTokenBatches(ctx, unmatchedJobs, effectiveBudget)
 	userProfiles := []UserProfileData{*profile}
 
 	batchIteration := 0
@@ -361,6 +393,16 @@ func (s *GeminiBatchMatchService) EvaluateForSingleUser(ctx context.Context, tar
 	}
 }
 
+func (s *GeminiBatchMatchService) resetRunErrorsIfHealthy() {
+	s.modelErrorMutex.Lock()
+	defer s.modelErrorMutex.Unlock()
+
+	if !s.isPipelinePermanentlyStopped {
+		s.runDisabledModels = make(map[string]bool)
+		s.modelRunErrors = make(map[string]int)
+	}
+}
+
 func (s *GeminiBatchMatchService) getNextModelName() (string, error) {
 	s.modelErrorMutex.RLock()
 	if s.isPipelinePermanentlyStopped {
@@ -379,20 +421,14 @@ func (s *GeminiBatchMatchService) getNextModelName() (string, error) {
 	s.modelErrorMutex.RLock()
 	var activeModels []string
 	for _, model := range s.Models {
-		if !s.disabledModels[model] {
+		if !s.disabledModels[model] && !s.runDisabledModels[model] {
 			activeModels = append(activeModels, model)
 		}
 	}
 	s.modelErrorMutex.RUnlock()
 
 	if len(activeModels) == 0 {
-		s.modelErrorMutex.Lock()
-		s.isPipelinePermanentlyStopped = true
-		if s.OnPipelineShutdown != nil {
-			s.OnPipelineShutdown()
-		}
-		s.modelErrorMutex.Unlock()
-		return "", fmt.Errorf("all configured Gemini models are permanently stopped")
+		return "", fmt.Errorf("no active Gemini models available for this run")
 	}
 
 	nextIndex := s.currentModelIndex.Add(1) - 1
@@ -414,37 +450,38 @@ func (s *GeminiBatchMatchService) recordModelSuccess(modelName string) {
 	s.modelErrorMutex.Lock()
 	defer s.modelErrorMutex.Unlock()
 
-	s.modelConsecutiveErrors[modelName] = 0
+	s.modelRunErrors[modelName] = 0
 }
 
 func (s *GeminiBatchMatchService) recordModelFailure(ctx context.Context, modelName string, failureReason string) {
 	s.modelErrorMutex.Lock()
 	defer s.modelErrorMutex.Unlock()
 
-	s.modelConsecutiveErrors[modelName]++
-	consecutiveErrors := s.modelConsecutiveErrors[modelName]
+	s.modelRunErrors[modelName]++
+	consecutiveErrors := s.modelRunErrors[modelName]
 
-	log.Printf("[GeminiBatchMatchService] Model '%s' consecutive error count: %d/%d (Reason: %s)",
+	log.Printf("[GeminiBatchMatchService] Model '%s' error count for current run: %d/%d (Reason: %s)",
 		modelName, consecutiveErrors, maxConsecutiveModelErrors, failureReason)
 
-	if consecutiveErrors >= maxConsecutiveModelErrors && !s.disabledModels[modelName] {
-		s.disabledModels[modelName] = true
-		log.Printf("[GeminiBatchMatchService] Model '%s' exceeded %d consecutive errors. Permanently disabling model.",
+	if consecutiveErrors >= maxConsecutiveModelErrors && !s.runDisabledModels[modelName] {
+		s.runDisabledModels[modelName] = true
+		log.Printf("[GeminiBatchMatchService] Model '%s' reached %d errors in current run. Disabled for this turn.",
 			modelName, maxConsecutiveModelErrors)
 
-		go s.notifyAdminModelDisabled(modelName, failureReason)
-
-		allDisabled := true
+		allDisabledInRun := true
 		for _, model := range s.Models {
-			if !s.disabledModels[model] {
-				allDisabled = false
+			if !s.runDisabledModels[model] && !s.disabledModels[model] {
+				allDisabledInRun = false
 				break
 			}
 		}
 
-		if allDisabled && !s.isPipelinePermanentlyStopped {
+		if allDisabledInRun && !s.isPipelinePermanentlyStopped {
 			s.isPipelinePermanentlyStopped = true
-			log.Println("[GeminiBatchMatchService] All configured Gemini models permanently disabled. Shutting down AI evaluation pipeline.")
+			for _, model := range s.Models {
+				s.disabledModels[model] = true
+			}
+			log.Println("[GeminiBatchMatchService] All configured Gemini models reached error threshold. Permanently shutting down AI evaluation pipeline.")
 			if s.OnPipelineShutdown != nil {
 				s.OnPipelineShutdown()
 			}
@@ -556,9 +593,8 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 	cleanJSON := sanitizeJSONResponse(rawOutput)
 	var batchResult GeminiBatchResponse
 	if errJSON := json.Unmarshal([]byte(cleanJSON), &batchResult); errJSON != nil {
-		log.Printf("[GeminiBatchMatchService] JSON parse error from model %s: %v", modelName, errJSON)
+		log.Printf("[GeminiBatchMatchService] JSON parse warning from model %s: %v. Raw output will not be counted as model error.", modelName, errJSON)
 		utils.LogRawAIResponse("GeminiBatch-PARSE-ERROR", modelName, promptText, rawOutput, time.Since(requestStart), true)
-		s.recordModelFailure(ctx, modelName, "JSON parse failure: "+errJSON.Error())
 		return false
 	}
 
@@ -601,7 +637,7 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 func (s *GeminiBatchMatchService) IsModelDisabledForTest(modelName string) bool {
 	s.modelErrorMutex.RLock()
 	defer s.modelErrorMutex.RUnlock()
-	return s.disabledModels[modelName]
+	return s.disabledModels[modelName] || s.runDisabledModels[modelName]
 }
 
 // IsPipelinePermanentlyStoppedForTest checks if the pipeline is permanently stopped.
@@ -615,7 +651,7 @@ func (s *GeminiBatchMatchService) IsPipelinePermanentlyStoppedForTest() bool {
 func (s *GeminiBatchMatchService) GetModelConsecutiveErrorsForTest(modelName string) int {
 	s.modelErrorMutex.RLock()
 	defer s.modelErrorMutex.RUnlock()
-	return s.modelConsecutiveErrors[modelName]
+	return s.modelRunErrors[modelName]
 }
 
 // RecordModelFailureForTest records a model failure for testing.
@@ -626,6 +662,11 @@ func (s *GeminiBatchMatchService) RecordModelFailureForTest(ctx context.Context,
 // RecordModelSuccessForTest records a model success for testing.
 func (s *GeminiBatchMatchService) RecordModelSuccessForTest(modelName string) {
 	s.recordModelSuccess(modelName)
+}
+
+// ResetRunErrorsIfHealthyForTest resets run errors for test simulation of a new run.
+func (s *GeminiBatchMatchService) ResetRunErrorsIfHealthyForTest() {
+	s.resetRunErrorsIfHealthy()
 }
 
 func (s *GeminiBatchMatchService) generateBatchContent(ctx context.Context, modelName string, prompt string) (string, error) {

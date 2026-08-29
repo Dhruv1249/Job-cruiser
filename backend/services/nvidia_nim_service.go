@@ -444,6 +444,8 @@ func (s *NvidiaNimService) EvaluatePendingForAllUsersWithResult(ctx context.Cont
 		workerPool <- i
 	}
 
+	s.consecutiveFailures.Store(0)
+
 	for _, singleBatch := range jobBatches {
 		if workerCtx.Err() != nil || hasCircuitBroken.Load() {
 			break
@@ -461,14 +463,18 @@ func (s *NvidiaNimService) EvaluatePendingForAllUsersWithResult(ctx context.Cont
 			}
 
 			log.Printf("[NvidiaNimWorker-%d] Starting evaluation for batch of %d jobs...", id, len(batch))
-			success := s.evaluateJobBatchWithBackoff(workerCtx, userProfiles, batch, evaluatedJobIDs, &syncMutex, id)
+			success, isAPIError := s.evaluateJobBatchWithBackoff(workerCtx, userProfiles, batch, evaluatedJobIDs, &syncMutex, id)
 			if !success {
-				failureCount := s.consecutiveFailures.Add(1)
-				log.Printf("[NvidiaNimWorker-%d] Batch of %d jobs failed. Consecutive failure count across all workers: %d/4", id, len(batch), failureCount)
-				if failureCount >= 4 {
-					log.Println("[NvidiaNimService] 4 continuous worker errors reached across all workers. Triggering circuit breaker and stopping NVIDIA NIM worker pool.")
-					hasCircuitBroken.Store(true)
-					cancelWorkers()
+				if isAPIError {
+					failureCount := s.consecutiveFailures.Add(1)
+					log.Printf("[NvidiaNimWorker-%d] Batch of %d jobs failed with API error. Run failure count: %d/6", id, len(batch), failureCount)
+					if failureCount >= 6 {
+						log.Println("[NvidiaNimService] 6 continuous API errors reached across all workers. Triggering circuit breaker and stopping NVIDIA NIM worker pool for this run.")
+						hasCircuitBroken.Store(true)
+						cancelWorkers()
+					}
+				} else {
+					log.Printf("[NvidiaNimWorker-%d] Batch of %d jobs had JSON parse warning (not counted towards 6 run failures).", id, len(batch))
 				}
 			} else {
 				s.consecutiveFailures.Store(0)
@@ -530,6 +536,8 @@ func (s *NvidiaNimService) EvaluateForSingleUserWithResult(ctx context.Context, 
 	workerCtx, cancelWorkers := context.WithCancel(ctx)
 	defer cancelWorkers()
 
+	s.consecutiveFailures.Store(0)
+
 	for index := 0; index < len(jobBatches); index++ {
 		if workerCtx.Err() != nil || hasCircuitBroken.Load() {
 			break
@@ -548,13 +556,15 @@ func (s *NvidiaNimService) EvaluateForSingleUserWithResult(ctx context.Context, 
 			if workerCtx.Err() != nil || hasCircuitBroken.Load() {
 				return
 			}
-			success := s.evaluateJobBatchWithBackoff(workerCtx, []UserProfileData{*profile}, batch, evaluatedJobIDs, &syncMutex, id)
+			success, isAPIError := s.evaluateJobBatchWithBackoff(workerCtx, []UserProfileData{*profile}, batch, evaluatedJobIDs, &syncMutex, id)
 			if !success {
-				failureCount := s.consecutiveFailures.Add(1)
-				if failureCount >= 4 {
-					log.Println("[NvidiaNimService] 4 continuous worker errors reached for single user evaluation. Circuit breaker triggered.")
-					hasCircuitBroken.Store(true)
-					cancelWorkers()
+				if isAPIError {
+					failureCount := s.consecutiveFailures.Add(1)
+					if failureCount >= 6 {
+						log.Println("[NvidiaNimService] 6 continuous API errors reached for single user evaluation. Circuit breaker triggered.")
+						hasCircuitBroken.Store(true)
+						cancelWorkers()
+					}
 				}
 			} else {
 				s.consecutiveFailures.Store(0)
@@ -874,18 +884,18 @@ func (s *NvidiaNimService) evaluateJobBatchWithBackoff(
 	evaluatedJobIDs map[string]bool,
 	syncMutex *sync.Mutex,
 	workerID int,
-) bool {
+) (bool, bool) {
 	expectedResultCount := len(batch) * len(userProfiles)
-	batchResult, rawText, promptText, ok := s.callBatchEvaluationAPI(ctx, userProfiles, batch, expectedResultCount, workerID)
+	batchResult, rawText, promptText, ok, isAPIError := s.callBatchEvaluationAPI(ctx, userProfiles, batch, expectedResultCount, workerID)
 	if !ok {
 		utils.LogRawAIResponse(fmt.Sprintf("Worker-%d-ERROR", workerID), s.ModelName, promptText, rawText, 0, true)
-		return false
+		return false, isAPIError
 	}
 
 	if len(batchResult.Results) == 0 {
 		log.Printf("[Worker-%d] Model returned empty results for batch of %d jobs — skipping.", workerID, len(batch))
 		utils.LogRawAIResponse(fmt.Sprintf("Worker-%d-EMPTY", workerID), s.ModelName, promptText, rawText, 0, true)
-		return false
+		return false, false
 	}
 
 	utils.LogRawAIResponse(fmt.Sprintf("Worker-%d", workerID), s.ModelName, promptText, rawText, 0, false)
@@ -918,18 +928,18 @@ func (s *NvidiaNimService) evaluateJobBatchWithBackoff(
 		syncMutex.Unlock()
 	}
 
-	return true
+	return true, false
 }
 
 // callBatchEvaluationAPI issues a single NIM API call for the given batch and returns the parsed
-// result, the raw response text, the prompt used, and whether the call succeeded structurally.
+// result, the raw response text, the prompt used, whether the call succeeded structurally, and whether failure was an API error.
 func (s *NvidiaNimService) callBatchEvaluationAPI(
 	ctx context.Context,
 	userProfiles []UserProfileData,
 	batch []JobSnippetData,
 	expectedResultCount int,
 	workerID int,
-) (nvidiaBatchResponse, string, string, bool) {
+) (nvidiaBatchResponse, string, string, bool, bool) {
 	promptText := buildMultiJobPrompt(userProfiles, batch, expectedResultCount)
 	messages := []nvidiaRequestMessage{
 		{
@@ -945,6 +955,8 @@ You MUST output exactly this structure:
       "match_score": <integer 0-100>,
       "match_reasoning": "<detailed 2-3 line description detailing location, tech stack, and experience comparison>",
       "inferred_required_yoe": <integer: minimum required years of experience inferred from JD, title, or requirements>,
+      "standardized_location": "<standardized canonical location e.g. Bengaluru, India or Remote (Global)>",
+      "work_model": "<remote|hybrid|onsite>",
       "is_matched": <true|false>
     }
   ]
@@ -972,18 +984,18 @@ Violating this format — outputting any text before or after the JSON, using a 
 	responseBytes, errCall := s.executeNvidiaAPIWithRetry(ctx, payload, workerID)
 	if errCall != nil {
 		log.Printf("[Worker-%d] API call failed for batch of %d jobs: %v", workerID, len(batch), errCall)
-		return nvidiaBatchResponse{}, "", promptText, false
+		return nvidiaBatchResponse{}, "", promptText, false, true
 	}
 
 	var parsedResponse nvidiaAPIResponse
 	if errUnmarshal := json.Unmarshal(responseBytes, &parsedResponse); errUnmarshal != nil {
 		log.Printf("[Worker-%d] Unmarshal error for batch of %d jobs: %v", workerID, len(batch), errUnmarshal)
-		return nvidiaBatchResponse{}, "", promptText, false
+		return nvidiaBatchResponse{}, "", promptText, false, true
 	}
 
 	if len(parsedResponse.Choices) == 0 {
 		log.Printf("[Worker-%d] Empty choices array for batch of %d jobs", workerID, len(batch))
-		return nvidiaBatchResponse{}, "", promptText, false
+		return nvidiaBatchResponse{}, "", promptText, false, true
 	}
 
 	rawText := parsedResponse.Choices[0].Message.Content
@@ -991,12 +1003,12 @@ Violating this format — outputting any text before or after the JSON, using a 
 
 	var batchResult nvidiaBatchResponse
 	if errJSON := json.Unmarshal([]byte(cleanJSON), &batchResult); errJSON != nil {
-		log.Printf("[Worker-%d] JSON parse error for batch of %d jobs: %v", workerID, len(batch), errJSON)
-		utils.LogRawAIResponse(fmt.Sprintf("Worker-%d-ERROR", workerID), s.ModelName, promptText, "RAW_OUTPUT:\n"+rawText+"\n\nCLEANED_JSON:\n"+cleanJSON, 0, true)
-		return nvidiaBatchResponse{}, rawText, promptText, false
+		log.Printf("[Worker-%d] JSON parse warning for batch of %d jobs: %v. Output will not be counted as API error.", workerID, len(batch), errJSON)
+		utils.LogRawAIResponse(fmt.Sprintf("Worker-%d-PARSE-ERROR", workerID), s.ModelName, promptText, "RAW_OUTPUT:\n"+rawText+"\n\nCLEANED_JSON:\n"+cleanJSON, 0, true)
+		return nvidiaBatchResponse{}, rawText, promptText, false, false
 	}
 
-	return batchResult, rawText, promptText, true
+	return batchResult, rawText, promptText, true, false
 }
 
 func (s *NvidiaNimService) executeNvidiaAPIWithRetry(ctx context.Context, payload nvidiaRequest, workerID int) ([]byte, error) {
