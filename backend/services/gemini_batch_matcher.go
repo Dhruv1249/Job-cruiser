@@ -73,13 +73,49 @@ type GeminiBatchMatchService struct {
 	modelRunErrors               map[string]int
 	disabledModels               map[string]bool
 	runDisabledModels            map[string]bool
+	ModelTokenBudgets            map[string]int
 }
 
 const (
-	maxConsecutiveModelErrors   = 6
-	defaultFlashLiteTokenBudget = 100000
-	defaultStandardTokenBudget  = 250000
+	maxConsecutiveModelErrors = 6
+	defaultGlobalTokenBudget  = 100000
 )
+
+// GetTargetTokenBudgetForModel returns the per-model token budget based on GEMINI_MODEL_TOKEN_BUDGETS or global fallback.
+func (s *GeminiBatchMatchService) GetTargetTokenBudgetForModel(modelName string) int {
+	normalizedName := strings.ToLower(strings.TrimSpace(modelName))
+
+	if s.ModelTokenBudgets != nil {
+		if budget, exists := s.ModelTokenBudgets[normalizedName]; exists && budget > 0 {
+			return budget
+		}
+	}
+
+	if s.TargetTokenBudget > 0 {
+		return s.TargetTokenBudget
+	}
+
+	return defaultGlobalTokenBudget
+}
+
+func parseConfiguredModelTokenBudgets() map[string]int {
+	budgets := make(map[string]int)
+	rawBudgets := strings.TrimSpace(os.Getenv("GEMINI_MODEL_TOKEN_BUDGETS"))
+	if rawBudgets != "" {
+		pairs := strings.Split(rawBudgets, ",")
+		for _, pair := range pairs {
+			parts := strings.Split(pair, "=")
+			if len(parts) == 2 {
+				modelKey := strings.ToLower(strings.TrimSpace(parts[0]))
+				valStr := strings.TrimSpace(parts[1])
+				if parsedVal, err := strconv.Atoi(valStr); err == nil && parsedVal > 0 {
+					budgets[modelKey] = parsedVal
+				}
+			}
+		}
+	}
+	return budgets
+}
 
 // NewGeminiBatchMatchService constructs a new GeminiBatchMatchService configured via environment variables.
 func NewGeminiBatchMatchService(databasePool *pgxpool.Pool, apiKey string) *GeminiBatchMatchService {
@@ -90,17 +126,19 @@ func NewGeminiBatchMatchService(databasePool *pgxpool.Pool, apiKey string) *Gemi
 	configuredModels := parseConfiguredGeminiModels()
 	tokenBudget := parseConfiguredTokenBudget()
 	rateLimitDuration := parseConfiguredRateLimitDuration()
+	modelBudgets := parseConfiguredModelTokenBudgets()
 
 	return &GeminiBatchMatchService{
-		DB:                 databasePool,
-		APIKey:             apiKey,
-		HTTPClient:         &http.Client{Timeout: 15 * time.Minute},
-		Models:             configuredModels,
-		TargetTokenBudget:  tokenBudget,
-		RateLimitInterval:  rateLimitDuration,
-		modelRunErrors:     make(map[string]int),
-		disabledModels:     make(map[string]bool),
-		runDisabledModels:  make(map[string]bool),
+		DB:                databasePool,
+		APIKey:            apiKey,
+		HTTPClient:        &http.Client{Timeout: 15 * time.Minute},
+		Models:            configuredModels,
+		TargetTokenBudget: tokenBudget,
+		RateLimitInterval: rateLimitDuration,
+		modelRunErrors:    make(map[string]int),
+		disabledModels:    make(map[string]bool),
+		runDisabledModels: make(map[string]bool),
+		ModelTokenBudgets: modelBudgets,
 	}
 }
 
@@ -245,26 +283,8 @@ func (s *GeminiBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context
 		return
 	}
 
-	effectiveBudget := s.TargetTokenBudget
-	if effectiveBudget <= 0 {
-		effectiveBudget = defaultStandardTokenBudget
-		for _, model := range s.Models {
-			if strings.Contains(strings.ToLower(model), "flash-lite") || strings.Contains(strings.ToLower(model), "3.1-flash-lite") {
-				effectiveBudget = defaultFlashLiteTokenBudget
-				break
-			}
-		}
-	}
-
-	jobBatches := buildMultiJobTokenBatches(ctx, pendingJobs, effectiveBudget)
-	if len(jobBatches) == 0 {
-		return
-	}
-
-	log.Printf("[GeminiBatchMatchService] Dispatching sequential Gemini pipeline across %d initial batches (Token Budget: %d)...", len(jobBatches), effectiveBudget)
-
 	batchIteration := 0
-	for len(jobBatches) > 0 {
+	for len(pendingJobs) > 0 {
 		select {
 		case <-ctx.Done():
 			return
@@ -272,13 +292,9 @@ func (s *GeminiBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context
 		}
 
 		if s.IsPipelinePermanentlyStopped() {
-			log.Println("[GeminiBatchMatchService] AI matching pipeline is permanently stopped. Aborting remaining batches.")
+			log.Println("[GeminiBatchMatchService] AI matching pipeline is permanently stopped. Aborting remaining jobs.")
 			return
 		}
-
-		singleBatch := jobBatches[0]
-		jobBatches = jobBatches[1:]
-		batchIteration++
 
 		selectedModel, errModel := s.getNextModelName()
 		if errModel != nil {
@@ -286,17 +302,22 @@ func (s *GeminiBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context
 			return
 		}
 
-		log.Printf("[GeminiBatchMatchService] Processing batch %d (%d jobs, %d remaining in queue) using model: %s...",
-			batchIteration, len(singleBatch), len(jobBatches), selectedModel)
+		modelBudget := s.GetTargetTokenBudgetForModel(selectedModel)
+		singleBatch, remainingJobs := extractSingleJobBatch(pendingJobs, modelBudget)
+		pendingJobs = remainingJobs
+		batchIteration++
+
+		log.Printf("[GeminiBatchMatchService] Processing batch %d (%d jobs, %d remaining in queue) using model: %s (Token Budget: %d)...",
+			batchIteration, len(singleBatch), len(pendingJobs), selectedModel, modelBudget)
 
 		s.enforceRateLimitPacing()
 
 		currentBatchEvaluatedIDs := make(map[string]bool)
 		success := s.evaluateJobBatch(ctx, userProfiles, singleBatch, currentBatchEvaluatedIDs, selectedModel)
 		if !success {
-			log.Printf("[GeminiBatchMatchService] Batch of %d jobs failed with model %s — re-queuing batch at the end of queue.", len(singleBatch), selectedModel)
+			log.Printf("[GeminiBatchMatchService] Batch of %d jobs failed with model %s — re-queuing jobs at the end of queue.", len(singleBatch), selectedModel)
 			if !s.IsPipelinePermanentlyStopped() {
-				jobBatches = append(jobBatches, singleBatch)
+				pendingJobs = append(pendingJobs, singleBatch...)
 			}
 		} else {
 			if len(currentBatchEvaluatedIDs) > 0 {
@@ -342,22 +363,10 @@ func (s *GeminiBatchMatchService) EvaluateForSingleUser(ctx context.Context, tar
 		return
 	}
 
-	effectiveBudget := s.TargetTokenBudget
-	if effectiveBudget <= 0 {
-		effectiveBudget = defaultStandardTokenBudget
-		for _, model := range s.Models {
-			if strings.Contains(strings.ToLower(model), "flash-lite") || strings.Contains(strings.ToLower(model), "3.1-flash-lite") {
-				effectiveBudget = defaultFlashLiteTokenBudget
-				break
-			}
-		}
-	}
-
-	jobBatches := buildMultiJobTokenBatches(ctx, unmatchedJobs, effectiveBudget)
 	userProfiles := []UserProfileData{*profile}
-
 	batchIteration := 0
-	for len(jobBatches) > 0 {
+
+	for len(unmatchedJobs) > 0 {
 		select {
 		case <-ctx.Done():
 			return
@@ -369,28 +378,65 @@ func (s *GeminiBatchMatchService) EvaluateForSingleUser(ctx context.Context, tar
 			return
 		}
 
-		singleBatch := jobBatches[0]
-		jobBatches = jobBatches[1:]
-		batchIteration++
-
 		selectedModel, errModel := s.getNextModelName()
 		if errModel != nil {
 			log.Printf("[GeminiBatchMatchService] Configuration error for user %s: %v", targetUserID, errModel)
 			return
 		}
 
+		modelBudget := s.GetTargetTokenBudgetForModel(selectedModel)
+		singleBatch, remainingJobs := extractSingleJobBatch(unmatchedJobs, modelBudget)
+		unmatchedJobs = remainingJobs
+		batchIteration++
+
+		log.Printf("[GeminiBatchMatchService] Processing single-user batch %d (%d jobs, %d remaining) for user %s using model: %s (Token Budget: %d)...",
+			batchIteration, len(singleBatch), len(unmatchedJobs), targetUserID, selectedModel, modelBudget)
+
 		s.enforceRateLimitPacing()
 		currentBatchEvaluatedIDs := make(map[string]bool)
 		success := s.evaluateJobBatch(ctx, userProfiles, singleBatch, currentBatchEvaluatedIDs, selectedModel)
 		if !success {
-			log.Printf("[GeminiBatchMatchService] Single-user batch of %d jobs failed with model %s — re-queuing batch at the end of queue.", len(singleBatch), selectedModel)
+			log.Printf("[GeminiBatchMatchService] Single-user batch of %d jobs failed with model %s — re-queuing jobs at the end of queue.", len(singleBatch), selectedModel)
 			if !s.IsPipelinePermanentlyStopped() {
-				jobBatches = append(jobBatches, singleBatch)
+				unmatchedJobs = append(unmatchedJobs, singleBatch...)
 			}
 		} else {
 			log.Printf("[GeminiBatchMatchService] Evaluated single-user batch %d (%d jobs) for user %s.", batchIteration, len(singleBatch), targetUserID)
 		}
 	}
+}
+
+func extractSingleJobBatch(jobs []JobSnippetData, targetTokenBudget int) ([]JobSnippetData, []JobSnippetData) {
+	if len(jobs) == 0 {
+		return nil, nil
+	}
+	if targetTokenBudget <= 0 {
+		targetTokenBudget = defaultGlobalTokenBudget
+	}
+
+	var batch []JobSnippetData
+	currentTokens := 0
+	cutIndex := 0
+
+	for index, job := range jobs {
+		snippetText := fmt.Sprintf("ID: %s\nTitle: %s\nCompany: %s\nLocation: %s\nDescription: %s\n",
+			job.JobID, job.Title, job.Company, job.Location, truncateTextString(job.Description, maxJobDescriptionLength))
+
+		itemTokens := calculateExactSubwordTokens(snippetText)
+		tokenBudgetExceeded := len(batch) > 0 && currentTokens+itemTokens > targetTokenBudget
+		jobCountExceeded := len(batch) >= maxJobsPerBatch
+
+		if tokenBudgetExceeded || jobCountExceeded {
+			cutIndex = index
+			break
+		}
+
+		batch = append(batch, job)
+		currentTokens += itemTokens
+		cutIndex = index + 1
+	}
+
+	return batch, jobs[cutIndex:]
 }
 
 func (s *GeminiBatchMatchService) resetRunErrorsIfHealthy() {

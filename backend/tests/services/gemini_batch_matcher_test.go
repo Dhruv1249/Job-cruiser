@@ -242,3 +242,30 @@ func TestGeminiBatchMatchServiceTurnBasedRecovery(t *testing.T) {
 		t.Fatalf("expected active model selection on next run, got %s (err: %v)", firstModelNextRun, errNext)
 	}
 }
+
+func TestGeminiBatchMatchServiceModelTokenBudgetsConfig(t *testing.T) {
+	t.Setenv("GEMINI_MODEL_TOKEN_BUDGETS", "gemini-3.5-flash-lite=150000,gemini-3.1-flash-lite=100000,custom-model=300000")
+	t.Setenv("GEMINI_BATCH_TOKEN_BUDGET", "120000")
+
+	service := services.NewGeminiBatchMatchService(nil, "test-api-key")
+
+	budget35 := service.GetTargetTokenBudgetForModel("gemini-3.5-flash-lite")
+	if budget35 != 150000 {
+		t.Fatalf("expected 150000 budget for gemini-3.5-flash-lite, got %d", budget35)
+	}
+
+	budget31 := service.GetTargetTokenBudgetForModel("gemini-3.1-flash-lite")
+	if budget31 != 100000 {
+		t.Fatalf("expected 100000 budget for gemini-3.1-flash-lite, got %d", budget31)
+	}
+
+	budgetCustom := service.GetTargetTokenBudgetForModel("custom-model")
+	if budgetCustom != 300000 {
+		t.Fatalf("expected 300000 budget for custom-model, got %d", budgetCustom)
+	}
+
+	budgetFallback := service.GetTargetTokenBudgetForModel("unlisted-future-model")
+	if budgetFallback != 120000 {
+		t.Fatalf("expected fallback budget 120000 for unlisted-future-model, got %d", budgetFallback)
+	}
+}
