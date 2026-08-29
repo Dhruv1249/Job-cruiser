@@ -169,6 +169,8 @@ KEYWORDS = fetch_master_keywords()
 SINGLE_CALL_FEED_SITES = [
     Site.REMOTEOK,
     Site.WEWORKREMOTELY,
+    Site.HN_HIRING,
+    Site.YC_STARTUP,
     Site.THE_MUSE,
     Site.HIMALAYAS,
     Site.JOBSPRESSO,
