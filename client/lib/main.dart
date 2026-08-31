@@ -358,6 +358,7 @@ class _MyHomePageState extends State<MyHomePage> {
   int _pendingMatchCount = 0;
   int _unreadNotificationCount = 0;
   Timer? _notificationPollingTimer;
+  Timer? _searchDebounceTimer;
   final Set<String> _seenNotificationIds = {};
   bool _hasInitialNotificationSync = false;
 
@@ -377,6 +378,11 @@ class _MyHomePageState extends State<MyHomePage> {
       if (text != _filterState.searchQuery) {
         setState(() {
           _filterState = _filterState.copyWith(searchQuery: text);
+        });
+        _searchDebounceTimer?.cancel();
+        _searchDebounceTimer = Timer(const Duration(milliseconds: 400), () {
+          _filterState.saveToStorage();
+          _loadMatchedJobs();
         });
       }
     });
@@ -460,6 +466,7 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void dispose() {
     _notificationPollingTimer?.cancel();
+    _searchDebounceTimer?.cancel();
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -483,6 +490,8 @@ class _MyHomePageState extends State<MyHomePage> {
       viewedOnly: _filterState.viewMode == 'viewed',
       unviewedOnly: _filterState.viewMode == 'unviewed',
       sortBy: _filterState.sortBy,
+      applicationStatus: _filterState.applicationStatus,
+      searchQuery: _filterState.searchQuery,
       offset: 0,
       limit: 50,
     );
@@ -529,6 +538,8 @@ class _MyHomePageState extends State<MyHomePage> {
       viewedOnly: _filterState.viewMode == 'viewed',
       unviewedOnly: _filterState.viewMode == 'unviewed',
       sortBy: _filterState.sortBy,
+      applicationStatus: _filterState.applicationStatus,
+      searchQuery: _filterState.searchQuery,
       offset: nextOffset,
       limit: 50,
     );
@@ -546,12 +557,12 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _onFilterStateUpdated(JobFilterState updated) {
+    _searchDebounceTimer?.cancel();
     setState(() {
       _filterState = updated;
       _searchController.text = updated.searchQuery;
     });
-    _filterState.saveToStorage();
-    _loadMatchedJobs();
+    _loadMatchedJobs().then((_) => updated.saveToStorage());
   }
 
   void _openFilterSettings() {
@@ -624,10 +635,7 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-  List<MatchedJob> get _filteredJobs {
-    final matching = _matchedJobs.where((job) => _filterState.matchesJob(job)).toList();
-    return _filterState.applySort(matching);
-  }
+  List<MatchedJob> get _filteredJobs => _matchedJobs;
 
   void _markJobAsViewedLocally(MatchedJob targetJob) {
     if (targetJob.jobId.isEmpty) return;

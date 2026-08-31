@@ -191,6 +191,8 @@ class ApiService {
     bool viewedOnly = false,
     bool unviewedOnly = false,
     String sortBy = 'score_desc',
+    String applicationStatus = 'all',
+    String searchQuery = '',
     int limit = 50,
     int offset = 0,
   }) async {
@@ -209,6 +211,12 @@ class ApiService {
 
       if (days != null && days > 0) {
         queryParams['days'] = days;
+      }
+      if (applicationStatus != 'all') {
+        queryParams['application_status'] = applicationStatus;
+      }
+      if (searchQuery.trim().isNotEmpty) {
+        queryParams['search'] = searchQuery.trim();
       }
 
       final response = await _dio.get(

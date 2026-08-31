@@ -102,3 +102,74 @@ func TestMatchedJobResponseUnmarshaling(t *testing.T) {
 		t.Errorf("expected 3 items in TechStack, got %d", len(parsedResponse.TechStack))
 	}
 }
+/*
+TestUnmarshalStringJSONValidArray verifies that a valid JSON array string is correctly decoded into a Go string slice.
+*/
+func TestUnmarshalStringJSONValidArray(t *testing.T) {
+	raw := `["Go","PostgreSQL","Docker"]`
+	var result []string
+	if err := handlers.UnmarshalStringJSON(raw, &result); err != nil {
+		t.Fatalf("expected no error for valid JSON array, got: %v", err)
+	}
+	if len(result) != 3 {
+		t.Errorf("expected 3 items, got %d", len(result))
+	}
+	if result[0] != "Go" || result[1] != "PostgreSQL" || result[2] != "Docker" {
+		t.Errorf("unexpected values: %v", result)
+	}
+}
+
+/*
+TestUnmarshalStringJSONEmptyArray verifies that an empty JSON array is decoded to an empty slice without error.
+*/
+func TestUnmarshalStringJSONEmptyArray(t *testing.T) {
+	raw := `[]`
+	var result []string
+	if err := handlers.UnmarshalStringJSON(raw, &result); err != nil {
+		t.Fatalf("expected no error for empty JSON array, got: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected 0 items, got %d", len(result))
+	}
+}
+
+/*
+TestUnmarshalStringJSONInvalidInput verifies that malformed JSON returns a non-nil error.
+*/
+func TestUnmarshalStringJSONInvalidInput(t *testing.T) {
+	raw := `not valid json`
+	var result []string
+	if err := handlers.UnmarshalStringJSON(raw, &result); err == nil {
+		t.Fatal("expected error for malformed JSON, got nil")
+	}
+}
+
+/*
+TestMatchedJobResponseApplicationStatusField verifies that the application_status field is correctly serialized.
+*/
+func TestMatchedJobResponseApplicationStatusField(t *testing.T) {
+	statuses := []string{"unapplied", "bookmarked", "applied", "interviewing", "offer", "rejected"}
+	for _, status := range statuses {
+		response := handlers.MatchedJobResponse{
+			JobID:             "test-id",
+			ApplicationStatus: status,
+			TechStack:         []string{},
+		}
+		jsonBytes, err := json.Marshal(response)
+		if err != nil {
+			t.Fatalf("failed to marshal for status %q: %v", status, err)
+		}
+		var parsed map[string]interface{}
+		if err := json.Unmarshal(jsonBytes, &parsed); err != nil {
+			t.Fatalf("failed to unmarshal for status %q: %v", status, err)
+		}
+		got, ok := parsed["application_status"]
+		if !ok {
+			t.Errorf("application_status field missing for status %q", status)
+			continue
+		}
+		if got != status {
+			t.Errorf("expected application_status %q, got %q", status, got)
+		}
+	}
+}

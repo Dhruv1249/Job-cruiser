@@ -180,24 +180,30 @@ void main() {
       expect(techSearch.matchesJob(unmatchedJob), isFalse);
     });
 
-    test('applies sorting algorithms correctly', () {
-      final list = [unmatchedJob, highMatchedJob];
+    test('filters by application status correctly', () {
+      const unappliedFilter = JobFilterState(applicationStatus: 'unapplied');
+      expect(unappliedFilter.matchesJob(highMatchedJob), isTrue);
+      expect(unappliedFilter.matchesJob(unmatchedJob), isFalse);
 
-      const sortByScore = JobFilterState(sortBy: 'score_desc');
-      final sortedByScore = sortByScore.applySort(list);
-      expect(sortedByScore.first.jobId, equals('job-1'));
+      const bookmarkedFilter = JobFilterState(applicationStatus: 'bookmarked');
+      expect(bookmarkedFilter.matchesJob(highMatchedJob), isFalse);
+      expect(bookmarkedFilter.matchesJob(unmatchedJob), isTrue);
 
-      const sortByDateDesc = JobFilterState(sortBy: 'date_desc');
-      final sortedByDateDesc = sortByDateDesc.applySort(list);
-      expect(sortedByDateDesc.first.jobId, equals('job-1'));
+      const allStatusFilter = JobFilterState(applicationStatus: 'all');
+      expect(allStatusFilter.matchesJob(highMatchedJob), isTrue);
+      expect(allStatusFilter.matchesJob(unmatchedJob), isTrue);
+    });
 
-      const sortByDateAsc = JobFilterState(sortBy: 'date_asc');
-      final sortedByDateAsc = sortByDateAsc.applySort(list);
-      expect(sortedByDateAsc.first.jobId, equals('job-2'));
-
-      const sortBySalary = JobFilterState(sortBy: 'salary_desc');
-      final sortedBySalary = sortBySalary.applySort(list);
-      expect(sortedBySalary.first.jobId, equals('job-1'));
+    test('combined filters apply all dimensions simultaneously', () {
+      const strictFilter = JobFilterState(
+        matchScope: 'matched_only',
+        minScore: 80,
+        workModel: 'remote_only',
+        viewMode: 'unviewed',
+        applicationStatus: 'unapplied',
+      );
+      expect(strictFilter.matchesJob(highMatchedJob), isTrue);
+      expect(strictFilter.matchesJob(unmatchedJob), isFalse);
     });
   });
 }

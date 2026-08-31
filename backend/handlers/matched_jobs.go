@@ -6,14 +6,19 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Dhruv1249/Job-cruiser/backend/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func unmarshalStringJSON(raw string, target interface{}) error {
+func UnmarshalStringJSON(raw string, target interface{}) error {
 	return json.Unmarshal([]byte(raw), target)
+}
+
+func unmarshalStringJSON(raw string, target interface{}) error {
+	return UnmarshalStringJSON(raw, target)
 }
 
 // MatchedJobsHandler serves the matched jobs endpoint, reading from user_job_matches
@@ -83,6 +88,8 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 	viewedOnly := c.DefaultQuery("viewed_only", "false") == "true"
 	unviewedOnly := c.DefaultQuery("unviewed_only", "false") == "true"
 	sortBy := c.DefaultQuery("sort_by", "score_desc")
+	applicationStatus := c.DefaultQuery("application_status", "all")
+	searchQuery := strings.TrimSpace(c.DefaultQuery("search", ""))
 
 	limitParam := c.DefaultQuery("limit", "50")
 	limit, limitErr := strconv.Atoi(limitParam)
@@ -100,10 +107,8 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 	var args []interface{}
 	args = append(args, userID)
 
-	if daysFilter > 0 && daysFilter <= 14 {
+	if daysFilter > 0 {
 		conditions = append(conditions, fmt.Sprintf("j.scraped_at >= NOW() - INTERVAL '%d days'", daysFilter))
-	} else {
-		conditions = append(conditions, "j.scraped_at >= NOW() - INTERVAL '14 days'")
 	}
 	conditions = append(conditions, "COALESCE(ujm.is_dismissed, false) = false")
 
@@ -131,6 +136,22 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 
 	if remoteOnly {
 		conditions = append(conditions, "j.is_remote = true")
+	}
+
+	if applicationStatus == "unapplied" {
+		conditions = append(conditions, "(app.status IS NULL OR app.status = 'unapplied')")
+	} else if applicationStatus != "all" {
+		args = append(args, applicationStatus)
+		conditions = append(conditions, fmt.Sprintf("app.status = $%d", len(args)))
+	}
+
+	if searchQuery != "" {
+		args = append(args, "%"+searchQuery+"%")
+		searchParamIndex := len(args)
+		conditions = append(conditions, fmt.Sprintf(
+			"(j.title ILIKE $%d OR COALESCE(comp.name, '') ILIKE $%d OR COALESCE(j.location, '') ILIKE $%d OR COALESCE(j.summary, '') ILIKE $%d)",
+			searchParamIndex, searchParamIndex, searchParamIndex, searchParamIndex,
+		))
 	}
 
 	whereClause := ""
