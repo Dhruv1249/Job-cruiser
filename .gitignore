@@ -1,10 +1,11 @@
-# Go
 /backend/backend
 /backend/*.exe
 /backend/bin/
-.env
 
-# Flutter/Dart
+.env*
+*.env*
+**/.env*
+
 /client/.dart_tool/
 /client/.flutter-plugins
 /client/.flutter-plugins-dependencies
@@ -13,12 +14,14 @@
 /client/android/key.properties
 /client/ios/.symlinks/
 
-# Python (For later)
-/scraper/venv/
-/scraper/__pycache__/
+/scrapper/venv/
+/scrapper/__pycache__/
+/scrapper/.pytest_cache/
+/scrapper/data/
+/scrapper/scratch/
 *.pyc
 
-# IDEs
 .vscode/
 .idea/
 .DS_Store
+*.log

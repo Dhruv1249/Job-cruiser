@@ -10,11 +10,13 @@ import 'models/job.dart';
 import 'models/job_filter_state.dart';
 import 'services/api_service.dart';
 import 'services/notification_service.dart';
+import 'services/update_checker_service.dart';
 import 'widgets/company_logo_avatar.dart';
 import 'widgets/notifications_sheet.dart';
 import 'widgets/job_filter_bar.dart';
 import 'widgets/job_filter_dialog.dart';
 import 'widgets/job_detail_panel.dart';
+import 'widgets/update_banner.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 Future<void> main() async {
@@ -345,6 +347,7 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   final ApiService _apiService = ApiService();
+  final UpdateCheckerService _updateCheckerService = UpdateCheckerService();
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
@@ -359,6 +362,8 @@ class _MyHomePageState extends State<MyHomePage> {
   int _unreadNotificationCount = 0;
   Timer? _notificationPollingTimer;
   Timer? _searchDebounceTimer;
+  PendingUpdate? _pendingUpdate;
+  bool _updateBannerDismissed = false;
   final Set<String> _seenNotificationIds = {};
   bool _hasInitialNotificationSync = false;
 
@@ -389,6 +394,12 @@ class _MyHomePageState extends State<MyHomePage> {
     _scrollController.addListener(_onScroll);
   }
 
+  Future<void> _checkForUpdate() async {
+    final update = await _updateCheckerService.checkForUpdate();
+    if (!mounted || update == null) return;
+    setState(() => _pendingUpdate = update);
+  }
+
   Future<void> _initializeFilterAndData() async {
     final savedFilters = await JobFilterState.loadFromStorage();
     if (!mounted) return;
@@ -400,6 +411,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
     await _loadMatchedJobs();
     await _loadUnreadNotificationsCount();
+    _checkForUpdate();
   }
 
   Future<void> _refreshMatchStatus() async {
@@ -655,12 +667,28 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final showUpdateBanner =
+        _pendingUpdate != null && !_updateBannerDismissed;
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final isDesktop = constraints.maxWidth >= 960;
         return Scaffold(
           appBar: _buildAppBar(isDesktop),
-          body: isDesktop ? _buildDesktopSplitLayout() : _buildMobileFeedLayout(),
+          body: Column(
+            children: [
+              if (showUpdateBanner)
+                UpdateBanner(
+                  update: _pendingUpdate!,
+                  onDismiss: () => setState(() => _updateBannerDismissed = true),
+                ),
+              Expanded(
+                child: isDesktop
+                    ? _buildDesktopSplitLayout()
+                    : _buildMobileFeedLayout(),
+              ),
+            ],
+          ),
         );
       },
     );
