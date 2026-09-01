@@ -39,7 +39,8 @@ jobs:
           key: ${{ secrets.OCI_SSH_KEY }}
           script: |
             cd ~/Job-cruiser/scrapper
-            git pull origin main
+            git fetch origin
+            git reset --hard origin/main
             docker build -t jobcruiser-scraper:latest .
 
             sudo bash -c 'cat << "EOF" > /etc/systemd/system/jobcruiser-scraper.service
@@ -50,7 +51,7 @@ jobs:
             [Service]
             Type=oneshot
             WorkingDirectory=/home/opc/Job-cruiser/scrapper
-            ExecStart=/usr/bin/docker run --rm --net host --env-file /home/opc/Job-cruiser/.env jobcruiser-scraper:latest
+            ExecStart=/usr/bin/docker run --rm --net host -e TZ=Asia/Kolkata --env-file /home/opc/Job-cruiser/.env jobcruiser-scraper:latest
             EOF
 
             cat << "EOF" > /etc/systemd/system/jobcruiser-scraper.timer

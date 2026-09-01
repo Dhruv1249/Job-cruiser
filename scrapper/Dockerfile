@@ -6,7 +6,10 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ca-certificates \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+ENV TZ=Asia/Kolkata
 
 # Copy requirements and install all dependencies (including JobSpy fork from git)
 COPY requirements.txt .

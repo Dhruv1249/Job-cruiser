@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/Dhruv1249/Job-cruiser/backend/db"
 	"github.com/Dhruv1249/Job-cruiser/backend/handlers"
@@ -22,6 +23,11 @@ import (
 )
 
 func main() {
+	kolkataLocation, locationError := time.LoadLocation("Asia/Kolkata")
+	if locationError == nil {
+		time.Local = kolkataLocation
+	}
+
 	utils.InitColorLogger()
 	utils.ClearRawAILogFile()
 	gin.ForceConsoleColor()

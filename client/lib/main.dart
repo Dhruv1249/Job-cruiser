@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'details.dart' as details_page;
 import 'profile.dart';
@@ -180,6 +181,13 @@ class JobCruiserShell extends StatefulWidget {
 
 class _JobCruiserShellState extends State<JobCruiserShell> {
   int _currentIndex = 0;
+  final ValueNotifier<int> _inboxRefreshTrigger = ValueNotifier<int>(0);
+
+  @override
+  void dispose() {
+    _inboxRefreshTrigger.dispose();
+    super.dispose();
+  }
 
   void _openJobDetails(MatchedJob job) async {
     await Navigator.of(context).push(
@@ -200,7 +208,10 @@ class _JobCruiserShellState extends State<JobCruiserShell> {
       body: IndexedStack(
         index: _currentIndex,
         children: [
-          MyHomePage(onSelectJob: _openJobDetails),
+          MyHomePage(
+            onSelectJob: _openJobDetails,
+            refreshTrigger: _inboxRefreshTrigger,
+          ),
           const ApplicationTrackerPage(),
           const ProfilePage(),
         ],
@@ -261,7 +272,13 @@ class _JobCruiserShellState extends State<JobCruiserShell> {
   Widget _buildDesktopNavItem(int index, String label, IconData unselectedIcon, IconData selectedIcon) {
     final isSelected = _currentIndex == index;
     return InkWell(
-      onTap: () => setState(() => _currentIndex = index),
+      onTap: () {
+        if (_currentIndex == index && index == 0) {
+          _inboxRefreshTrigger.value++;
+        } else {
+          setState(() => _currentIndex = index);
+        }
+      },
       borderRadius: BorderRadius.circular(8),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -309,9 +326,13 @@ class _JobCruiserShellState extends State<JobCruiserShell> {
       child: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (int index) {
-          setState(() {
-            _currentIndex = index;
-          });
+          if (_currentIndex == index && index == 0) {
+            _inboxRefreshTrigger.value++;
+          } else {
+            setState(() {
+              _currentIndex = index;
+            });
+          }
         },
         destinations: const [
           NavigationDestination(
@@ -337,9 +358,14 @@ class _JobCruiserShellState extends State<JobCruiserShell> {
 
 /// Primary feed page rendering job opportunities with responsive master-detail layouts.
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.onSelectJob});
+  const MyHomePage({
+    super.key,
+    required this.onSelectJob,
+    this.refreshTrigger,
+  });
 
   final Function(MatchedJob job) onSelectJob;
+  final ValueListenable<int>? refreshTrigger;
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
@@ -370,6 +396,7 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
+    widget.refreshTrigger?.addListener(_scrollToTopAndRefresh);
     _initializeFilterAndData();
     _notificationPollingTimer = Timer.periodic(
       const Duration(seconds: 6),
@@ -476,12 +503,33 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   @override
+  void didUpdateWidget(covariant MyHomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshTrigger != widget.refreshTrigger) {
+      oldWidget.refreshTrigger?.removeListener(_scrollToTopAndRefresh);
+      widget.refreshTrigger?.addListener(_scrollToTopAndRefresh);
+    }
+  }
+
+  @override
   void dispose() {
+    widget.refreshTrigger?.removeListener(_scrollToTopAndRefresh);
     _notificationPollingTimer?.cancel();
     _searchDebounceTimer?.cancel();
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _scrollToTopAndRefresh() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0.0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+    _loadMatchedJobs();
   }
 
   Future<void> _loadMatchedJobs() async {

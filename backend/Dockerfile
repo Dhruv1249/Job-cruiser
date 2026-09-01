@@ -17,6 +17,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o backend-server main.go
 FROM alpine:3.19
 
 RUN apk add --no-cache ca-certificates tzdata
+ENV TZ=Asia/Kolkata
 
 WORKDIR /app
 

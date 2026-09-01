@@ -43,5 +43,6 @@ jobs:
               --name jobcruiser-backend \
               --restart unless-stopped \
               --net host \
+              -e TZ=Asia/Kolkata \
               --env-file ~/Job-cruiser/.env \
               jobcruiser-backend:latest
