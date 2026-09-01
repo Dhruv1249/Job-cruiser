@@ -169,16 +169,15 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 
 	var orderByClause string
 	if viewedOnly {
-		orderByClause = "ORDER BY ujv.viewed_at DESC"
+		orderByClause = "\n\t\tORDER BY ujv.viewed_at DESC"
 	} else {
 		switch sortBy {
 		case "date_desc":
-			orderByClause = "ORDER BY j.scraped_at DESC"
+			orderByClause = "\n\t\tORDER BY j.scraped_at DESC"
 		case "date_asc":
-			orderByClause = "ORDER BY j.scraped_at ASC"
+			orderByClause = "\n\t\tORDER BY j.scraped_at ASC"
 		case "salary_desc":
-			orderByClause = "ORDER BY COALESCE(j.salary_max, j.salary_min, 0) DESC, j.scraped_at DESC"
-		case "score_desc":
+			orderByClause = "\n\t\tORDER BY COALESCE(j.salary_max, j.salary_min, 0) DESC, j.scraped_at DESC"
 		default:
 			orderByClause = `
 		ORDER BY
