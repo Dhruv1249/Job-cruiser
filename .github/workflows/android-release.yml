@@ -42,11 +42,13 @@ jobs:
         id: version
         run: |
           VERSION_NAME=$(grep '^version:' client/pubspec.yaml | sed 's/version: //' | cut -d'+' -f1 | xargs)
-          VERSION_CODE=${{ github.run_number }}
+          VERSION_CODE=$(grep '^version:' client/pubspec.yaml | sed 's/version: //' | cut -s -d'+' -f2 | xargs)
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE=${{ github.run_number }}
+          fi
           echo "name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
           echo "code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
-          echo "tag=v${VERSION_NAME}+${VERSION_CODE}" >> "$GITHUB_OUTPUT"
-          echo "full=${VERSION_NAME}+${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Restore keystore from secret
         env:
@@ -89,27 +91,22 @@ jobs:
       - name: Rename APK with version
         run: |
           mv client/build/app/outputs/flutter-apk/app-release.apk \
-             client/build/app/outputs/flutter-apk/JobCruiser-${{ steps.version.outputs.full }}.apk
+             client/build/app/outputs/flutter-apk/JobCruiser-v${{ steps.version.outputs.name }}.apk
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: "Job Cruiser ${{ steps.version.outputs.name }} (build ${{ steps.version.outputs.code }})"
+          name: "Job Cruiser v${{ steps.version.outputs.name }}"
           body: |
-            ## Job Cruiser ${{ steps.version.outputs.name }}
+            ## Job Cruiser v${{ steps.version.outputs.name }}
 
-            **Build:** `${{ steps.version.outputs.code }}`
             **Commit:** `${{ github.sha }}`
-
-            ### Install
-            Download `JobCruiser-${{ steps.version.outputs.full }}.apk` below and open it on your Android device.
-            Enable *Install from unknown sources* for your browser or file manager if prompted.
 
             ### What changed
             ${{ github.event.head_commit.message }}
           files: |
-            client/build/app/outputs/flutter-apk/JobCruiser-${{ steps.version.outputs.full }}.apk
+            client/build/app/outputs/flutter-apk/JobCruiser-v${{ steps.version.outputs.name }}.apk
           make_latest: true
           draft: false
           prerelease: false

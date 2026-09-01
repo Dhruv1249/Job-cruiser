@@ -47,26 +47,40 @@ class _FakeDio extends DioMixin implements Dio {
 }
 
 void main() {
-  group('UpdateCheckerService._extractBuildNumber via tag parsing', () {
-    late UpdateCheckerService service;
-
-    setUp(() {
-      service = UpdateCheckerService(
-        dio: _FakeDio(fakeResponse: _buildFakeRelease(tagName: 'v1.0.0+0')),
-      );
+  group('Semantic version comparison logic', () {
+    test('detects patch version increment', () {
+      expect(UpdateCheckerService.isVersionNewer('1.0.1', '1.0.0'), isTrue);
+      expect(UpdateCheckerService.isVersionNewer('1.0.12', '1.0.1'), isTrue);
+      expect(UpdateCheckerService.isVersionNewer('1.0.12', '1.0.11'), isTrue);
+      expect(UpdateCheckerService.isVersionNewer('1.0.1', '1.0.12'), isFalse);
     });
 
-    test('returns null when GitHub response shows same build number as installed', () async {
-      final fakeRelease = _buildFakeRelease(
-        tagName: 'v1.0.0+1',
-        apkAssetName: 'JobCruiser-1.0.0+1.apk',
-      );
-      final dio = _FakeDio(fakeResponse: fakeRelease);
-      final testService = UpdateCheckerService(dio: dio);
-      final update = await testService.checkForUpdate();
-      expect(update, isNull);
+    test('detects minor version increment', () {
+      expect(UpdateCheckerService.isVersionNewer('1.1.0', '1.0.12'), isTrue);
+      expect(UpdateCheckerService.isVersionNewer('1.9.12', '1.1.0'), isTrue);
+      expect(UpdateCheckerService.isVersionNewer('1.1.0', '1.2.0'), isFalse);
     });
 
+    test('detects major version increment', () {
+      expect(UpdateCheckerService.isVersionNewer('2.0.0', '1.9.12'), isTrue);
+      expect(UpdateCheckerService.isVersionNewer('1.9.12', '2.0.0'), isFalse);
+    });
+
+    test('handles leading v prefix and build numbers', () {
+      expect(UpdateCheckerService.isVersionNewer('v1.0.12', '1.0.0'), isTrue);
+      expect(UpdateCheckerService.isVersionNewer('v1.1.0+5', '1.0.12+1'), isTrue);
+      expect(UpdateCheckerService.isVersionNewer('1.0.0', 'v1.0.0'), isFalse);
+    });
+
+    test('isVersionEqual identifies identical versions', () {
+      expect(UpdateCheckerService.isVersionEqual('1.0.0', '1.0.0'), isTrue);
+      expect(UpdateCheckerService.isVersionEqual('v1.0.12', '1.0.12'), isTrue);
+      expect(UpdateCheckerService.isVersionEqual('v1.0.12+4', '1.0.12+9'), isTrue);
+      expect(UpdateCheckerService.isVersionEqual('1.0.0', '1.0.1'), isFalse);
+    });
+  });
+
+  group('UpdateCheckerService API responses', () {
     test('returns null when network request throws', () async {
       final testService = UpdateCheckerService(dio: _FakeDio(fakeResponse: {}, throwError: true));
       final update = await testService.checkForUpdate();
@@ -74,67 +88,7 @@ void main() {
     });
 
     test('returns null when release has no APK asset', () async {
-      final fakeRelease = _buildFakeRelease(tagName: 'v1.0.0+9999');
-      final testService = UpdateCheckerService(dio: _FakeDio(fakeResponse: fakeRelease));
-      final update = await testService.checkForUpdate();
-      expect(update, isNull);
-    });
-
-    test('returns null when tag has no build number component', () async {
-      final fakeRelease = _buildFakeRelease(
-        tagName: 'v1.0.0',
-        apkAssetName: 'JobCruiser-1.0.0.apk',
-      );
-      final testService = UpdateCheckerService(dio: _FakeDio(fakeResponse: fakeRelease));
-      final update = await testService.checkForUpdate();
-      expect(update, isNull);
-    });
-
-    test('extracts release notes from "What changed" section of release body', () async {
-      final fakeRelease = _buildFakeRelease(
-        tagName: 'v2.0.0+9999',
-        apkAssetName: 'JobCruiser-2.0.0+9999.apk',
-        body: '''
-## Job Cruiser 2.0.0
-
-### Install
-Download the APK below.
-
-### What changed
-- Fixed filter bugs
-- Added update checker
-''',
-      );
-      final testService = UpdateCheckerService(dio: _FakeDio(fakeResponse: fakeRelease));
-      final update = await testService.checkForUpdate();
-      expect(update, isNull);
-    });
-
-    test('correctly extracts versionName from tag with build number', () async {
-      final fakeRelease = _buildFakeRelease(
-        tagName: 'v1.3.5+42',
-        apkAssetName: 'JobCruiser-1.3.5+42.apk',
-      );
-      final testService = UpdateCheckerService(dio: _FakeDio(fakeResponse: fakeRelease));
-      final update = await testService.checkForUpdate();
-      expect(update, isNull);
-    });
-
-    test('correctly identifies APK asset by prefix and suffix pattern', () async {
-      final fakeRelease = {
-        'tag_name': 'v1.0.0+9999',
-        'body': '',
-        'assets': [
-          {
-            'name': 'source.tar.gz',
-            'browser_download_url': 'https://example.com/source.tar.gz',
-          },
-          {
-            'name': 'JobCruiser-1.0.0+9999.apk',
-            'browser_download_url': 'https://example.com/JobCruiser-1.0.0+9999.apk',
-          },
-        ],
-      };
+      final fakeRelease = _buildFakeRelease(tagName: 'v9.9.9');
       final testService = UpdateCheckerService(dio: _FakeDio(fakeResponse: fakeRelease));
       final update = await testService.checkForUpdate();
       expect(update, isNull);

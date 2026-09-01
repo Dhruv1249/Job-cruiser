@@ -3,19 +3,73 @@ import 'package:url_launcher/url_launcher.dart';
 import '../main.dart' show AppColors;
 import '../services/update_checker_service.dart';
 
-/// Persistent top banner that appears when a newer APK build is available on GitHub Releases.
+/// Persistent top banner that appears when a newer version is available on GitHub Releases.
 ///
-/// Accepts a [PendingUpdate] and a dismiss callback. Tapping "Download" opens the
-/// APK URL directly in the device browser so the user can install it manually.
-class UpdateBanner extends StatelessWidget {
+/// Provides a one-tap action to download the APK in-app and trigger the Android
+/// system package installer directly.
+class UpdateBanner extends StatefulWidget {
   const UpdateBanner({
     super.key,
     required this.update,
     required this.onDismiss,
+    this.updateCheckerService,
   });
 
   final PendingUpdate update;
   final VoidCallback onDismiss;
+  final UpdateCheckerService? updateCheckerService;
+
+  @override
+  State<UpdateBanner> createState() => _UpdateBannerState();
+}
+
+class _UpdateBannerState extends State<UpdateBanner> {
+  late final UpdateCheckerService _service =
+      widget.updateCheckerService ?? UpdateCheckerService();
+
+  bool _isDownloading = false;
+  double _progress = 0.0;
+
+  Future<void> _handleInstall() async {
+    if (_isDownloading) return;
+
+    setState(() {
+      _isDownloading = true;
+      _progress = 0.0;
+    });
+
+    final success = await _service.downloadAndInstall(
+      update: widget.update,
+      onProgress: (progressValue) {
+        if (mounted) {
+          setState(() {
+            _progress = progressValue;
+          });
+        }
+      },
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _isDownloading = false;
+      _progress = 0.0;
+    });
+
+    if (!success) {
+      final uri = Uri.tryParse(widget.update.downloadUrl);
+      if (uri != null && await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to download update. Please try again.'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -34,79 +88,91 @@ class UpdateBanner extends StatelessWidget {
             ),
           ],
         ),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.system_update_alt, color: Colors.white, size: 18),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Update available — v${update.versionName}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                  ),
-                  if (update.releaseNotes.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      update.releaseNotes,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 11,
+            Row(
+              children: [
+                const Icon(Icons.system_update_alt, color: Colors.white, size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Update available — v${widget.update.versionName}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ],
-              ),
+                      if (widget.update.releaseNotes.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          widget.update.releaseNotes,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: _isDownloading ? null : _handleInstall,
+                  style: TextButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: AppColors.primary,
+                    disabledBackgroundColor: Colors.white70,
+                    disabledForegroundColor: AppColors.primary,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    minimumSize: const Size(0, 32),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                  ),
+                  child: _isDownloading
+                      ? Text(
+                          _progress > 0
+                              ? '${(_progress * 100).toInt()}%'
+                              : 'Downloading...',
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                        )
+                      : const Text(
+                          'Update',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                        ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white70, size: 18),
+                  onPressed: _isDownloading ? null : widget.onDismiss,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  tooltip: 'Dismiss',
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            TextButton(
-              onPressed: () => _openDownloadUrl(context),
-              style: TextButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: AppColors.primary,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                minimumSize: const Size(0, 32),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            if (_isDownloading) ...[
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: LinearProgressIndicator(
+                  value: _progress > 0 ? _progress : null,
+                  backgroundColor: Colors.white24,
+                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                  minHeight: 3,
+                ),
               ),
-              child: const Text(
-                'Download',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-              ),
-            ),
-            const SizedBox(width: 4),
-            IconButton(
-              icon: const Icon(Icons.close, color: Colors.white70, size: 18),
-              onPressed: onDismiss,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              tooltip: 'Dismiss',
-            ),
+            ],
           ],
         ),
       ),
     );
-  }
-
-  Future<void> _openDownloadUrl(BuildContext context) async {
-    final uri = Uri.tryParse(update.downloadUrl);
-    if (uri == null) return;
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not open download link: ${update.downloadUrl}'),
-          backgroundColor: AppColors.error,
-        ),
-      );
-    }
   }
 }
