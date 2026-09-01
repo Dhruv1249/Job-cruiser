@@ -50,7 +50,8 @@ android {
 
     buildTypes {
         debug {
-            manifestPlaceholders["appName"] = "Job Cruiser"
+            applicationIdSuffix = ".debug"
+            manifestPlaceholders["appName"] = "JC Debug"
         }
         release {
             signingConfig = if (keystorePropertiesFile.exists()) {
