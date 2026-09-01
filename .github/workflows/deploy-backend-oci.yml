@@ -34,7 +34,8 @@ jobs:
           key: ${{ secrets.OCI_SSH_KEY }}
           script: |
             cd ~/Job-cruiser/backend
-            git pull origin main
+            git fetch origin
+            git reset --hard origin/main
             docker build -t jobcruiser-backend:latest .
             docker stop jobcruiser-backend || true
             docker rm jobcruiser-backend || true
