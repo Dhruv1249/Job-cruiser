@@ -56,10 +56,11 @@ class _AuthScreenState extends State<AuthScreen> {
 
     if (response != null) {
       final hasPreferences = response['has_preferences'] as bool? ?? false;
+      final suggestedEmail = response['primary_email'] as String? ?? _emailController.text.trim();
       if (!hasPreferences) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (_) => const OnboardingWizardScreen(),
+            builder: (_) => OnboardingWizardScreen(suggestedEmail: suggestedEmail),
           ),
         );
       } else {
@@ -110,11 +111,15 @@ class _AuthScreenState extends State<AuthScreen> {
         final isNewUser = response['is_new_user'] as bool? ?? false;
         final hasPreferences = response['has_preferences'] as bool? ?? false;
         final suggestedName = response['suggested_name'] as String?;
+        final suggestedEmail = response['primary_email'] as String?;
 
         if (isNewUser || !hasPreferences) {
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (_) => OnboardingWizardScreen(suggestedName: suggestedName),
+              builder: (_) => OnboardingWizardScreen(
+                suggestedName: suggestedName,
+                suggestedEmail: suggestedEmail,
+              ),
             ),
           );
         } else {

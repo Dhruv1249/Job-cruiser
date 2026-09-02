@@ -100,12 +100,19 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   late final List<String> _currentTargets;
   late final TextEditingController _roleController;
   late final TextEditingController _locationController;
+  late final TextEditingController _emailController;
+  late final TextEditingController _phoneController;
+  late final TextEditingController _githubController;
+  late final TextEditingController _linkedinController;
+  late final TextEditingController _portfolioController;
   late final TextEditingController _overleafUrlController;
   late final TextEditingController _overleafSecretController;
   late final TextEditingController _overleafProjectController;
   late final TextEditingController _resumeTemplateController;
   late final TextEditingController _coverLetterTemplateController;
   late final TextEditingController _bioTextController;
+
+  final List<Map<String, TextEditingController>> _customLinkControllers = [];
 
   bool _isParsingCV = false;
   late double _baseSalary;
@@ -163,6 +170,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   String _currency = 'USD';
   int _targetResumePages = 1;
   int _targetCoverLetterPages = 1;
+  bool _matchThresholdNotificationEnabled = false;
+  int _matchThresholdPercentage = 80;
 
   @override
   void initState() {
@@ -176,6 +185,11 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
         : List<String>.from(widget.initialPreferences!.targetRoles);
     _roleController = TextEditingController();
     _locationController = TextEditingController();
+    _emailController = TextEditingController();
+    _phoneController = TextEditingController();
+    _githubController = TextEditingController();
+    _linkedinController = TextEditingController();
+    _portfolioController = TextEditingController();
     _overleafUrlController = TextEditingController();
     _overleafSecretController = TextEditingController();
     _overleafProjectController = TextEditingController(text: 'job_applications');
@@ -189,12 +203,62 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     _loadSavedPreferences();
   }
 
+  void _addCustomLink({String label = '', String url = ''}) {
+    setState(() {
+      _customLinkControllers.add({
+        'label': TextEditingController(text: label),
+        'url': TextEditingController(text: url),
+      });
+    });
+  }
+
+  void _removeCustomLink(int index) {
+    setState(() {
+      _customLinkControllers[index]['label']?.dispose();
+      _customLinkControllers[index]['url']?.dispose();
+      _customLinkControllers.removeAt(index);
+    });
+  }
+
   Future<void> _loadSavedPreferences() async {
     final apiPref = await ApiService().fetchPreferences();
     if (!mounted) return;
 
     if (apiPref != null) {
       setState(() {
+        if (apiPref['email'] != null && (apiPref['email'] as String).isNotEmpty) {
+          _emailController.text = apiPref['email'] as String;
+        }
+        if (apiPref['phone'] != null && (apiPref['phone'] as String).isNotEmpty) {
+          _phoneController.text = apiPref['phone'] as String;
+        }
+        if (apiPref['location'] != null && (apiPref['location'] as String).isNotEmpty) {
+          _locationController.text = apiPref['location'] as String;
+        }
+        if (apiPref['github_url'] != null && (apiPref['github_url'] as String).isNotEmpty) {
+          _githubController.text = apiPref['github_url'] as String;
+        }
+        if (apiPref['linkedin_url'] != null && (apiPref['linkedin_url'] as String).isNotEmpty) {
+          _linkedinController.text = apiPref['linkedin_url'] as String;
+        }
+        if (apiPref['portfolio_url'] != null && (apiPref['portfolio_url'] as String).isNotEmpty) {
+          _portfolioController.text = apiPref['portfolio_url'] as String;
+        }
+        if (apiPref['custom_links'] != null && apiPref['custom_links'] is List) {
+          for (final linkEntry in _customLinkControllers) {
+            linkEntry['label']?.dispose();
+            linkEntry['url']?.dispose();
+          }
+          _customLinkControllers.clear();
+          for (final rawItem in (apiPref['custom_links'] as List)) {
+            if (rawItem is Map) {
+              _customLinkControllers.add({
+                'label': TextEditingController(text: rawItem['label']?.toString() ?? ''),
+                'url': TextEditingController(text: rawItem['url']?.toString() ?? ''),
+              });
+            }
+          }
+        }
         if (apiPref['currency'] != null && (apiPref['currency'] as String).isNotEmpty) {
           _currency = apiPref['currency'] as String;
         }
@@ -239,6 +303,12 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
         if (apiPref['target_cover_letter_pages'] != null) {
           _targetCoverLetterPages = (apiPref['target_cover_letter_pages'] as num).toInt().clamp(1, 4);
         }
+        if (apiPref['match_threshold_notification_enabled'] != null) {
+          _matchThresholdNotificationEnabled = apiPref['match_threshold_notification_enabled'] == true;
+        }
+        if (apiPref['match_threshold_percentage'] != null && (apiPref['match_threshold_percentage'] as num) > 0) {
+          _matchThresholdPercentage = (apiPref['match_threshold_percentage'] as num).toInt().clamp(50, 100);
+        }
       });
     }
 
@@ -265,12 +335,21 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   void dispose() {
     _roleController.dispose();
     _locationController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _githubController.dispose();
+    _linkedinController.dispose();
+    _portfolioController.dispose();
     _overleafUrlController.dispose();
     _overleafSecretController.dispose();
     _overleafProjectController.dispose();
     _resumeTemplateController.dispose();
     _coverLetterTemplateController.dispose();
     _bioTextController.dispose();
+    for (final linkEntry in _customLinkControllers) {
+      linkEntry['label']?.dispose();
+      linkEntry['url']?.dispose();
+    }
     super.dispose();
   }
 
@@ -285,6 +364,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
           children: [
             _buildHeader(),
             const SizedBox(height: 24),
+            _buildContactAndLinksCard(),
+            const SizedBox(height: 24),
             _buildExperienceCard(),
             const SizedBox(height: 24),
             _buildDesiredRoles(),
@@ -296,6 +377,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             _buildWorkModels(),
             const SizedBox(height: 24),
             _buildCompensationTarget(),
+            const SizedBox(height: 24),
+            _buildMatchNotificationCard(),
             const SizedBox(height: 24),
             _buildOverleafCard(),
             const SizedBox(height: 24),
@@ -1282,6 +1365,256 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     );
   }
 
+  Widget _buildContactAndLinksCard() {
+    return _buildSectionCard(
+      icon: Icons.contact_page_outlined,
+      title: 'Contact Information & Links',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Populate your authentic links and contact info to be included in tailored LaTeX resumes and cover letters.',
+            style: TextStyle(fontSize: 13, color: AppColors.onSurfaceVariant),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: 'Contact Email',
+              hintText: 'e.g. user@example.com',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: 'Phone',
+                    hintText: 'e.g. +1 555-0199',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: _locationController,
+                  decoration: const InputDecoration(
+                    labelText: 'Location / City',
+                    hintText: 'e.g. Bengaluru, India',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _githubController,
+            decoration: const InputDecoration(
+              labelText: 'GitHub Profile URL',
+              hintText: 'https://github.com/username',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _linkedinController,
+            decoration: const InputDecoration(
+              labelText: 'LinkedIn Profile URL',
+              hintText: 'https://linkedin.com/in/username',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _portfolioController,
+            decoration: const InputDecoration(
+              labelText: 'Portfolio / Personal Website URL',
+              hintText: 'https://yourportfolio.dev',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Additional Profile Links',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.onSurface,
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _addCustomLink(),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add Link'),
+              ),
+            ],
+          ),
+          if (_customLinkControllers.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            ..._customLinkControllers.asMap().entries.map((entry) {
+              final index = entry.key;
+              final linkItem = entry.value;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8.0),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 110,
+                      child: TextField(
+                        controller: linkItem['label'],
+                        decoration: const InputDecoration(
+                          labelText: 'Label',
+                          hintText: 'e.g. Blog',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: linkItem['url'],
+                        decoration: const InputDecoration(
+                          labelText: 'URL',
+                          hintText: 'https://...',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: AppColors.error, size: 20),
+                      onPressed: () => _removeCustomLink(index),
+                      tooltip: 'Remove link',
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMatchNotificationCard() {
+    return _buildSectionCard(
+      icon: Icons.notifications_active_outlined,
+      title: 'Match Notifications',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      'NOTIFY ON HIGH MATCHES',
+                      style: TextStyle(
+                        fontFamily: 'Geist',
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.onSurfaceVariant,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Receive in-app alerts and notifications when new job matches meet or exceed your percentage threshold.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppColors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: _matchThresholdNotificationEnabled,
+                onChanged: (val) {
+                  setState(() {
+                    _matchThresholdNotificationEnabled = val;
+                  });
+                },
+              ),
+            ],
+          ),
+          if (_matchThresholdNotificationEnabled) ...[
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Minimum Match Threshold',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.onSurface,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                  ),
+                  child: Text(
+                    '${_matchThresholdPercentage.toInt()}%+',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Slider(
+              value: _matchThresholdPercentage.toDouble().clamp(50.0, 95.0),
+              min: 50.0,
+              max: 95.0,
+              divisions: 9,
+              label: '${_matchThresholdPercentage.toInt()}%',
+              onChanged: (val) {
+                setState(() {
+                  _matchThresholdPercentage = val.round();
+                });
+              },
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: const [
+                Text('50% (Broad)', style: TextStyle(fontSize: 11, color: AppColors.onSurfaceVariant)),
+                Text('80% (Recommended)', style: TextStyle(fontSize: 11, color: AppColors.onSurfaceVariant)),
+                Text('95% (Strict)', style: TextStyle(fontSize: 11, color: AppColors.onSurfaceVariant)),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildSaveButton() {
     return SizedBox(
       width: double.infinity,
@@ -1304,8 +1637,23 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
               ? _baseSalary.toInt() * 100000
               : _baseSalary.toInt() * 1000;
 
+          final customLinksPayload = _customLinkControllers
+              .map((entry) => {
+                    'label': entry['label']?.text.trim() ?? '',
+                    'url': entry['url']?.text.trim() ?? '',
+                  })
+              .where((entry) => entry['url']!.isNotEmpty)
+              .toList();
+
           await apiService.savePreferences({
             'full_name': fullName,
+            'email': _emailController.text.trim(),
+            'phone': _phoneController.text.trim(),
+            'location': _locationController.text.trim(),
+            'github_url': _githubController.text.trim(),
+            'linkedin_url': _linkedinController.text.trim(),
+            'portfolio_url': _portfolioController.text.trim(),
+            'custom_links': customLinksPayload,
             'target_roles': _currentTargets,
             'target_industries': _selectedIndustries.toList(),
             'target_locations': _selectedLocations.toList(),
@@ -1316,6 +1664,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             'master_cv_text': _bioTextController.text,
             'target_resume_pages': _targetResumePages,
             'target_cover_letter_pages': _targetCoverLetterPages,
+            'match_threshold_notification_enabled': _matchThresholdNotificationEnabled,
+            'match_threshold_percentage': _matchThresholdPercentage,
           });
 
           if (!mounted) return;

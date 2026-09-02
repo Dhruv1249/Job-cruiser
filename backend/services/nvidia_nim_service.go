@@ -66,7 +66,10 @@ type UserProfileData struct {
 	PreferredRoles     []string `json:"preferred_roles"`
 	PreferredLocations []string `json:"preferred_locations"`
 	WorkModel          string   `json:"work_model"`
-	ExperienceYears    int      `json:"experience_years"`
+	ExperienceYears                   int      `json:"experience_years"`
+	CurrentLocation                   string   `json:"current_location"`
+	MatchThresholdNotificationEnabled bool     `json:"match_threshold_notification_enabled"`
+	MatchThresholdPercentage          int      `json:"match_threshold_percentage"`
 }
 
 // JobSnippetData contains minimal job details sent for AI batch evaluation.
@@ -923,6 +926,9 @@ func (s *NvidiaNimService) evaluateJobBatchWithBackoff(
 			log.Printf("[Worker-%d] Upsert error for user %s job %s: %v", workerID, res.UserID, res.JobID, upsertErr)
 		}
 		_ = updateJobStandardizedLocationAndWorkModel(ctx, s.DB, res.JobID, res.StandardizedLocation, res.WorkModel)
+		if matchedProfile != nil {
+			notifyUserOnHighMatch(ctx, s.DB, matchedProfile, res.JobID, res.MatchScore)
+		}
 		syncMutex.Lock()
 		evaluatedJobIDs[res.JobID] = true
 		syncMutex.Unlock()
@@ -940,33 +946,16 @@ func (s *NvidiaNimService) callBatchEvaluationAPI(
 	expectedResultCount int,
 	workerID int,
 ) (nvidiaBatchResponse, string, string, bool, bool) {
-	promptText := buildMultiJobPrompt(userProfiles, batch, expectedResultCount)
+	systemInstruction := buildBatchMatchSystemInstruction(expectedResultCount)
+	userContent := buildBatchMatchUserContent(userProfiles, batch, expectedResultCount)
 	messages := []nvidiaRequestMessage{
 		{
-			Role: "system",
-			Content: `You are a JSON-only API. Your entire response must be one single valid JSON object — no prose, no markdown, no code fences, no explanation, no preamble, no postamble. Not a single word outside the JSON.
-
-You MUST output exactly this structure:
-{
-  "results": [
-    {
-      "job_id": "<uuid string>",
-      "user_id": "<uuid string>",
-      "match_score": <integer 0-100>,
-      "match_reasoning": "<detailed 2-3 line description detailing location, tech stack, and experience comparison>",
-      "inferred_required_yoe": <integer: minimum required years of experience inferred from JD, title, or requirements>,
-      "standardized_location": "<standardized canonical location e.g. Bengaluru, India or Remote (Global)>",
-      "work_model": "<remote|hybrid|onsite>",
-      "is_matched": <true|false>
-    }
-  ]
-}
-
-Violating this format — outputting any text before or after the JSON, using a different key name, returning an empty array, or omitting any entry — is a critical failure.`,
+			Role:    "system",
+			Content: systemInstruction,
 		},
 		{
 			Role:    "user",
-			Content: promptText,
+			Content: userContent,
 		},
 	}
 	payload := nvidiaRequest{
@@ -984,18 +973,18 @@ Violating this format — outputting any text before or after the JSON, using a 
 	responseBytes, errCall := s.executeNvidiaAPIWithRetry(ctx, payload, workerID)
 	if errCall != nil {
 		log.Printf("[Worker-%d] API call failed for batch of %d jobs: %v", workerID, len(batch), errCall)
-		return nvidiaBatchResponse{}, "", promptText, false, true
+		return nvidiaBatchResponse{}, "", userContent, false, true
 	}
 
 	var parsedResponse nvidiaAPIResponse
 	if errUnmarshal := json.Unmarshal(responseBytes, &parsedResponse); errUnmarshal != nil {
 		log.Printf("[Worker-%d] Unmarshal error for batch of %d jobs: %v", workerID, len(batch), errUnmarshal)
-		return nvidiaBatchResponse{}, "", promptText, false, true
+		return nvidiaBatchResponse{}, "", userContent, false, true
 	}
 
 	if len(parsedResponse.Choices) == 0 {
 		log.Printf("[Worker-%d] Empty choices array for batch of %d jobs", workerID, len(batch))
-		return nvidiaBatchResponse{}, "", promptText, false, true
+		return nvidiaBatchResponse{}, "", userContent, false, true
 	}
 
 	rawText := parsedResponse.Choices[0].Message.Content
@@ -1004,11 +993,11 @@ Violating this format — outputting any text before or after the JSON, using a 
 	var batchResult nvidiaBatchResponse
 	if errJSON := json.Unmarshal([]byte(cleanJSON), &batchResult); errJSON != nil {
 		log.Printf("[Worker-%d] JSON parse warning for batch of %d jobs: %v. Output will not be counted as API error.", workerID, len(batch), errJSON)
-		utils.LogRawAIResponse(fmt.Sprintf("Worker-%d-PARSE-ERROR", workerID), s.ModelName, promptText, "RAW_OUTPUT:\n"+rawText+"\n\nCLEANED_JSON:\n"+cleanJSON, 0, true)
-		return nvidiaBatchResponse{}, rawText, promptText, false, false
+		utils.LogRawAIResponse(fmt.Sprintf("Worker-%d-PARSE-ERROR", workerID), s.ModelName, userContent, "RAW_OUTPUT:\n"+rawText+"\n\nCLEANED_JSON:\n"+cleanJSON, 0, true)
+		return nvidiaBatchResponse{}, rawText, userContent, false, false
 	}
 
-	return batchResult, rawText, promptText, true, false
+	return batchResult, rawText, userContent, true, false
 }
 
 func (s *NvidiaNimService) executeNvidiaAPIWithRetry(ctx context.Context, payload nvidiaRequest, workerID int) ([]byte, error) {
@@ -1199,51 +1188,56 @@ func capBackoff(duration time.Duration) time.Duration {
 	return duration
 }
 
-// buildMultiJobPrompt constructs the evaluation prompt for a batch of jobs against a set of user profiles.
-func buildMultiJobPrompt(userProfiles []UserProfileData, jobsBatch []JobSnippetData, expectedResultCount int) string {
+// buildBatchMatchSystemInstruction constructs the system instructions, schema, and scoring rules.
+func buildBatchMatchSystemInstruction(expectedResultCount int) string {
 	currentTimeText := time.Now().Format("January 2006")
+	return fmt.Sprintf(`You are an expert AI job-matching evaluation API. Your entire response must be one single valid JSON object containing a "results" array — no prose, no markdown, no code fences, no explanation, no preamble, no postamble. Not a single word outside the JSON.
 
-	promptTemplate := `Return ONLY a raw JSON object formatted as follows:
+SCHEMA FORMAT:
 {
   "results": [
     {
-      "job_id": "<job_id string copied verbatim from JOB LISTINGS below>",
-      "user_id": "<user_id string copied verbatim from CANDIDATE PROFILES below>",
-      "match_score": 85,
-      "match_reasoning": "Detailed 2-3 line reasoning specifying exact tech stack overlap, location compatibility, and YoE comparison.",
-      "inferred_required_yoe": 4,
-      "standardized_location": "Bengaluru, India",
-      "work_model": "hybrid",
-      "is_matched": true
+      "job_id": "<job_id string copied verbatim from JOB LISTINGS>",
+      "user_id": "<user_id string copied verbatim from CANDIDATE PROFILES>",
+      "match_score": <integer 0-100>,
+      "match_reasoning": "<detailed 2-3 line description detailing location compatibility, tech stack overlap, and experience comparison>",
+      "inferred_required_yoe": <integer minimum required years of experience inferred from JD, title, or requirements>,
+      "standardized_location": "<standardized canonical location e.g. Bengaluru, India or Remote (Global)>",
+      "work_model": "<remote|hybrid|onsite>",
+      "is_matched": <true|false>
     }
   ]
 }
 
-IMPORTANT: You MUST return exactly %d entries in the "results" array — one for every (job x candidate) pair listed below. An empty array or partial array is invalid.
+IMPORTANT: You MUST return exactly %d entries in the "results" array — one for every (job x candidate) pair. An empty array or partial array is invalid.
 
 STANDARDIZED LOCATION & WORK MODEL GUIDELINES:
 1. "standardized_location": Extract and standardize the location from the job's title, location, and description:
    - Canonical format: "City, Country" or "City, State, USA" (e.g. "Bengaluru, India", "Pune, India", "London, United Kingdom", "San Francisco, CA, USA", "New York, NY, USA").
-   - If multiple distinct cities/offices are offered, join them with semicolons (e.g. "Bengaluru, India; Hyderabad, India" or "San Francisco, CA, USA; New York, NY, USA").
+   - If multiple distinct cities/offices are offered, join them with semicolons.
    - If 100%% unrestricted global remote: write "Remote (Global)".
    - If remote with country/region restrictions: write "Remote (US)", "Remote (India)", "Remote (Europe)", "Remote (APAC)", or "Remote (LatAm)".
    - If city-specific remote: write "Bengaluru, India (Remote)" or "San Francisco, CA, USA (Remote)".
 
 2. "work_model": Extract the work arrangement permitted for the role:
-   - "remote": Role can be performed 100%% from home (globally or within a specified region).
-   - "hybrid": Role requires regular in-office presence (e.g. 2-3 days in office/week).
+   - "remote": Role can be performed 100%% from home.
+   - "hybrid": Role requires regular in-office presence.
    - "onsite": Role requires 100%% physical presence in office/facility.
-   - If multiple options are offered (e.g. employee choice): join with commas (e.g. "hybrid, remote" or "onsite, hybrid, remote").
+   - If multiple options are offered: join with commas (e.g. "hybrid, remote").
 
-SCORING INSTRUCTIONS & RULES:
-Score each candidate from 0 to 100 based on technical skill match, strictly penalized by location mismatch and experience gaps.
-A "Score Cap" means the MAXIMUM ALLOWABLE score. Even if a candidate has a 100%% technical skill match, their final match_score CANNOT exceed the cap if a constraint is violated.
-
+SCORING INSTRUCTIONS & CONSTRAINTS:
 1. LOCATION COMPATIBILITY (STRICTEST FILTER):
-   - Check the candidate's Preferred Locations and Work Model Preference against the job's location and description.
-   - FULL MISMATCH: If a job requires on-site/hybrid attendance in a country/city the candidate is NOT located in (or did not list as preferred), or requires local citizenship/work authorization the candidate lacks (e.g., "US Only", "Must reside in the US", "US Work Authorization required without sponsorship") -> MAXIMUM SCORE CAP: 0-15.
-   - REGIONAL REMOTE: If a job is remote but limited to a region/timezone compatible with the candidate (e.g., "Remote - APAC" or "Remote - Asia" for an India candidate) -> MAXIMUM SCORE CAP: 60-85.
-   - EXACT MATCH / GLOBAL REMOTE: If the job is in the candidate's preferred location OR is 100%% unrestricted global remote ("Worldwide", "Anywhere", "Global Remote") -> No location penalty. Full technical score allowed.
+   - Check the candidate's Current Location, Preferred Locations, and Work Model Preference against the job's location and description.
+   - STRICT PROHIBITION ON SPECULATING RELOCATION: You MUST NEVER assume, speculate, or suggest that a candidate can, will, or wants to relocate. DO NOT write in "match_reasoning": "match if candidate can relocate", "good fit if willing to relocate", "potential match if they move to the US", or any variation. Relocation is STRICTLY FORBIDDEN as a justification for a match.
+   - HARD LOCATION MISMATCH (SCORE CAP: 0-10, IS_MATCHED: FALSE):
+     * If a job requires on-site or hybrid attendance in a country or city the candidate does not reside in or did not list as preferred (e.g. US, UK, Europe for a candidate in India) -> MAXIMUM SCORE CAP: 0-10. is_matched MUST be false. Technical skills CANNOT overcome this.
+     * If a job requires local citizenship, residency, or work authorization the candidate lacks (e.g., "US Only", "Must reside in the US", "US Work Authorization required without sponsorship", "W2 only", "Security Clearance") -> MAXIMUM SCORE CAP: 0-10. is_matched MUST be false.
+     * If a remote job is restricted to a domestic market or timezone incompatible with the candidate (e.g., "Remote (US)", "Remote - North America" for a candidate in India) -> MAXIMUM SCORE CAP: 0-10. is_matched MUST be false.
+     * For all hard location mismatches, "match_reasoning" must explicitly state the location or work authorization incompatibility. NEVER suggest relocation.
+   - REGIONAL REMOTE (SCORE CAP: 60-80):
+     * Only if a job is remote and explicitly open to the candidate's region/timezone (e.g., "Remote - APAC", "Remote - Asia" for an India candidate).
+   - EXACT MATCH / 100%% UNRESTRICTED GLOBAL REMOTE:
+     * If the job is in the candidate's preferred location OR is 100%% unrestricted global remote ("Worldwide", "Anywhere", "Global Remote", "Work from anywhere in the world") with NO domestic country restrictions -> Full technical score allowed.
 
 2. EXPERIENCE GAP (HARD SCORE CAPS):
    - Compare the candidate's Years of Experience (YoE) against the job's minimum required YoE stated in the JD. Current date: %s.
@@ -1252,19 +1246,20 @@ A "Score Cap" means the MAXIMUM ALLOWABLE score. Even if a candidate has a 100%%
    - If Job Required YoE is (Candidate YoE + 1) to (Candidate YoE + 2): MAXIMUM SCORE CAP: 55-70. Stretch role.
    - If Candidate YoE >= Job Required YoE: Award +10 to +15 bonus points to the technical match score.
 
-3. HIGH MATCH (90-100):
+3. HIGH MATCH (85-100):
    - ONLY for jobs where location matches cleanly (Exact Match / Global Remote), candidate meets or exceeds required YoE, and strong tech stack overlap exists.
 
 4. IS_MATCHED FLAG:
-   - Set is_matched to true IF AND ONLY IF match_score >= 30.
+   - Set is_matched to true IF AND ONLY IF match_score >= 35 AND there is NO location mismatch.
+   - If a job has a location mismatch (match_score <= 15), is_matched MUST be false.
 
 5. REASONING:
-   - "match_reasoning" must be 2-3 clear, natural sentences explaining: (1) location verification & compatibility, (2) technical stack overlap & missing skills, and (3) experience comparison.
+   - "match_reasoning" must be 2-3 clear, natural sentences explaining: (1) location verification & compatibility, (2) technical stack overlap & missing skills, and (3) experience comparison.`, expectedResultCount, currentTimeText)
+}
 
-`
-
+// buildBatchMatchUserContent constructs the input payload containing candidate profiles and job snippets.
+func buildBatchMatchUserContent(userProfiles []UserProfileData, jobsBatch []JobSnippetData, expectedResultCount int) string {
 	var builder strings.Builder
-	fmt.Fprintf(&builder, promptTemplate, expectedResultCount, currentTimeText)
 
 	builder.WriteString("### CANDIDATE PROFILES\n")
 	for _, profile := range userProfiles {
@@ -1272,8 +1267,12 @@ A "Score Cap" means the MAXIMUM ALLOWABLE score. Even if a candidate has a 100%%
 		if profile.MasterCVText != "" {
 			combinedProfileText += "\n\nMaster CV / Full Experience Context:\n" + profile.MasterCVText
 		}
-		fmt.Fprintf(&builder, "User ID: %s\nCandidate YoE: %d\nPreferred Locations: %s\nWork Model Preference: %s\nPreferred Roles: %s\nProfile & Resume Context:\n%s\n\n",
-			profile.UserID, profile.ExperienceYears, strings.Join(profile.PreferredLocations, ", "), profile.WorkModel, strings.Join(profile.PreferredRoles, ", "), combinedProfileText)
+		candidateCurrentLocation := profile.CurrentLocation
+		if candidateCurrentLocation == "" {
+			candidateCurrentLocation = "Not specified"
+		}
+		fmt.Fprintf(&builder, "User ID: %s\nCandidate Current Location: %s\nCandidate YoE: %d\nPreferred Locations: %s\nWork Model Preference: %s\nPreferred Roles: %s\nProfile & Resume Context:\n%s\n\n",
+			profile.UserID, candidateCurrentLocation, profile.ExperienceYears, strings.Join(profile.PreferredLocations, ", "), profile.WorkModel, strings.Join(profile.PreferredRoles, ", "), combinedProfileText)
 	}
 
 	builder.WriteString("### JOB LISTINGS TO EVALUATE\n")
@@ -1283,8 +1282,12 @@ A "Score Cap" means the MAXIMUM ALLOWABLE score. Even if a candidate has a 100%%
 	}
 
 	fmt.Fprintf(&builder, "NOW OUTPUT THE JSON. Exactly %d entries. No other text. Start with '{' and end with '}'.\n", expectedResultCount)
-
 	return builder.String()
+}
+
+// buildMultiJobPrompt constructs the evaluation prompt for a batch of jobs against a set of user profiles.
+func buildMultiJobPrompt(userProfiles []UserProfileData, jobsBatch []JobSnippetData, expectedResultCount int) string {
+	return buildBatchMatchUserContent(userProfiles, jobsBatch, expectedResultCount)
 }
 
 // FetchAllUserProfiles retrieves all users with AI matching enabled.
@@ -1313,7 +1316,10 @@ func fetchAllActiveUserProfiles(ctx context.Context, databasePool *pgxpool.Pool)
 	}
 	sqlQuery := `
 		SELECT u.id, u.primary_email, COALESCE(up.bio_experience_text, ''), COALESCE(up.master_cv_text, ''), COALESCE(up.target_roles, '[]'),
-		       COALESCE(up.target_locations, '[]'), COALESCE(up.work_models->>0, ''), 0
+		       COALESCE(up.target_locations, '[]'), COALESCE(up.work_models->>0, ''), 0,
+		       COALESCE(NULLIF(up.location, ''), NULLIF(u.location, ''), ''),
+		       COALESCE(up.match_threshold_notification_enabled, false),
+		       COALESCE(up.match_threshold_percentage, 80)
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id
 		WHERE u.ai_matching_enabled = true;
@@ -1327,7 +1333,7 @@ func fetchAllActiveUserProfiles(ctx context.Context, databasePool *pgxpool.Pool)
 	var profiles []UserProfileData
 	for rows.Next() {
 		var item UserProfileData
-		scanErr := rows.Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.MasterCVText, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears)
+		scanErr := rows.Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.MasterCVText, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears, &item.CurrentLocation, &item.MatchThresholdNotificationEnabled, &item.MatchThresholdPercentage)
 		if scanErr == nil {
 			item.ExperienceYears = calculateTotalExperienceYears(item.MasterCVText)
 			profiles = append(profiles, item)
@@ -1342,13 +1348,16 @@ func fetchSingleUserProfileByID(ctx context.Context, databasePool *pgxpool.Pool,
 	}
 	sqlQuery := `
 		SELECT u.id, u.primary_email, COALESCE(up.bio_experience_text, ''), COALESCE(up.master_cv_text, ''), COALESCE(up.target_roles, '[]'),
-		       COALESCE(up.target_locations, '[]'), COALESCE(up.work_models->>0, ''), 0
+		       COALESCE(up.target_locations, '[]'), COALESCE(up.work_models->>0, ''), 0,
+		       COALESCE(NULLIF(up.location, ''), NULLIF(u.location, ''), ''),
+		       COALESCE(up.match_threshold_notification_enabled, false),
+		       COALESCE(up.match_threshold_percentage, 80)
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id
 		WHERE u.id = $1;
 	`
 	var item UserProfileData
-	scanErr := databasePool.QueryRow(ctx, sqlQuery, targetUserID).Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.MasterCVText, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears)
+	scanErr := databasePool.QueryRow(ctx, sqlQuery, targetUserID).Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.MasterCVText, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears, &item.CurrentLocation, &item.MatchThresholdNotificationEnabled, &item.MatchThresholdPercentage)
 	if scanErr != nil {
 		return nil, scanErr
 	}
@@ -1471,6 +1480,59 @@ func updateJobStandardizedLocationAndWorkModel(ctx context.Context, databasePool
 	`
 	_, errExec := databasePool.Exec(ctx, sqlQuery, cleanLocation, isRemote, jobID)
 	return errExec
+}
+
+func notifyUserOnHighMatch(ctx context.Context, databasePool *pgxpool.Pool, profile *UserProfileData, jobID string, matchScore int) {
+	if databasePool == nil || profile == nil || !profile.MatchThresholdNotificationEnabled {
+		return
+	}
+	targetThreshold := profile.MatchThresholdPercentage
+	if targetThreshold <= 0 {
+		targetThreshold = 80
+	}
+	if matchScore < targetThreshold {
+		return
+	}
+
+	var alreadyNotified bool
+	checkQuery := `
+		SELECT COALESCE(is_notified, false)
+		FROM user_job_matches
+		WHERE user_id = $1 AND job_id = $2;
+	`
+	_ = databasePool.QueryRow(ctx, checkQuery, profile.UserID, jobID).Scan(&alreadyNotified)
+	if alreadyNotified {
+		return
+	}
+
+	var jobTitle, companyName string
+	jobQuery := `
+		SELECT j.title, COALESCE(c.name, 'Company')
+		FROM jobs j
+		LEFT JOIN companies c ON j.company_id = c.id
+		WHERE j.id = $1;
+	`
+	_ = databasePool.QueryRow(ctx, jobQuery, jobID).Scan(&jobTitle, &companyName)
+	if jobTitle == "" {
+		jobTitle = "New Job Match"
+	}
+
+	notificationTitle := fmt.Sprintf("High Match Found (%d%%): %s", matchScore, jobTitle)
+	notificationMessage := fmt.Sprintf("New high match (%d%%) for %s at %s based on your profile preferences.", matchScore, jobTitle, companyName)
+
+	insertNotificationQuery := `
+		INSERT INTO notifications (user_id, title, message, is_read)
+		VALUES ($1, $2, $3, false);
+	`
+	_, insertError := databasePool.Exec(ctx, insertNotificationQuery, profile.UserID, notificationTitle, notificationMessage)
+	if insertError == nil {
+		markNotifiedQuery := `
+			UPDATE user_job_matches
+			SET is_notified = true
+			WHERE user_id = $1 AND job_id = $2;
+		`
+		_, _ = databasePool.Exec(ctx, markNotifiedQuery, profile.UserID, jobID)
+	}
 }
 
 func sanitizeJSONResponse(textContent string) string {

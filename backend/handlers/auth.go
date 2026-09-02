@@ -85,6 +85,7 @@ func (h *AuthHandler) Signup(c *gin.Context) {
 		"message":         "User created successfully",
 		"token":           tokenString,
 		"user_id":         newUserID,
+		"primary_email":   req.Email,
 		"is_new_user":     true,
 		"is_master_admin": isMasterAdmin,
 	})
@@ -145,6 +146,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		"message":             "Login successful",
 		"token":               tokenString,
 		"user_id":             userID,
+		"primary_email":       req.Email,
 		"has_preferences":     hasPreferences,
 		"ai_matching_enabled": aiMatchingEnabled,
 		"is_master_admin":     isMasterAdmin,
@@ -263,6 +265,7 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 		"message":             "Google Login successful",
 		"token":               tokenString,
 		"user_id":             userID,
+		"primary_email":       email,
 		"is_new_user":         isNewUser,
 		"is_master_admin":     isMasterAdmin,
 		"suggested_name":      name,

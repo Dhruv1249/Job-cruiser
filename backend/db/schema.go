@@ -339,6 +339,11 @@ var schemaQueries = []string{
 	`ALTER TABLE cover_letter_versions ADD COLUMN IF NOT EXISTS error_message TEXT;`,
 	`ALTER TABLE user_overleaf_config ADD COLUMN IF NOT EXISTS resume_template_path TEXT DEFAULT 'templates/resume.tex';`,
 	`ALTER TABLE user_overleaf_config ADD COLUMN IF NOT EXISTS cover_letter_template_path TEXT DEFAULT 'templates/cover_letter.tex';`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS email TEXT;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS custom_links JSONB DEFAULT '[]'::jsonb;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS match_threshold_notification_enabled BOOLEAN DEFAULT false;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS match_threshold_percentage INTEGER DEFAULT 80;`,
+	`ALTER TABLE user_job_matches ADD COLUMN IF NOT EXISTS is_notified BOOLEAN DEFAULT false;`,
 }
 
 // InitSchema executes the queries in sequence.

@@ -8,9 +8,14 @@ import 'services/api_service.dart';
 
 /// Multi-step Onboarding Wizard screen for new users.
 class OnboardingWizardScreen extends StatefulWidget {
-  const OnboardingWizardScreen({super.key, this.suggestedName});
+  const OnboardingWizardScreen({
+    super.key,
+    this.suggestedName,
+    this.suggestedEmail,
+  });
 
   final String? suggestedName;
+  final String? suggestedEmail;
 
   @override
   State<OnboardingWizardScreen> createState() => _OnboardingWizardScreenState();
@@ -22,17 +27,26 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
   bool _isSaving = false;
 
   late TextEditingController _nameController;
+  late TextEditingController _emailController;
+  late TextEditingController _phoneController;
+  late TextEditingController _locationController;
+  late TextEditingController _githubController;
+  late TextEditingController _linkedinController;
+  late TextEditingController _portfolioController;
   late TextEditingController _bioTextController;
   late TextEditingController _overleafUrlController;
   late TextEditingController _overleafSecretController;
   late TextEditingController _overleafProjectController;
-  late TextEditingController _locationController;
+
+  final List<Map<String, TextEditingController>> _customLinkControllers = [];
 
   bool _anyRole = true;
   bool _anyIndustry = true;
   bool _anySalary = true;
   bool _anyLocation = false;
   bool _anyWorkModel = false;
+  bool _matchThresholdNotificationEnabled = false;
+  int _matchThresholdPercentage = 80;
   bool _isParsingCV = false;
   String _rawCvText = '';
 
@@ -97,21 +111,52 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.suggestedName ?? '');
+    _emailController = TextEditingController(text: widget.suggestedEmail ?? '');
+    _phoneController = TextEditingController();
     _locationController = TextEditingController();
+    _githubController = TextEditingController();
+    _linkedinController = TextEditingController();
+    _portfolioController = TextEditingController();
     _bioTextController = TextEditingController();
     _overleafUrlController = TextEditingController();
     _overleafSecretController = TextEditingController();
     _overleafProjectController = TextEditingController(text: 'job_applications');
   }
 
+  void _addCustomLink({String label = '', String url = ''}) {
+    setState(() {
+      _customLinkControllers.add({
+        'label': TextEditingController(text: label),
+        'url': TextEditingController(text: url),
+      });
+    });
+  }
+
+  void _removeCustomLink(int index) {
+    setState(() {
+      _customLinkControllers[index]['label']?.dispose();
+      _customLinkControllers[index]['url']?.dispose();
+      _customLinkControllers.removeAt(index);
+    });
+  }
+
   @override
   void dispose() {
     _nameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
     _locationController.dispose();
+    _githubController.dispose();
+    _linkedinController.dispose();
+    _portfolioController.dispose();
     _bioTextController.dispose();
     _overleafUrlController.dispose();
     _overleafSecretController.dispose();
     _overleafProjectController.dispose();
+    for (final linkEntry in _customLinkControllers) {
+      linkEntry['label']?.dispose();
+      linkEntry['url']?.dispose();
+    }
     super.dispose();
   }
 
@@ -284,10 +329,25 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
       masterCvString = "$_rawCvText\n\n--- STRUCTURED RESUME DETAILS ---\n$masterCvString";
     }
 
+    final customLinksPayload = _customLinkControllers
+        .map((entry) => {
+              'label': entry['label']?.text.trim() ?? '',
+              'url': entry['url']?.text.trim() ?? '',
+            })
+        .where((entry) => entry['url']!.isNotEmpty)
+        .toList();
+
     final prefSuccess = await _apiService.savePreferences({
       'full_name': _nameController.text.trim().isNotEmpty
           ? _nameController.text.trim()
           : 'User',
+      'email': _emailController.text.trim(),
+      'phone': _phoneController.text.trim(),
+      'location': _locationController.text.trim(),
+      'github_url': _githubController.text.trim(),
+      'linkedin_url': _linkedinController.text.trim(),
+      'portfolio_url': _portfolioController.text.trim(),
+      'custom_links': customLinksPayload,
       'target_roles': targetRoles,
       'target_industries': targetIndustries,
       'target_locations': targetLocations,
@@ -298,6 +358,8 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
       'master_cv_text': masterCvString,
       'target_resume_pages': 1,
       'target_cover_letter_pages': 1,
+      'match_threshold_notification_enabled': _matchThresholdNotificationEnabled,
+      'match_threshold_percentage': _matchThresholdPercentage,
     });
 
     if (_overleafUrlController.text.trim().isNotEmpty) {
@@ -464,6 +526,152 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
             contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           ),
         ),
+        const SizedBox(height: 24),
+        const Text(
+          'Contact Information & Links (Optional for Resumes & Letters)',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: AppColors.primary,
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'These details are fed to AI during CV and cover letter tailoring. None are mandatory to fill during sign up.',
+          style: TextStyle(fontSize: 12, color: AppColors.onSurfaceVariant),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _emailController,
+          keyboardType: TextInputType.emailAddress,
+          decoration: const InputDecoration(
+            labelText: 'Contact Email (Optional)',
+            hintText: 'e.g. jane@example.com',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _phoneController,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: 'Phone (Optional)',
+                  hintText: 'e.g. +1 555-0199',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: _locationController,
+                decoration: const InputDecoration(
+                  labelText: 'Location (Optional)',
+                  hintText: 'e.g. Bengaluru, India',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _githubController,
+          decoration: const InputDecoration(
+            labelText: 'GitHub Profile URL (Optional)',
+            hintText: 'https://github.com/username',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _linkedinController,
+          decoration: const InputDecoration(
+            labelText: 'LinkedIn Profile URL (Optional)',
+            hintText: 'https://linkedin.com/in/username',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _portfolioController,
+          decoration: const InputDecoration(
+            labelText: 'Portfolio / Website URL (Optional)',
+            hintText: 'https://yourportfolio.dev',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Additional Profile Links',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.onSurface,
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () => _addCustomLink(),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Add Link'),
+            ),
+          ],
+        ),
+        if (_customLinkControllers.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          ..._customLinkControllers.asMap().entries.map((entry) {
+            final index = entry.key;
+            final linkItem = entry.value;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8.0),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 110,
+                    child: TextField(
+                      controller: linkItem['label'],
+                      decoration: const InputDecoration(
+                        labelText: 'Label',
+                        hintText: 'e.g. Blog',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: linkItem['url'],
+                      decoration: const InputDecoration(
+                        labelText: 'URL',
+                        hintText: 'https://...',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: AppColors.error, size: 20),
+                    onPressed: () => _removeCustomLink(index),
+                    tooltip: 'Remove link',
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
         const SizedBox(height: 24),
         const Text(
           'Self-Hosted Open-Overleaf Integration (Optional)',
@@ -1722,6 +1930,70 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                 },
               );
             }).toList(),
+          ),
+        ],
+        const SizedBox(height: 24),
+        const Divider(),
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text(
+                    'Match Notifications',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Receive alerts whenever a job matches your criteria above your threshold.',
+                    style: TextStyle(fontSize: 12, color: AppColors.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+            Switch(
+              value: _matchThresholdNotificationEnabled,
+              onChanged: (val) {
+                setState(() {
+                  _matchThresholdNotificationEnabled = val;
+                });
+              },
+            ),
+          ],
+        ),
+        if (_matchThresholdNotificationEnabled) ...[
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Notification Threshold',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.onSurface),
+              ),
+              Text(
+                '${_matchThresholdPercentage.toInt()}%+',
+                style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary, fontSize: 14),
+              ),
+            ],
+          ),
+          Slider(
+            value: _matchThresholdPercentage.toDouble().clamp(50.0, 95.0),
+            min: 50.0,
+            max: 95.0,
+            divisions: 9,
+            label: '${_matchThresholdPercentage.toInt()}%',
+            onChanged: (val) {
+              setState(() {
+                _matchThresholdPercentage = val.round();
+              });
+            },
           ),
         ],
       ],

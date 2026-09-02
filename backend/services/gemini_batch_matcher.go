@@ -625,13 +625,14 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 	modelName string,
 ) bool {
 	expectedResultCount := len(batch) * len(userProfiles)
-	promptText := buildMultiJobPrompt(userProfiles, batch, expectedResultCount)
+	systemInstruction := buildBatchMatchSystemInstruction(expectedResultCount)
+	userContent := buildBatchMatchUserContent(userProfiles, batch, expectedResultCount)
 
 	requestStart := time.Now()
-	rawOutput, errGenerate := s.generateBatchContent(ctx, modelName, promptText)
+	rawOutput, errGenerate := s.generateBatchContentWithSystem(ctx, modelName, systemInstruction, userContent)
 	if errGenerate != nil {
 		log.Printf("[GeminiBatchMatchService] API error with model %s: %v", modelName, errGenerate)
-		utils.LogRawAIResponse("GeminiBatch-ERROR", modelName, promptText, errGenerate.Error(), time.Since(requestStart), true)
+		utils.LogRawAIResponse("GeminiBatch-ERROR", modelName, userContent, errGenerate.Error(), time.Since(requestStart), true)
 		s.recordModelFailure(ctx, modelName, errGenerate.Error())
 		return false
 	}
@@ -640,11 +641,11 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 	var batchResult GeminiBatchResponse
 	if errJSON := json.Unmarshal([]byte(cleanJSON), &batchResult); errJSON != nil {
 		log.Printf("[GeminiBatchMatchService] JSON parse warning from model %s: %v. Raw output will not be counted as model error.", modelName, errJSON)
-		utils.LogRawAIResponse("GeminiBatch-PARSE-ERROR", modelName, promptText, rawOutput, time.Since(requestStart), true)
+		utils.LogRawAIResponse("GeminiBatch-PARSE-ERROR", modelName, userContent, rawOutput, time.Since(requestStart), true)
 		return false
 	}
 
-	utils.LogRawAIResponse("GeminiBatch", modelName, promptText, rawOutput, time.Since(requestStart), false)
+	utils.LogRawAIResponse("GeminiBatch", modelName, userContent, rawOutput, time.Since(requestStart), false)
 	s.recordModelSuccess(modelName)
 	log.Printf("[GeminiBatchMatchService] Answer received from model '%s' in %v (Response size: %d bytes). Successfully parsed %d job match results for %d candidate profile(s).",
 		modelName, time.Since(requestStart).Truncate(time.Millisecond), len(rawOutput), len(batchResult.Results), len(userProfiles))
@@ -672,6 +673,9 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 			log.Printf("[GeminiBatchMatchService] Upsert error for user %s job %s: %v", resultItem.UserID, resultItem.JobID, upsertErr)
 		}
 		_ = updateJobStandardizedLocationAndWorkModel(ctx, s.DB, resultItem.JobID, resultItem.StandardizedLocation, resultItem.WorkModel)
+		if matchedProfile != nil {
+			notifyUserOnHighMatch(ctx, s.DB, matchedProfile, resultItem.JobID, resultItem.MatchScore)
+		}
 
 		evaluatedJobIDs[resultItem.JobID] = true
 	}
@@ -716,6 +720,10 @@ func (s *GeminiBatchMatchService) ResetRunErrorsIfHealthyForTest() {
 }
 
 func (s *GeminiBatchMatchService) generateBatchContent(ctx context.Context, modelName string, prompt string) (string, error) {
+	return s.generateBatchContentWithSystem(ctx, modelName, "", prompt)
+}
+
+func (s *GeminiBatchMatchService) generateBatchContentWithSystem(ctx context.Context, modelName string, systemInstruction string, prompt string) (string, error) {
 	client, errClient := s.createGenAIClient(ctx)
 	if errClient != nil {
 		return "", errClient
@@ -733,6 +741,15 @@ func (s *GeminiBatchMatchService) generateBatchContent(ctx context.Context, mode
 		ResponseMIMEType: "application/json",
 		ResponseSchema:   &responseSchema,
 		Temperature:      genai.Ptr[float32](0.0),
+	}
+
+	if strings.TrimSpace(systemInstruction) != "" {
+		config.SystemInstruction = &genai.Content{
+			Role: "system",
+			Parts: []*genai.Part{
+				{Text: systemInstruction},
+			},
+		}
 	}
 
 	contents := []*genai.Content{

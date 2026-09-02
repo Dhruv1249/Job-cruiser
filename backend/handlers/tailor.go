@@ -89,38 +89,46 @@ func (handler *TailorHandler) fetchJobTailoringRecord(ctx *gin.Context, jobID st
 }
 
 func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{}) string {
-	var fullName, primaryEmail, phone, location, linkedInURL, gitHubURL, portfolioURL string
-	var bioText, latexCV, parsedExperienceJSON string
+	var fullName, primaryEmail, contactEmail, phone, location, linkedInURL, gitHubURL, portfolioURL string
+	var bioExperienceText, masterCVText, latexCV, parsedExperienceJSON string
+	var customLinksJSON []byte
 	queryError := handler.DB.QueryRow(
 		ctx.Request.Context(),
 		`SELECT
 			COALESCE(p.full_name, ''),
 			COALESCE(u.primary_email, ''),
+			COALESCE(p.email, ''),
 			COALESCE(p.phone, u.phone, ''),
 			COALESCE(p.location, u.location, ''),
 			COALESCE(p.linkedin_url, u.links->>'linkedin', ''),
 			COALESCE(p.github_url, u.links->>'github', ''),
 			COALESCE(p.portfolio_url, u.links->>'portfolio', ''),
-			COALESCE(NULLIF(p.bio_experience_text, ''), p.master_cv_text, ''),
+			COALESCE(p.custom_links, '[]'::jsonb),
+			COALESCE(p.bio_experience_text, ''),
+			COALESCE(p.master_cv_text, ''),
 			COALESCE(u.latex_cv, ''),
 			COALESCE(u.parsed_experience::text, '[]')
 		 FROM users u
 		 LEFT JOIN user_preferences p ON u.id = p.user_id
 		 WHERE u.id = $1`,
 		userID,
-	).Scan(&fullName, &primaryEmail, &phone, &location, &linkedInURL, &gitHubURL, &portfolioURL, &bioText, &latexCV, &parsedExperienceJSON)
+	).Scan(&fullName, &primaryEmail, &contactEmail, &phone, &location, &linkedInURL, &gitHubURL, &portfolioURL, &customLinksJSON, &bioExperienceText, &masterCVText, &latexCV, &parsedExperienceJSON)
 	if queryError != nil {
 		return "Experienced software engineer with strong backend and cloud infrastructure skills."
 	}
 
 	var profile strings.Builder
 
-	profile.WriteString("CANDIDATE CONTACT INFORMATION (USE EXACTLY AS-IS, DO NOT MODIFY OR INVENT)\n")
+	profile.WriteString("CANDIDATE CONTACT INFORMATION & LINKS (USE AS-IS, DO NOT MODIFY OR INVENT)\n")
 	if fullName != "" {
 		profile.WriteString(fmt.Sprintf("  Full Name: %s\n", fullName))
 	}
-	if primaryEmail != "" {
-		profile.WriteString(fmt.Sprintf("  Email: %s\n", primaryEmail))
+	effectiveEmail := contactEmail
+	if effectiveEmail == "" {
+		effectiveEmail = primaryEmail
+	}
+	if effectiveEmail != "" {
+		profile.WriteString(fmt.Sprintf("  Email: %s\n", effectiveEmail))
 	}
 	if phone != "" {
 		profile.WriteString(fmt.Sprintf("  Phone: %s\n", phone))
@@ -136,6 +144,24 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 	}
 	if portfolioURL != "" {
 		profile.WriteString(fmt.Sprintf("  Portfolio: %s\n", portfolioURL))
+	}
+
+	var customLinks []struct {
+		Label string `json:"label"`
+		URL   string `json:"url"`
+	}
+	if len(customLinksJSON) > 0 {
+		_ = json.Unmarshal(customLinksJSON, &customLinks)
+		for _, customLinkItem := range customLinks {
+			trimmedURL := strings.TrimSpace(customLinkItem.URL)
+			if trimmedURL != "" {
+				label := strings.TrimSpace(customLinkItem.Label)
+				if label == "" {
+					label = "Link"
+				}
+				profile.WriteString(fmt.Sprintf("  %s: %s\n", label, trimmedURL))
+			}
+		}
 	}
 	profile.WriteString("\n")
 
@@ -260,9 +286,15 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 		}
 	}
 
-	if bioText != "" {
-		profile.WriteString("ADDITIONAL BIO / RAW EXPERIENCE TEXT\n")
-		profile.WriteString(bioText)
+	if bioExperienceText != "" {
+		profile.WriteString("BIOGRAPHY & OVERVIEW\n")
+		profile.WriteString(bioExperienceText)
+		profile.WriteString("\n\n")
+	}
+
+	if masterCVText != "" && masterCVText != bioExperienceText {
+		profile.WriteString("MASTER CV / FULL WORK EXPERIENCE TEXT\n")
+		profile.WriteString(masterCVText)
 		profile.WriteString("\n\n")
 	}
 

@@ -208,27 +208,39 @@ func (service *ResumeTailorService) TailorResumeToFolderWithTemplate(
 	}
 
 	techStackList := strings.Join(jobContext.TechStack, ", ")
-	initialPrompt := fmt.Sprintf(
-		"You are an expert LaTeX resume tailoring engine. Output ONLY valid compilable LaTeX — no markdown fences, no explanations, no commentary.\n\n"+
-			"=== BASELINE LATEX TEMPLATE (FORMAT & MACRO BLUEPRINT) ===\n%s\n=== END BASELINE TEMPLATE ===\n\n"+
+
+	systemInstruction := fmt.Sprintf(
+		"You are an expert LaTeX resume tailoring engine. Your task is to craft a dense, single-page, ATS-compliant LaTeX resume tailored specifically to the target job description, derived exclusively from the candidate's authentic background.\n\n"+
+			"CORE DIRECTIVES:\n"+
+			"1. OUTPUT FORMAT: Output ONLY valid compilable LaTeX code. Do NOT output markdown code fences (no ```latex or ```), no explanations, and no commentary. The output must start directly with \\documentclass and end with \\end{document}.\n"+
+			"2. BASELINE TEMPLATE USAGE: The baseline LaTeX template provided in user content is a FORMAT AND MACRO SKELETON ONLY. You MUST adopt its preamble, package imports, geometry margins, color definitions, and custom structural macros (\\resumeSubheading, \\resumeItem, \\resumeProjectHeading).\n"+
+			"3. PURGE ALL DUMMY TEMPLATE DATA: All text inside \\begin{document}...\\end{document} in the baseline template (such as 'Candidate Name', 'Acme Cloud Technologies', 'Nexus Systems', 'Distributed Task Queue Engine', dummy universities, sample bullet points, and dummy dates) is PLACEHOLDER MOCK DATA. You MUST COMPLETELY PURGE AND REPLACE all dummy template entries with the candidate's authentic information from the CANDIDATE EXPERIENCE BANK. NEVER retain any dummy companies, projects, or placeholder names from the template.\n"+
+			"4. CONTACT & PROFILE LINKS: Render the candidate's real name, email, phone, location, LinkedIn, GitHub, portfolio, and any other provided profile links prominently in the header. Never use 'Candidate Name' or placeholder links.\n"+
+			"5. PROFESSIONAL SUMMARY: Write an impactful 2-3 sentence summary tailored specifically for the %s role at %s, synthesizing the candidate's genuine technical strengths and domain expertise from their experience bank to address the core requirements in the JOB DESCRIPTION.\n"+
+			"6. TECHNICAL SKILLS: Populate the skills section exclusively with the candidate's actual languages, frameworks, cloud technologies, databases, and developer tools extracted from their experience bank. Group them cleanly and prioritize skills that match the target role (%s).\n"+
+			"7. WORK EXPERIENCE: Render the candidate's real work history (company names, titles, employment dates, locations) from the experience bank using \\resumeSubheading. Write strong, tailored \\resumeItem bullets starting with assertive action verbs that emphasize technical accomplishments, architecture, scalability, latency, database optimizations, and tooling matching the JD's requirements. NEVER retain placeholder companies or generic template bullets.\n"+
+			"8. PROJECTS: Highlight 2-3 of the candidate's real projects from their experience bank that best demonstrate relevant tech stack proficiencies and problem-solving. Render using \\resumeProjectHeading with real project names, technologies used, and GitHub/live links. Detail what the candidate actually built and the technical impact. NEVER copy dummy template projects.\n"+
+			"9. EDUCATION & CERTIFICATIONS: Render the candidate's real degree, university/institution, graduation year, and academic achievements using \\resumeSubheading. Do not use dummy universities.\n"+
+			"10. NO INVENTED EXPERIENCE: NEVER invent fake employers, fake job titles, or unearned degrees. However, deeply expand upon the technical execution of the candidate's genuine projects and responsibilities (architecture, concurrency, APIs, performance, data pipelines) to create a dense, impressive, fully-filled resume.\n"+
+			"11. PAGE BUDGET: Exactly %d page(s). Ensure the resume fills the target page budget completely from top to bottom with zero awkward whitespace gaps at the bottom, without spilling onto an extra page.\n"+
+			"12. STANDARD PACKAGES ONLY: Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
+			"13. ESCAPE SPECIAL CHARACTERS: ALWAYS properly escape special characters in text, company names, titles, and links: use \\& for &, \\%% for %%, \\_ for _, \\# for #, \\$ for $.\n"+
+			"14. Output MUST begin with \\documentclass and end with \\end{document}.",
+		jobContext.Title,
+		jobContext.Company,
+		techStackList,
+		targetPages,
+	)
+
+	contentText := fmt.Sprintf(
+		"=== BASELINE LATEX TEMPLATE (FORMAT & MACRO BLUEPRINT ONLY) ===\n%s\n=== END BASELINE TEMPLATE ===\n\n"+
 			"TARGET ROLE\n"+
 			"  Title:     %s\n"+
 			"  Company:   %s\n"+
 			"  Seniority: %s\n"+
 			"  Tech:      %s\n\n"+
 			"JOB DESCRIPTION\n%s\n\n"+
-			"CANDIDATE EXPERIENCE BANK\n%s\n\n"+
-			"STRICT RULES FOR FORMAT PRESERVATION & CONTENT TAILORING\n"+
-			"- FORMAT & STRUCTURE PRESERVATION (MANDATORY): You MUST adopt and preserve the EXACT LaTeX preamble, package imports, geometry margins, custom macro definitions (e.g. \\resumeSubheading, \\resumeItem, \\resumeProjectHeading), fonts, color definitions, and overall visual layout from the BASELINE LATEX TEMPLATE above. Do not invent new macro names or change structural commands.\n"+
-			"- CONTACT INFO: The experience bank above starts with CANDIDATE CONTACT INFORMATION. You MUST use the candidate's REAL name, email, phone, location, LinkedIn URL, and GitHub URL EXACTLY as provided in the header. NEVER use placeholders like '[Your Name]', 'candidate@email.com', or '[Your Phone Number]'. If a field is missing, simply omit it.\n"+
-			"- Page budget: exactly %d page(s). Ensure the resume fills the entire target page area completely without empty space or whitespace gaps at the bottom, and does not spill over.\n"+
-			"- Standard Packages Only: Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
-			"- Escape Special Characters: ALWAYS properly escape special characters in text, company names, titles, and links: use \\& for &, \\%% for %%, \\_ for _, \\# for #, \\$ for $.\n"+
-			"- Relevant Details Selection: Compare the Job Description requirements with the candidate experience bank. If the candidate has multiple projects, select ONLY the top 2-3 most relevant projects and experiences that directly match the JD's tech stack and responsibilities. Do not include unrelated projects.\n"+
-			"- Truthfulness & No Fabrication: NEVER invent fake employment history, fake companies, or fake degrees. Reorder, rephrase, and emphasize authentic facts and real candidate skills from the experience bank.\n"+
-			"- Full Page Density (No Emptiness): If candidate details are brief, expand upon the depth of their actual technical implementation, architecture, databases, tools, APIs, testing, and achievements to produce a dense, impressive, fully-filled %d-page resume.\n"+
-			"- Emphasize matching tech keywords in bullets and skills sections.\n"+
-			"- Output MUST begin with \\documentclass and end with \\end{document}.",
+			"CANDIDATE EXPERIENCE BANK (PRIMARY SOURCE OF TRUTH FOR ALL CONTENT)\n%s",
 		templateContent,
 		jobContext.Title,
 		jobContext.Company,
@@ -236,11 +248,9 @@ func (service *ResumeTailorService) TailorResumeToFolderWithTemplate(
 		techStackList,
 		jobContext.RawDesc,
 		userBio,
-		targetPages,
-		targetPages,
 	)
 
-	tailoredTeX, generateError := service.generateContentWithGemini(ctx, initialPrompt)
+	tailoredTeX, generateError := service.generateContentWithGeminiAndSystemInstruction(ctx, systemInstruction, contentText)
 	if generateError != nil {
 		return nil, fmt.Errorf("failed generating LaTeX with Gemini: %w", generateError)
 	}
@@ -410,26 +420,39 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolderWithTemplate(
 	}
 
 	techStackList := strings.Join(jobContext.TechStack, ", ")
-	coverLetterPrompt := fmt.Sprintf(
-		"You are an expert LaTeX cover letter writer. Output ONLY valid compilable LaTeX — no markdown fences, no explanations.\n\n"+
-			"=== BASELINE LATEX COVER LETTER TEMPLATE (FORMAT BLUEPRINT) ===\n%s\n=== END BASELINE TEMPLATE ===\n\n"+
+
+	systemInstruction := fmt.Sprintf(
+		"You are an expert LaTeX cover letter writer. Output ONLY valid compilable LaTeX code without markdown fences, commentary, or conversational filler. Output MUST begin with \\documentclass and end with \\end{document}.\n\n"+
+			"CORE DIRECTIVES:\n"+
+			"1. SKELETON BLUEPRINT ONLY: The baseline template provided in user content is ONLY a styling blueprint (preamble, geometry, and layout). The text in the template (such as 'Candidate Name', 'Target Company', 'Software Engineer role at Target Company', and the generic sample paragraphs) is DUMMY PLACEHOLDER TEXT. You MUST COMPLETELY REPLACE all dummy text with a fully customized, professional cover letter tailored specifically to the candidate and the target role.\n"+
+			"2. RECIPIENT & COMPANY: Address the letter specifically to '%s' (Company) and reference the '%s' (Title) role. NEVER output 'Target Company' or placeholder names.\n"+
+			"3. HEADER & SIGNATURE: Render the candidate's real name, email, phone, location, and links from the candidate profile in both the top header and closing signature. Never use 'Candidate Name' or placeholder links.\n"+
+			"4. ORIGINAL PERSUASIVE LETTER BODY: Write 3-4 cohesive, compelling, beautifully phrased paragraphs:\n"+
+			"   - Opening: State enthusiastic interest in the %s position at %s. Summarize who the candidate is and why their unique background makes them an exceptional match.\n"+
+			"   - Technical Alignment: Detail 2-3 specific real projects, technologies, and achievements from the candidate's background that directly solve the requirements and tech stack (%s) described in the JOB DESCRIPTION. Explain what the candidate built and the tangible technical impact.\n"+
+			"   - Mission Alignment: Articulate genuine appreciation for %s's engineering mission and domain based on the JD, explaining how the candidate will hit the ground running.\n"+
+			"   - Professional Closing: Reiterate value proposition, express eagerness to discuss technical contributions, and provide a polite call to action.\n"+
+			"5. TRUTHFULNESS: Every technical claim and project must be grounded in the candidate's actual background. Do not invent companies or fake credentials.\n"+
+			"6. PAGE BUDGET: Exactly %d page(s). Neatly balanced and full without overflowing onto a second page.\n"+
+			"7. STANDARD PACKAGES & ESCAPING: Use standard TeX Live packages only. ALWAYS properly escape special characters (\\&, \\%%, \\_, \\#, \\$).",
+		jobContext.Company,
+		jobContext.Title,
+		jobContext.Title,
+		jobContext.Company,
+		techStackList,
+		jobContext.Company,
+		targetPages,
+	)
+
+	contentText := fmt.Sprintf(
+		"=== BASELINE LATEX COVER LETTER TEMPLATE (FORMAT BLUEPRINT ONLY) ===\n%s\n=== END BASELINE TEMPLATE ===\n\n"+
 			"TARGET ROLE\n"+
 			"  Title:     %s\n"+
 			"  Company:   %s\n"+
 			"  Seniority: %s\n"+
 			"  Tech:      %s\n\n"+
 			"JOB DESCRIPTION\n%s\n\n"+
-			"CANDIDATE BIO & EXPERIENCE\n%s\n\n"+
-			"STRICT RULES\n"+
-			"- FORMAT PRESERVATION: Adopt the exact preamble, geometry, font settings, and layout structure of the BASELINE LATEX COVER LETTER TEMPLATE above.\n"+
-			"- CONTACT INFO: The candidate bio above starts with CANDIDATE CONTACT INFORMATION. You MUST use the candidate's REAL name, email, phone, and location EXACTLY as provided in the header and signature. NEVER use placeholders like '[Your Name]', '[Your Email Address]', or '[Your Phone Number]'. If a field is missing, simply omit it.\n"+
-			"- Page budget: exactly %d page(s). Professional tone. Address the hiring team directly.\n"+
-			"- Standard Packages Only: Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
-			"- Escape Special Characters: ALWAYS properly escape special characters in text, company names, titles, and links: use \\& for &, \\%% for %%, \\_ for _, \\# for #, \\$ for $.\n"+
-			"- Selection of Matching Details: Select and highlight ONLY the candidate's projects and skills that directly align with the job description's tech stack and mission.\n"+
-			"- Truthfulness: Never invent facts, companies, or experience.\n"+
-			"- Full Page Density: Structure the letter with a strong opening hook, 2-3 substantial technical body paragraphs explaining concrete relevant accomplishments, and a confident closing that neatly fills the %d page(s) without large empty gaps.\n"+
-			"- Output MUST begin with \\documentclass and end with \\end{document}.",
+			"CANDIDATE BIO & EXPERIENCE (SOURCE OF TRUTH FOR ALL CONTENT)\n%s",
 		templateContent,
 		jobContext.Title,
 		jobContext.Company,
@@ -437,11 +460,9 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolderWithTemplate(
 		techStackList,
 		jobContext.RawDesc,
 		userBio,
-		targetPages,
-		targetPages,
 	)
 
-	coverLetterTeX, generateError := service.generateContentWithGemini(ctx, coverLetterPrompt)
+	coverLetterTeX, generateError := service.generateContentWithGeminiAndSystemInstruction(ctx, systemInstruction, contentText)
 	if generateError != nil {
 		return nil, fmt.Errorf("failed generating cover letter LaTeX with Gemini: %w", generateError)
 	}
@@ -581,8 +602,9 @@ func (service *ResumeTailorService) TailorResumeDirect(
 	}
 
 	initialPrompt := fmt.Sprintf(
-		"You are an expert LaTeX resume tailoring engine. Output ONLY valid LaTeX without markdown fences.\n\n"+
-			"Candidate Bio:\n%s\n\nJob Description:\n%s\n\nPage budget: %d page(s). Output MUST begin with \\documentclass.",
+		"You are an expert LaTeX resume tailoring engine. Output ONLY valid LaTeX without markdown fences or explanations.\n\n"+
+			"Candidate Information (Source of Truth):\n%s\n\nJob Description:\n%s\n\n"+
+			"STRICT INSTRUCTIONS: Replace any dummy placeholders with the candidate's real name, authentic projects, real employment history, and actual technical skills from the candidate information. Never invent fake companies or use placeholder names. Fill the target budget of %d page(s) densely with technical depth. Output MUST begin with \\documentclass.",
 		userBio, legacyJobContext.RawDesc, targetPages,
 	)
 	tailoredTeX, generateError := service.generateContentWithGemini(ctx, initialPrompt)
@@ -651,8 +673,9 @@ func (service *ResumeTailorService) GenerateCoverLetterDirect(
 		filePath = "cover_letter.tex"
 	}
 	promptText := fmt.Sprintf(
-		"You are an expert LaTeX cover letter writer. Output ONLY valid LaTeX without markdown fences.\n"+
-			"User Bio:\n%s\n\nJob Description:\n%s\n\nExactly 1 page. Output MUST begin with \\documentclass.",
+		"You are an expert LaTeX cover letter writer. Output ONLY valid LaTeX without markdown fences.\n\n"+
+			"Candidate Information (Source of Truth):\n%s\n\nJob Description:\n%s\n\n"+
+			"STRICT INSTRUCTIONS: Replace all placeholders with candidate's real name and authentic achievements. Write an original, persuasive letter connecting candidate's real experience to the job requirements. Exactly 1 page. Output MUST begin with \\documentclass.",
 		userBio,
 		jobDescription,
 	)
@@ -692,14 +715,26 @@ func (service *ResumeTailorService) GenerateCoverLetterDirect(
 }
 
 func (service *ResumeTailorService) generateContentWithGemini(ctx context.Context, promptText string) (string, error) {
+	return service.generateContentWithGeminiAndSystemInstruction(ctx, "", promptText)
+}
+
+func (service *ResumeTailorService) generateContentWithGeminiAndSystemInstruction(ctx context.Context, systemInstruction string, contentText string) (string, error) {
 	payloadMap := map[string]interface{}{
 		"contents": []map[string]interface{}{
 			{
 				"parts": []map[string]string{
-					{"text": promptText},
+					{"text": contentText},
 				},
 			},
 		},
+	}
+
+	if strings.TrimSpace(systemInstruction) != "" {
+		payloadMap["system_instruction"] = map[string]interface{}{
+			"parts": []map[string]string{
+				{"text": systemInstruction},
+			},
+		}
 	}
 
 	jsonBytes, marshalError := json.Marshal(payloadMap)

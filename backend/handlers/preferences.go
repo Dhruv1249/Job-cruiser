@@ -26,24 +26,33 @@ type PreferencesHandler struct {
 	APIKey       string
 }
 
+type CustomLinkItem struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
 type PreferencesRequest struct {
-	FullName               string   `json:"full_name" binding:"required"`
-	Phone                  string   `json:"phone"`
-	Location               string   `json:"location"`
-	LinkedInURL            string   `json:"linkedin_url"`
-	GitHubURL              string   `json:"github_url"`
-	PortfolioURL           string   `json:"portfolio_url"`
-	TargetRoles            []string `json:"target_roles" binding:"required"`
-	TargetIndustries       []string `json:"target_industries"`
-	TargetLocations        []string `json:"target_locations"`
-	WorkModels             []string `json:"work_models" binding:"required"`
-	MinSalary              int      `json:"min_salary"`
-	Currency               string   `json:"currency"`
-	MasterCVText           string   `json:"master_cv_text"`
-	BioExperienceText      string   `json:"bio_experience_text"`
-	AIMatchingEnabled      bool     `json:"ai_matching_enabled"`
-	TargetResumePages      int      `json:"target_resume_pages"`
-	TargetCoverLetterPages int      `json:"target_cover_letter_pages"`
+	FullName               string           `json:"full_name" binding:"required"`
+	Email                  string           `json:"email"`
+	Phone                  string           `json:"phone"`
+	Location               string           `json:"location"`
+	LinkedInURL            string           `json:"linkedin_url"`
+	GitHubURL              string           `json:"github_url"`
+	PortfolioURL           string           `json:"portfolio_url"`
+	CustomLinks            []CustomLinkItem `json:"custom_links"`
+	TargetRoles            []string         `json:"target_roles" binding:"required"`
+	TargetIndustries       []string         `json:"target_industries"`
+	TargetLocations        []string         `json:"target_locations"`
+	WorkModels             []string         `json:"work_models" binding:"required"`
+	MinSalary              int              `json:"min_salary"`
+	Currency               string           `json:"currency"`
+	MasterCVText           string           `json:"master_cv_text"`
+	BioExperienceText      string           `json:"bio_experience_text"`
+	AIMatchingEnabled      bool             `json:"ai_matching_enabled"`
+	TargetResumePages      int              `json:"target_resume_pages"`
+	TargetCoverLetterPages            int              `json:"target_cover_letter_pages"`
+	MatchThresholdNotificationEnabled bool             `json:"match_threshold_notification_enabled"`
+	MatchThresholdPercentage          int              `json:"match_threshold_percentage"`
 }
 
 type ParseCVRequest struct {
@@ -118,18 +127,29 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 	if targetCoverLetterPages <= 0 {
 		targetCoverLetterPages = 1
 	}
+	matchThresholdPercentage := req.MatchThresholdPercentage
+	if matchThresholdPercentage <= 0 {
+		matchThresholdPercentage = 80
+	}
+
+	customLinksJSON, marshalLinksError := json.Marshal(req.CustomLinks)
+	if marshalLinksError != nil {
+		customLinksJSON = []byte("[]")
+	}
 
 	query := `
-		INSERT INTO user_preferences (user_id, full_name, phone, location, linkedin_url, github_url, portfolio_url, target_roles, target_industries, target_locations, work_models, min_salary, currency, master_cv_text, bio_experience_text, target_resume_pages, target_cover_letter_pages)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		INSERT INTO user_preferences (user_id, full_name, email, phone, location, linkedin_url, github_url, portfolio_url, custom_links, target_roles, target_industries, target_locations, work_models, min_salary, currency, master_cv_text, bio_experience_text, target_resume_pages, target_cover_letter_pages, match_threshold_notification_enabled, match_threshold_percentage)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 		ON CONFLICT (user_id) 
 		DO UPDATE SET 
 			full_name = EXCLUDED.full_name,
+			email = EXCLUDED.email,
 			phone = EXCLUDED.phone,
 			location = EXCLUDED.location,
 			linkedin_url = EXCLUDED.linkedin_url,
 			github_url = EXCLUDED.github_url,
 			portfolio_url = EXCLUDED.portfolio_url,
+			custom_links = EXCLUDED.custom_links,
 			target_roles = EXCLUDED.target_roles,
 			target_industries = EXCLUDED.target_industries,
 			target_locations = EXCLUDED.target_locations,
@@ -140,10 +160,12 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 			bio_experience_text = EXCLUDED.bio_experience_text,
 			target_resume_pages = EXCLUDED.target_resume_pages,
 			target_cover_letter_pages = EXCLUDED.target_cover_letter_pages,
+			match_threshold_notification_enabled = EXCLUDED.match_threshold_notification_enabled,
+			match_threshold_percentage = EXCLUDED.match_threshold_percentage,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 
-	_, err := h.DB.Exec(context.Background(), query, userID, req.FullName, req.Phone, req.Location, req.LinkedInURL, req.GitHubURL, req.PortfolioURL, req.TargetRoles, req.TargetIndustries, req.TargetLocations, req.WorkModels, req.MinSalary, req.Currency, req.MasterCVText, req.BioExperienceText, targetResumePages, targetCoverLetterPages)
+	_, err := h.DB.Exec(context.Background(), query, userID, req.FullName, req.Email, req.Phone, req.Location, req.LinkedInURL, req.GitHubURL, req.PortfolioURL, customLinksJSON, req.TargetRoles, req.TargetIndustries, req.TargetLocations, req.WorkModels, req.MinSalary, req.Currency, req.MasterCVText, req.BioExperienceText, targetResumePages, targetCoverLetterPages, req.MatchThresholdNotificationEnabled, matchThresholdPercentage)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save preferences: " + err.Error()})
 		return
@@ -169,11 +191,13 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 	query := `
 		SELECT 
 			COALESCE(p.full_name, ''), 
+			COALESCE(p.email, u.primary_email, ''),
 			COALESCE(p.phone, u.phone, ''),
 			COALESCE(p.location, u.location, ''),
 			COALESCE(p.linkedin_url, u.links->>'linkedin', ''),
 			COALESCE(p.github_url, u.links->>'github', ''),
 			COALESCE(p.portfolio_url, u.links->>'portfolio', ''),
+			COALESCE(p.custom_links, '[]'::jsonb),
 			COALESCE(p.target_roles, '[]'::jsonb), 
 			COALESCE(p.target_industries, '[]'::jsonb), 
 			COALESCE(p.target_locations, '["India (On-site & Hybrid)", "India (Remote)", "Global Remote"]'::jsonb), 
@@ -185,6 +209,8 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 			COALESCE(u.ai_matching_enabled, false),
 			COALESCE(p.target_resume_pages, 1),
 			COALESCE(p.target_cover_letter_pages, 1),
+			COALESCE(p.match_threshold_notification_enabled, false),
+			COALESCE(p.match_threshold_percentage, 80),
 			(p.user_id IS NOT NULL AND jsonb_array_length(COALESCE(p.target_roles, '[]'::jsonb)) > 0) AS has_preferences
 		FROM users u
 		LEFT JOIN user_preferences p ON u.id = p.user_id
@@ -193,13 +219,18 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 
 	var pref PreferencesRequest
 	var hasPreferences bool
+	var customLinksJSON []byte
 	err := h.DB.QueryRow(context.Background(), query, userID).Scan(
-		&pref.FullName, &pref.Phone, &pref.Location, &pref.LinkedInURL, &pref.GitHubURL, &pref.PortfolioURL, &pref.TargetRoles, &pref.TargetIndustries, &pref.TargetLocations, &pref.WorkModels, &pref.MinSalary, &pref.Currency, &pref.MasterCVText, &pref.BioExperienceText, &pref.AIMatchingEnabled, &pref.TargetResumePages, &pref.TargetCoverLetterPages, &hasPreferences,
+		&pref.FullName, &pref.Email, &pref.Phone, &pref.Location, &pref.LinkedInURL, &pref.GitHubURL, &pref.PortfolioURL, &customLinksJSON, &pref.TargetRoles, &pref.TargetIndustries, &pref.TargetLocations, &pref.WorkModels, &pref.MinSalary, &pref.Currency, &pref.MasterCVText, &pref.BioExperienceText, &pref.AIMatchingEnabled, &pref.TargetResumePages, &pref.TargetCoverLetterPages, &pref.MatchThresholdNotificationEnabled, &pref.MatchThresholdPercentage, &hasPreferences,
 	)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch preferences: " + err.Error()})
 		return
+	}
+
+	if len(customLinksJSON) > 0 {
+		_ = json.Unmarshal(customLinksJSON, &pref.CustomLinks)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
