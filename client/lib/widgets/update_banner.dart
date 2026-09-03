@@ -61,6 +61,7 @@ class _UpdateBannerState extends State<UpdateBanner> {
       if (uri != null && await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Failed to download update. Please try again.'),

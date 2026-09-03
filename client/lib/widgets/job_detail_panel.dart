@@ -268,10 +268,10 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
         if (widget.showBackButton) _buildHeaderBar(),
         Expanded(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
             child: Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 800),
+                constraints: const BoxConstraints(maxWidth: 960),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -670,98 +670,106 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
       ),
       child: SafeArea(
         top: false,
-        child: Row(
-          children: [
-            IconButton.outlined(
-              onPressed: _isSaving
-                  ? null
-                  : () => _handleSaveStatus(isBookmarked ? 'unbookmarked' : 'bookmarked'),
-              icon: Icon(
-                isBookmarked ? Icons.bookmark : Icons.bookmark_border,
-                color: isBookmarked ? AppColors.matchGreen : AppColors.primary,
-                size: 20,
-              ),
-              style: IconButton.styleFrom(
-                side: BorderSide(
-                  color: isBookmarked ? AppColors.matchGreen : AppColors.outlineVariant,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 960),
+            child: Row(
+              children: [
+                IconButton.outlined(
+                  onPressed: _isSaving
+                      ? null
+                      : () => _handleSaveStatus(isBookmarked ? 'unbookmarked' : 'bookmarked'),
+                  icon: Icon(
+                    isBookmarked ? Icons.bookmark : Icons.bookmark_border,
+                    color: isBookmarked ? AppColors.matchGreen : AppColors.primary,
+                    size: 20,
+                  ),
+                  style: IconButton.styleFrom(
+                    side: BorderSide(
+                      color: isBookmarked ? AppColors.matchGreen : AppColors.outlineVariant,
+                    ),
+                    padding: const EdgeInsets.all(10),
+                  ),
+                  tooltip: isBookmarked ? 'Saved' : 'Save Job',
                 ),
-                padding: const EdgeInsets.all(10),
-              ),
-              tooltip: isBookmarked ? 'Saved' : 'Save Job',
+                const SizedBox(width: 8),
+                IconButton.outlined(
+                  onPressed: _isSaving
+                      ? null
+                      : () => _handleSaveStatus(isApplied ? 'not_applied' : 'applied'),
+                  icon: Icon(
+                    isApplied ? Icons.check_circle : Icons.check_circle_outline,
+                    color: isApplied ? AppColors.matchGreen : AppColors.primary,
+                    size: 20,
+                  ),
+                  style: IconButton.styleFrom(
+                    side: BorderSide(
+                      color: isApplied ? AppColors.matchGreen : AppColors.outlineVariant,
+                    ),
+                    padding: const EdgeInsets.all(10),
+                  ),
+                  tooltip: isApplied ? 'Applied' : 'Mark as Applied',
+                ),
+                if (widget.job.url.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  IconButton.outlined(
+                    onPressed: () => _openJobUrl(widget.job.url),
+                    icon: const Icon(
+                      Icons.open_in_new,
+                      color: AppColors.primary,
+                      size: 19,
+                    ),
+                    style: IconButton.styleFrom(
+                      side: const BorderSide(color: AppColors.outlineVariant),
+                      padding: const EdgeInsets.all(10),
+                    ),
+                    tooltip: 'Open ATS Job Listing',
+                  ),
+                ],
+                const SizedBox(width: 8),
+                IconButton.outlined(
+                  onPressed: _handleDismissJob,
+                  icon: const Icon(
+                    Icons.visibility_off_outlined,
+                    color: AppColors.error,
+                    size: 19,
+                  ),
+                  style: IconButton.styleFrom(
+                    side: const BorderSide(color: AppColors.outlineVariant),
+                    padding: const EdgeInsets.all(10),
+                  ),
+                  tooltip: 'Hide Job',
+                ),
+                const Spacer(),
+                Flexible(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 160, maxWidth: 280),
+                    child: ElevatedButton.icon(
+                      onPressed: _isTailoring ? null : _handleTailorApplication,
+                      icon: _isTailoring
+                          ? const SizedBox(
+                              width: 15,
+                              height: 15,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.auto_awesome, size: 16, color: Colors.white),
+                      label: Text(
+                        _isTailoring ? 'Starting Tailoring...' : 'Tailor Application',
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            IconButton.outlined(
-              onPressed: _isSaving
-                  ? null
-                  : () => _handleSaveStatus(isApplied ? 'not_applied' : 'applied'),
-              icon: Icon(
-                isApplied ? Icons.check_circle : Icons.check_circle_outline,
-                color: isApplied ? AppColors.matchGreen : AppColors.primary,
-                size: 20,
-              ),
-              style: IconButton.styleFrom(
-                side: BorderSide(
-                  color: isApplied ? AppColors.matchGreen : AppColors.outlineVariant,
-                ),
-                padding: const EdgeInsets.all(10),
-              ),
-              tooltip: isApplied ? 'Applied' : 'Mark as Applied',
-            ),
-            if (widget.job.url.isNotEmpty) ...[
-              const SizedBox(width: 8),
-              IconButton.outlined(
-                onPressed: () => _openJobUrl(widget.job.url),
-                icon: const Icon(
-                  Icons.open_in_new,
-                  color: AppColors.primary,
-                  size: 19,
-                ),
-                style: IconButton.styleFrom(
-                  side: const BorderSide(color: AppColors.outlineVariant),
-                  padding: const EdgeInsets.all(10),
-                ),
-                tooltip: 'Open ATS Job Listing',
-              ),
-            ],
-            const SizedBox(width: 8),
-            IconButton.outlined(
-              onPressed: _handleDismissJob,
-              icon: const Icon(
-                Icons.visibility_off_outlined,
-                color: AppColors.error,
-                size: 19,
-              ),
-              style: IconButton.styleFrom(
-                side: const BorderSide(color: AppColors.outlineVariant),
-                padding: const EdgeInsets.all(10),
-              ),
-              tooltip: 'Hide Job',
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: _isTailoring ? null : _handleTailorApplication,
-                icon: _isTailoring
-                    ? const SizedBox(
-                        width: 15,
-                        height: 15,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Icon(Icons.auto_awesome, size: 16, color: Colors.white),
-                label: Text(
-                  _isTailoring ? 'Starting Tailoring...' : 'Tailor Application',
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

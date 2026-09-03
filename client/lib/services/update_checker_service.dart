@@ -40,6 +40,7 @@ class UpdateCheckerService {
   /// Fetches the latest GitHub release and returns a [PendingUpdate] if the
   /// installed version is older, or null if already up to date or on an error.
   Future<PendingUpdate?> checkForUpdate() async {
+    if (kIsWeb) return null;
     try {
       final packageInfo = await PackageInfo.fromPlatform();
       final installedVersion = packageInfo.version;

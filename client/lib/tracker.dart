@@ -248,9 +248,10 @@ class _ApplicationTrackerPageState extends State<ApplicationTrackerPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = MediaQuery.of(context).size.width >= 960;
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: _buildAppBar(),
+      appBar: isDesktop ? null : _buildAppBar(),
       body: RefreshIndicator(
         onRefresh: _loadApplications,
         color: AppColors.primary,

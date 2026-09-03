@@ -1,9 +1,10 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import '../main.dart' show AppColors;
 import '../models/job_filter_state.dart';
 
-/// Compact, horizontal quick filter chip bar for real-time filter tweaking and sorting toggling.
-class JobFilterBar extends StatelessWidget {
+/// Compact, horizontal quick filter chip bar with mouse wheel, drag, and arrow navigation scrolling support.
+class JobFilterBar extends StatefulWidget {
   const JobFilterBar({
     super.key,
     required this.filterState,
@@ -16,35 +17,178 @@ class JobFilterBar extends StatelessWidget {
   final VoidCallback onOpenFilterDialog;
 
   @override
+  State<JobFilterBar> createState() => _JobFilterBarState();
+}
+
+class _JobFilterBarState extends State<JobFilterBar> {
+  late final ScrollController _scrollController;
+  bool _canScrollLeft = false;
+  bool _canScrollRight = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController();
+    _scrollController.addListener(_updateScrollIndicators);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateScrollIndicators());
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_updateScrollIndicators);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _updateScrollIndicators() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    final canLeft = position.pixels > 2.0;
+    final canRight = position.pixels < (position.maxScrollExtent - 2.0);
+    if (canLeft != _canScrollLeft || canRight != _canScrollRight) {
+      setState(() {
+        _canScrollLeft = canLeft;
+        _canScrollRight = canRight;
+      });
+    }
+  }
+
+  void _scrollBy(double offset) {
+    if (!_scrollController.hasClients) return;
+    final target = (_scrollController.offset + offset).clamp(
+      0.0,
+      _scrollController.position.maxScrollExtent,
+    );
+    _scrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final activeCount = filterState.activeFilterCount;
-    final isCustomScore = filterState.minScore > 0 || filterState.maxScore < 100;
-    final isCustomRecency = filterState.recencyDays != null && filterState.recencyDays! > 0;
+    final activeCount = widget.filterState.activeFilterCount;
+    final isCustomScore = widget.filterState.minScore > 0 || widget.filterState.maxScore < 100;
+    final isCustomRecency = widget.filterState.recencyDays != null && widget.filterState.recencyDays! > 0;
 
     return Container(
       color: AppColors.surface,
       height: 44,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: [
-            _buildAllFiltersButton(activeCount),
-            const SizedBox(width: 8),
-            _buildQuickSortChip(),
-            const SizedBox(width: 6),
-            _buildScopeSelectorChip(),
-            const SizedBox(width: 6),
-            _buildScorePresetChip(isCustomScore),
-            const SizedBox(width: 6),
-            _buildRecencyPresetChip(isCustomRecency),
-            const SizedBox(width: 6),
-            _buildViewStatusChip(),
-            if (!filterState.isDefault) ...[
-              const SizedBox(width: 8),
-              _buildClearAllChip(),
+      child: NotificationListener<ScrollMetricsNotification>(
+        onNotification: (notification) {
+          _updateScrollIndicators();
+          return false;
+        },
+        child: Listener(
+          onPointerSignal: (pointerSignal) {
+            if (pointerSignal is PointerScrollEvent && _scrollController.hasClients) {
+              final delta = pointerSignal.scrollDelta.dy != 0
+                  ? pointerSignal.scrollDelta.dy
+                  : pointerSignal.scrollDelta.dx;
+              final target = (_scrollController.offset + delta).clamp(
+                0.0,
+                _scrollController.position.maxScrollExtent,
+              );
+              _scrollController.jumpTo(target);
+            }
+          },
+          child: Stack(
+            children: [
+              SingleChildScrollView(
+                controller: _scrollController,
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    _buildAllFiltersButton(activeCount),
+                    const SizedBox(width: 8),
+                    _buildQuickSortChip(),
+                    const SizedBox(width: 6),
+                    _buildScopeSelectorChip(),
+                    const SizedBox(width: 6),
+                    _buildScorePresetChip(isCustomScore),
+                    const SizedBox(width: 6),
+                    _buildRecencyPresetChip(isCustomRecency),
+                    const SizedBox(width: 6),
+                    _buildViewStatusChip(),
+                    if (!widget.filterState.isDefault) ...[
+                      const SizedBox(width: 8),
+                      _buildClearAllChip(),
+                    ],
+                  ],
+                ),
+              ),
+              if (_canScrollLeft)
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  child: _buildScrollArrow(
+                    icon: Icons.chevron_left,
+                    onPressed: () => _scrollBy(-140),
+                    alignment: Alignment.centerLeft,
+                  ),
+                ),
+              if (_canScrollRight)
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  child: _buildScrollArrow(
+                    icon: Icons.chevron_right,
+                    onPressed: () => _scrollBy(140),
+                    alignment: Alignment.centerRight,
+                  ),
+                ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScrollArrow({
+    required IconData icon,
+    required VoidCallback onPressed,
+    required Alignment alignment,
+  }) {
+    final isLeft = alignment == Alignment.centerLeft;
+    return Container(
+      width: 32,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: isLeft ? Alignment.centerLeft : Alignment.centerRight,
+          end: isLeft ? Alignment.centerRight : Alignment.centerLeft,
+          colors: [
+            AppColors.surface,
+            AppColors.surface.withValues(alpha: 0.9),
+            AppColors.surface.withValues(alpha: 0.0),
           ],
+        ),
+      ),
+      alignment: alignment,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceContainerLowest,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.12),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+            ),
+            child: Icon(icon, size: 16, color: AppColors.primary),
+          ),
         ),
       ),
     );
@@ -53,7 +197,7 @@ class JobFilterBar extends StatelessWidget {
   Widget _buildAllFiltersButton(int activeCount) {
     final hasActive = activeCount > 0;
     return OutlinedButton.icon(
-      onPressed: onOpenFilterDialog,
+      onPressed: widget.onOpenFilterDialog,
       icon: Icon(
         Icons.tune,
         size: 14,
@@ -80,9 +224,9 @@ class JobFilterBar extends StatelessWidget {
   }
 
   Widget _buildQuickSortChip() {
-    final isDateSort = filterState.sortBy == 'date_desc';
-    final isSalarySort = filterState.sortBy == 'salary_desc';
-    final isOldestSort = filterState.sortBy == 'date_asc';
+    final isDateSort = widget.filterState.sortBy == 'date_desc';
+    final isSalarySort = widget.filterState.sortBy == 'salary_desc';
+    final isOldestSort = widget.filterState.sortBy == 'date_asc';
 
     String label = 'Sort: Score ↓';
     if (isDateSort) label = 'Sort: Date ↓';
@@ -93,7 +237,7 @@ class JobFilterBar extends StatelessWidget {
       tooltip: 'Change sorting order',
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       onSelected: (selectedSort) {
-        onFilterChanged(filterState.copyWith(sortBy: selectedSort));
+        widget.onFilterChanged(widget.filterState.copyWith(sortBy: selectedSort));
       },
       itemBuilder: (context) => const [
         PopupMenuItem(
@@ -175,7 +319,7 @@ class JobFilterBar extends StatelessWidget {
   }
 
   Widget _buildScopeSelectorChip() {
-    final scope = filterState.matchScope;
+    final scope = widget.filterState.matchScope;
     String label = 'All Jobs';
     if (scope == 'matched_only') label = 'Matched Only';
     if (scope == 'unmatched_only') label = 'Unmatched Only';
@@ -184,7 +328,7 @@ class JobFilterBar extends StatelessWidget {
       tooltip: 'Filter by match scope',
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       onSelected: (selectedScope) {
-        onFilterChanged(filterState.copyWith(matchScope: selectedScope));
+        widget.onFilterChanged(widget.filterState.copyWith(matchScope: selectedScope));
       },
       itemBuilder: (context) => const [
         PopupMenuItem(value: 'all', child: Text('All Jobs (Both)')),
@@ -226,11 +370,11 @@ class JobFilterBar extends StatelessWidget {
 
   Widget _buildScorePresetChip(bool isCustomScore) {
     String label = 'All Scores';
-    if (filterState.minScore == 90 && filterState.maxScore == 100) label = '90%+ Elite';
-    if (filterState.minScore == 80 && filterState.maxScore == 100) label = '80%+ Top';
-    if (filterState.minScore == 60 && filterState.maxScore == 100) label = '60%+ Good';
+    if (widget.filterState.minScore == 90 && widget.filterState.maxScore == 100) label = '90%+ Elite';
+    if (widget.filterState.minScore == 80 && widget.filterState.maxScore == 100) label = '80%+ Top';
+    if (widget.filterState.minScore == 60 && widget.filterState.maxScore == 100) label = '60%+ Good';
     if (isCustomScore && label == 'All Scores') {
-      label = '${filterState.minScore}%-${filterState.maxScore}%';
+      label = '${widget.filterState.minScore}%-${widget.filterState.maxScore}%';
     }
 
     return PopupMenuButton<String>(
@@ -238,15 +382,15 @@ class JobFilterBar extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       onSelected: (value) {
         if (value == '0') {
-          onFilterChanged(filterState.copyWith(minScore: 0, maxScore: 100));
+          widget.onFilterChanged(widget.filterState.copyWith(minScore: 0, maxScore: 100));
         } else if (value == '60') {
-          onFilterChanged(filterState.copyWith(minScore: 60, maxScore: 100));
+          widget.onFilterChanged(widget.filterState.copyWith(minScore: 60, maxScore: 100));
         } else if (value == '80') {
-          onFilterChanged(filterState.copyWith(minScore: 80, maxScore: 100));
+          widget.onFilterChanged(widget.filterState.copyWith(minScore: 80, maxScore: 100));
         } else if (value == '90') {
-          onFilterChanged(filterState.copyWith(minScore: 90, maxScore: 100));
+          widget.onFilterChanged(widget.filterState.copyWith(minScore: 90, maxScore: 100));
         } else if (value == 'custom') {
-          onOpenFilterDialog();
+          widget.onOpenFilterDialog();
         }
       },
       itemBuilder: (context) => const [
@@ -292,7 +436,7 @@ class JobFilterBar extends StatelessWidget {
 
   Widget _buildRecencyPresetChip(bool isCustomRecency) {
     String label = 'Any Time';
-    final days = filterState.recencyDays;
+    final days = widget.filterState.recencyDays;
     if (days == 1) label = 'Today (24h)';
     if (days == 2) label = '2 Days Ago';
     if (days == 3) label = '3 Days Ago';
@@ -305,13 +449,13 @@ class JobFilterBar extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       onSelected: (value) {
         if (value == 'null') {
-          onFilterChanged(filterState.copyWith(recencyDays: () => null));
+          widget.onFilterChanged(widget.filterState.copyWith(recencyDays: () => null));
         } else if (value == 'custom') {
-          onOpenFilterDialog();
+          widget.onOpenFilterDialog();
         } else {
           final parsed = int.tryParse(value);
           if (parsed != null) {
-            onFilterChanged(filterState.copyWith(recencyDays: () => parsed));
+            widget.onFilterChanged(widget.filterState.copyWith(recencyDays: () => parsed));
           }
         }
       },
@@ -359,8 +503,8 @@ class JobFilterBar extends StatelessWidget {
   }
 
   Widget _buildViewStatusChip() {
-    final isUnviewed = filterState.viewMode == 'unviewed';
-    final isViewed = filterState.viewMode == 'viewed';
+    final isUnviewed = widget.filterState.viewMode == 'unviewed';
+    final isViewed = widget.filterState.viewMode == 'viewed';
     final isCustomView = isUnviewed || isViewed;
 
     String label = 'All Views';
@@ -371,7 +515,7 @@ class JobFilterBar extends StatelessWidget {
       tooltip: 'Filter by view status',
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       onSelected: (mode) {
-        onFilterChanged(filterState.copyWith(viewMode: mode));
+        widget.onFilterChanged(widget.filterState.copyWith(viewMode: mode));
       },
       itemBuilder: (context) => const [
         PopupMenuItem(value: 'all', child: Text('All (Viewed & Unviewed)')),
@@ -424,7 +568,7 @@ class JobFilterBar extends StatelessWidget {
       side: const BorderSide(color: AppColors.error),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       onPressed: () {
-        onFilterChanged(filterState.reset());
+        widget.onFilterChanged(widget.filterState.reset());
       },
     );
   }

@@ -100,13 +100,14 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = MediaQuery.of(context).size.width >= 960;
     return Scaffold(
-      appBar: _buildAppBar(),
+      appBar: isDesktop ? null : _buildAppBar(),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 768), // max-w-3xl
+            constraints: const BoxConstraints(maxWidth: 768),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

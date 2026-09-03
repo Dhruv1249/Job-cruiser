@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'details.dart' as details_page;
@@ -25,6 +26,20 @@ Future<void> main() async {
   await dotenv.load(fileName: ".env");
   await NotificationService.instance.initialize();
   runApp(const MyApp());
+}
+
+/// Custom scroll behavior enabling drag gestures across mouse, trackpad, and touch input devices.
+class AppScrollBehavior extends MaterialScrollBehavior {
+  const AppScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+        PointerDeviceKind.unknown,
+      };
 }
 
 /// Palette constants defining theme styling across the application.
@@ -68,6 +83,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Job Cruiser',
+      scrollBehavior: const AppScrollBehavior(),
       theme: ThemeData(
         useMaterial3: true,
         scaffoldBackgroundColor: AppColors.surface,
@@ -182,11 +198,31 @@ class JobCruiserShell extends StatefulWidget {
 class _JobCruiserShellState extends State<JobCruiserShell> {
   int _currentIndex = 0;
   final ValueNotifier<int> _inboxRefreshTrigger = ValueNotifier<int>(0);
+  final ApiService _apiService = ApiService();
+  int _unreadNotificationCount = 0;
+  Timer? _notificationPollingTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUnreadNotificationsCount();
+    _notificationPollingTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => _loadUnreadNotificationsCount(),
+    );
+  }
 
   @override
   void dispose() {
+    _notificationPollingTimer?.cancel();
     _inboxRefreshTrigger.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadUnreadNotificationsCount() async {
+    final count = await _apiService.fetchUnreadNotificationsCount();
+    if (!mounted) return;
+    setState(() => _unreadNotificationCount = count);
   }
 
   void _openJobDetails(MatchedJob job) async {
@@ -264,6 +300,46 @@ class _JobCruiserShellState extends State<JobCruiserShell> {
           _buildDesktopNavItem(1, 'CRM Tracker', Icons.work_history_outlined, Icons.work_history),
           const SizedBox(width: 8),
           _buildDesktopNavItem(2, 'Profile & Preferences', Icons.account_circle_outlined, Icons.account_circle),
+          const Spacer(),
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications_outlined, color: AppColors.primary),
+                tooltip: 'Notifications',
+                onPressed: () async {
+                  await showNotificationsSheet(context);
+                  _loadUnreadNotificationsCount();
+                },
+              ),
+              if (_unreadNotificationCount > 0)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.redAccent,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 16,
+                      minHeight: 16,
+                    ),
+                    child: Text(
+                      '$_unreadNotificationCount',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: 8),
         ],
       ),
     );
@@ -722,7 +798,7 @@ class _MyHomePageState extends State<MyHomePage> {
       builder: (context, constraints) {
         final isDesktop = constraints.maxWidth >= 960;
         return Scaffold(
-          appBar: _buildAppBar(isDesktop),
+          appBar: isDesktop ? null : _buildAppBar(isDesktop),
           body: Column(
             children: [
               if (showUpdateBanner)
@@ -826,6 +902,8 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Widget _buildDesktopSplitLayout() {
     final jobs = _filteredJobs;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final feedWidth = (screenWidth * 0.28).clamp(420.0, 520.0);
 
     return Column(
       children: [
@@ -834,7 +912,7 @@ class _MyHomePageState extends State<MyHomePage> {
           child: Row(
             children: [
               SizedBox(
-                width: 440,
+                width: feedWidth,
                 child: Container(
                   decoration: BoxDecoration(
                     color: AppColors.surface,
@@ -847,6 +925,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   ),
                   child: Column(
                     children: [
+                      _buildDesktopFeedHeader(),
                       _buildSearchBar(),
                       JobFilterBar(
                         filterState: _filterState,
@@ -909,6 +988,43 @@ class _MyHomePageState extends State<MyHomePage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildDesktopFeedHeader() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border(
+          bottom: BorderSide(
+            color: AppColors.outlineVariant.withValues(alpha: 0.3),
+            width: 1,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Text(
+            'Matched Jobs',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: AppColors.primary,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            '${_filteredJobs.length} available',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppColors.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
