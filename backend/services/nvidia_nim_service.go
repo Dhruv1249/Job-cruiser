@@ -351,6 +351,20 @@ func (s *NvidiaNimService) SetPipelinePermanentlyStopped(stopped bool) {
 	s.isPipelinePermanentlyStopped = stopped
 }
 
+/*
+ResetPipeline clears error counters, unpauses queues, and re-enables NVIDIA NIM evaluation engine.
+*/
+func (s *NvidiaNimService) ResetPipeline() {
+	s.queueMutex.Lock()
+	s.isPipelinePermanentlyStopped = false
+	s.isQueuePaused = false
+	s.queueMutex.Unlock()
+
+	s.consecutiveFailures.Store(0)
+
+	log.Println("[NvidiaNimService] NVIDIA NIM matching pipeline has been reset and resumed.")
+}
+
 // FillTokenBucketForTest refills the rate limiter token bucket continuously for non-blocking unit tests.
 func (s *NvidiaNimService) FillTokenBucketForTest() {
 	go func() {

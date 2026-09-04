@@ -117,3 +117,36 @@ func TestNvidiaNimServiceEvaluatePendingForAllUsersNilDB(t *testing.T) {
 		t.Fatalf("expected EvaluatePendingForAllUsersWithResult to return true on nil DB")
 	}
 }
+
+/*
+TestHybridBatchMatchServiceResetPipeline verifies that ResetPipeline clears stopped state across all engines.
+*/
+func TestHybridBatchMatchServiceResetPipeline(t *testing.T) {
+	t.Setenv("GEMINI_BATCH_MODELS", "test-model-1")
+
+	nvidiaService := services.NewNvidiaNimService(nil, "test-nvidia-key")
+	geminiService := services.NewGeminiBatchMatchService(nil, "test-gemini-key")
+	hybridService := services.NewHybridBatchMatchService(nvidiaService, geminiService)
+
+	for iteration := 0; iteration < 6; iteration++ {
+		geminiService.RecordModelFailureForTest(context.Background(), "test-model-1", "mock quota error")
+	}
+
+	if !hybridService.IsPipelinePermanentlyStopped() {
+		t.Fatalf("expected hybrid service pipeline to be permanently stopped")
+	}
+
+	hybridService.ResetPipeline()
+
+	if geminiService.IsPipelinePermanentlyStopped() {
+		t.Fatalf("expected gemini pipeline to be reset")
+	}
+
+	if nvidiaService.IsPipelinePermanentlyStopped() {
+		t.Fatalf("expected nvidia NIM engine to be reset")
+	}
+
+	if hybridService.IsPipelinePermanentlyStopped() {
+		t.Fatalf("expected hybrid service pipeline to be reset")
+	}
+}

@@ -32,6 +32,8 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
   List<Map<String, dynamic>> _registeredUsers = [];
   ScraperTelemetryData? _telemetryData;
   bool _isLoading = true;
+  bool _isPipelineStopped = false;
+  bool _isRestartingPipeline = false;
 
   @override
   void initState() {
@@ -59,6 +61,7 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
     final masterKw = await _apiService.fetchMasterKeywordsForAdmin();
     final users = await _apiService.fetchUsersForAdmin();
     final telemetry = await _apiService.fetchScraperTelemetryData();
+    final pipelineStatus = await _apiService.fetchAIPipelineStatus();
 
     if (!mounted) return;
 
@@ -68,8 +71,38 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
       _masterKeywords = masterKw;
       _registeredUsers = users;
       _telemetryData = telemetry;
+      _isPipelineStopped = pipelineStatus?['is_permanently_stopped'] == true;
       _isLoading = false;
     });
+  }
+
+  Future<void> _restartAIPipeline() async {
+    setState(() {
+      _isRestartingPipeline = true;
+    });
+
+    final success = await _apiService.restartAIPipeline();
+
+    if (!mounted) return;
+
+    setState(() {
+      _isRestartingPipeline = false;
+    });
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('AI matching pipeline restarted and resumed successfully.'),
+        ),
+      );
+      _loadAdminData();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to restart AI matching pipeline.'),
+        ),
+      );
+    }
   }
 
   Future<void> _addManualMasterKeyword() async {
@@ -542,6 +575,8 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
             ),
           ),
           const SizedBox(height: 16),
+          _buildPipelineStatusCard(),
+          const SizedBox(height: 16),
           _registeredUsers.isEmpty
               ? const Padding(
                   padding: EdgeInsets.all(32),
@@ -596,6 +631,125 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
                     );
                   },
                 ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPipelineStatusCard() {
+    if (_isPipelineStopped) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.error.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.error.withValues(alpha: 0.6), width: 1.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                Icon(Icons.warning_amber_rounded, color: AppColors.error, size: 24),
+                SizedBox(width: 8),
+                Text(
+                  'AI Evaluation Pipeline Stopped',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.error,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'All configured AI models exceeded error thresholds (e.g. rate limits or quotas). Background job matching is paused.',
+              style: TextStyle(
+                fontSize: 13,
+                color: AppColors.onSurface,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 14),
+            ElevatedButton.icon(
+              onPressed: _isRestartingPipeline ? null : _restartAIPipeline,
+              icon: _isRestartingPipeline
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.restart_alt, size: 18),
+              label: const Text('Restart AI Pipeline'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.matchGreen.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.check_circle_outline, color: AppColors.matchGreen, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text(
+                  'AI Matching Pipeline: Active',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primary,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Background worker evaluates incoming jobs across configured models.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          OutlinedButton.icon(
+            onPressed: _isRestartingPipeline ? null : _restartAIPipeline,
+            icon: _isRestartingPipeline
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh, size: 16),
+            label: const Text('Reset', style: TextStyle(fontSize: 12)),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+          ),
         ],
       ),
     );
@@ -681,6 +835,8 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
               ],
             ),
             const SizedBox(height: 18),
+            _buildPipelineStatusCard(),
+            const SizedBox(height: 16),
             TelemetryKpiGrid(kpis: telemetry.kpis),
             const SizedBox(height: 16),
             IngestionTimelineChart(timeline: telemetry.ingestionTimeline),

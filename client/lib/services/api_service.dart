@@ -676,6 +676,31 @@ class ApiService {
     }
   }
 
+  /// Fetches operational status of the AI matching pipeline (Master Admin only).
+  Future<Map<String, dynamic>?> fetchAIPipelineStatus() async {
+    try {
+      final response = await _dio.get('/admin/pipeline/status');
+      if (response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      _logger.e(e);
+      return null;
+    }
+  }
+
+  /// Restarts and resets circuit breaker counters on the AI matching pipeline (Master Admin only).
+  Future<bool> restartAIPipeline() async {
+    try {
+      final response = await _dio.post('/admin/pipeline/restart');
+      return response.statusCode == 200;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
+
   /// Triggers AI resume tailoring for the given job and compiles via the user's open-overleaf instance.
   /// Returns the response map containing pdf_base64, version_id, pdf_web_url, and compile_result.
   Future<Map<String, dynamic>?> tailorResume({

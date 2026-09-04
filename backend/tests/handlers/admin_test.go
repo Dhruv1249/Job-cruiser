@@ -274,3 +274,32 @@ func TestCalculateRunHealth(t *testing.T) {
 	}
 }
 
+/*
+TestAdminHandlerPipelineStatusUnauthorized verifies that unauthenticated requests to pipeline endpoints are rejected.
+*/
+func TestAdminHandlerPipelineStatusUnauthorized(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := &handlers.AdminHandler{}
+
+	router := gin.New()
+	router.GET("/admin/pipeline/status", handler.GetAIPipelineStatus)
+	router.POST("/admin/pipeline/restart", handler.RestartAIPipeline)
+
+	statusRecorder := httptest.NewRecorder()
+	statusRequest, _ := http.NewRequest(http.MethodGet, "/admin/pipeline/status", nil)
+	router.ServeHTTP(statusRecorder, statusRequest)
+
+	if statusRecorder.Code != http.StatusUnauthorized {
+		t.Errorf("expected status %d, got %d", http.StatusUnauthorized, statusRecorder.Code)
+	}
+
+	restartRecorder := httptest.NewRecorder()
+	restartRequest, _ := http.NewRequest(http.MethodPost, "/admin/pipeline/restart", nil)
+	router.ServeHTTP(restartRecorder, restartRequest)
+
+	if restartRecorder.Code != http.StatusUnauthorized {
+		t.Errorf("expected status %d, got %d", http.StatusUnauthorized, restartRecorder.Code)
+	}
+}
+

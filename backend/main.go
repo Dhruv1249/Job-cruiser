@@ -243,6 +243,8 @@ func main() {
 		protected.PUT("/admin/users/:id/ai-matching", adminHandler.ToggleUserAIMatching)
 		protected.POST("/admin/reset-all-matches", adminHandler.ResetAndReevaluateMatches)
 		protected.GET("/admin/scraper-stats", adminHandler.GetScraperStats)
+		protected.GET("/admin/pipeline/status", adminHandler.GetAIPipelineStatus)
+		protected.POST("/admin/pipeline/restart", adminHandler.RestartAIPipeline)
 	}
 
 	// Check if a specific network port was requested in the .env file.

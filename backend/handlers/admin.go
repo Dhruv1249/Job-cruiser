@@ -31,6 +31,11 @@ func (h *AdminHandler) EnsureMasterAdmin(c *gin.Context) bool {
 		return false
 	}
 
+	if h.DB == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database connection not initialized"})
+		return false
+	}
+
 	var isMasterAdmin bool
 	query := `SELECT COALESCE(is_master_admin, false) FROM users WHERE id = $1;`
 	err := h.DB.QueryRow(context.Background(), query, userID).Scan(&isMasterAdmin)
@@ -434,8 +439,10 @@ func (h *AdminHandler) ResetAndReevaluateMatches(c *gin.Context) {
 		return
 	}
 
-	// 3. Trigger fresh evaluation pass in background
 	if h.MatchService != nil {
+		if h.MatchService.IsPipelinePermanentlyStopped() {
+			h.MatchService.ResetPipeline()
+		}
 		go func() {
 			log.Println("[AdminHandler] Reset completed. Triggering fresh multi-candidate evaluation pass.")
 			h.MatchService.EvaluatePendingForAllUsers(context.Background())
@@ -444,6 +451,53 @@ func (h *AdminHandler) ResetAndReevaluateMatches(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Successfully cleared old matches and reset evaluation flag. Fresh AI evaluation pipeline triggered in background.",
+	})
+}
+
+/*
+GetAIPipelineStatus returns the operational status of the AI matching pipeline.
+*/
+func (h *AdminHandler) GetAIPipelineStatus(c *gin.Context) {
+	if !h.EnsureMasterAdmin(c) {
+		return
+	}
+
+	isPermanentlyStopped := false
+	if h.MatchService != nil {
+		isPermanentlyStopped = h.MatchService.IsPipelinePermanentlyStopped()
+	}
+
+	statusText := "active"
+	if isPermanentlyStopped {
+		statusText = "stopped"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"is_permanently_stopped": isPermanentlyStopped,
+		"status":                 statusText,
+	})
+}
+
+/*
+RestartAIPipeline resets circuit breaker error counters and re-enables the AI matching pipeline.
+*/
+func (h *AdminHandler) RestartAIPipeline(c *gin.Context) {
+	if !h.EnsureMasterAdmin(c) {
+		return
+	}
+
+	if h.MatchService != nil {
+		h.MatchService.ResetPipeline()
+		go func() {
+			log.Println("[AdminHandler] AI matching pipeline reset by admin. Triggering evaluation pass.")
+			h.MatchService.EvaluatePendingForAllUsers(context.Background())
+		}()
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":                "AI matching pipeline has been reset and resumed successfully",
+		"is_permanently_stopped": false,
+		"status":                 "active",
 	})
 }
 

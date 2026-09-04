@@ -498,6 +498,24 @@ func (s *GeminiBatchMatchService) IsPipelinePermanentlyStopped() bool {
 	return s.isPipelinePermanentlyStopped
 }
 
+/*
+ResetPipeline clears circuit breaker error counters, unpauses queues, and re-enables all configured Gemini models.
+*/
+func (s *GeminiBatchMatchService) ResetPipeline() {
+	s.modelErrorMutex.Lock()
+	s.isPipelinePermanentlyStopped = false
+	s.disabledModels = make(map[string]bool)
+	s.runDisabledModels = make(map[string]bool)
+	s.modelRunErrors = make(map[string]int)
+	s.modelErrorMutex.Unlock()
+
+	s.queueMutex.Lock()
+	s.isQueuePaused = false
+	s.queueMutex.Unlock()
+
+	log.Println("[GeminiBatchMatchService] Gemini AI matching pipeline has been reset and resumed.")
+}
+
 func (s *GeminiBatchMatchService) recordModelSuccess(modelName string) {
 	s.modelErrorMutex.Lock()
 	defer s.modelErrorMutex.Unlock()

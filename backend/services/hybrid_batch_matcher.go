@@ -13,6 +13,8 @@ type BatchMatchEvaluator interface {
 	EvaluatePendingForAllUsers(ctx context.Context)
 	EvaluateForSingleUser(ctx context.Context, userID string)
 	StartBackgroundScheduler(ctx context.Context)
+	IsPipelinePermanentlyStopped() bool
+	ResetPipeline()
 }
 
 // HybridBatchMatchService delegates matching requests to NVIDIA NIM or Gemini batch services.
@@ -136,4 +138,27 @@ func (s *HybridBatchMatchService) StartBackgroundScheduler(ctx context.Context) 
 			}
 		}
 	}()
+}
+
+/*
+IsPipelinePermanentlyStopped returns true if the Gemini matching pipeline has been permanently shut down.
+*/
+func (s *HybridBatchMatchService) IsPipelinePermanentlyStopped() bool {
+	if s.GeminiBatchService != nil && s.GeminiBatchService.IsPipelinePermanentlyStopped() {
+		return true
+	}
+	return false
+}
+
+/*
+ResetPipeline resets circuit breaker counters and re-enables all matching engines across the hybrid pipeline.
+*/
+func (s *HybridBatchMatchService) ResetPipeline() {
+	if s.GeminiBatchService != nil {
+		s.GeminiBatchService.ResetPipeline()
+	}
+	if s.NvidiaNimService != nil {
+		s.NvidiaNimService.ResetPipeline()
+	}
+	log.Println("[HybridMatcher] AI evaluation pipeline has been fully reset and resumed.")
 }
