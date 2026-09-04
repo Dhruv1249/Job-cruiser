@@ -699,8 +699,6 @@ func (h *AdminHandler) GetScraperStats(c *gin.Context) {
 	`)
 
 	var runs []gin.H
-	var successfulRunsCount, failedRunsCount int
-	var totalDurationSeconds int
 	if runsErr == nil {
 		defer runsRows.Close()
 		for runsRows.Next() {
@@ -708,13 +706,6 @@ func (h *AdminHandler) GetScraperStats(c *gin.Context) {
 			var startedAt, finishedAt time.Time
 			var jobsAdded, durationSeconds int
 			if scanErr := runsRows.Scan(&runID, &startedAt, &finishedAt, &status, &jobsAdded, &sourcesRaw, &errorMessage, &durationSeconds); scanErr == nil {
-				if status == "completed" {
-					successfulRunsCount++
-				} else if status == "failed" {
-					failedRunsCount++
-				}
-				totalDurationSeconds += durationSeconds
-
 				runs = append(runs, gin.H{
 					"run_id":           runID,
 					"started_at":       startedAt.Format(time.RFC3339),
@@ -732,21 +723,7 @@ func (h *AdminHandler) GetScraperStats(c *gin.Context) {
 		runs = []gin.H{}
 	}
 
-	totalRunsRecorded := len(runs)
-	var successRatePct float64
-	var avgDurationSeconds int
-	if totalRunsRecorded > 0 {
-		successRatePct = math.Round((float64(successfulRunsCount)/float64(totalRunsRecorded))*1000) / 10
-		avgDurationSeconds = totalDurationSeconds / totalRunsRecorded
-	}
-
-	runHealth := gin.H{
-		"total_runs_recorded":  totalRunsRecorded,
-		"successful_runs":      successfulRunsCount,
-		"failed_runs":          failedRunsCount,
-		"success_rate_pct":     successRatePct,
-		"avg_duration_seconds": avgDurationSeconds,
-	}
+	runHealth := CalculateRunHealth(runs)
 
 	kpis := gin.H{
 		"total_jobs":              totalJobs,
@@ -776,4 +753,42 @@ func (h *AdminHandler) GetScraperStats(c *gin.Context) {
 		"top_companies":      topCompanies,
 		"runs":               runs,
 	})
+}
+
+/*
+CalculateRunHealth computes overall execution reliability and duration statistics
+across a list of scraper runs.
+*/
+func CalculateRunHealth(runs []gin.H) gin.H {
+	totalRunsRecorded := len(runs)
+	var successfulRunsCount, failedRunsCount int
+	var totalDurationSeconds int
+
+	for _, runItem := range runs {
+		statusString, _ := runItem["status"].(string)
+		normalizedStatus := strings.ToLower(strings.TrimSpace(statusString))
+		if normalizedStatus == "success" || normalizedStatus == "completed" || normalizedStatus == "finished" {
+			successfulRunsCount++
+		} else if normalizedStatus == "failed" || normalizedStatus == "error" {
+			failedRunsCount++
+		}
+		if durationSeconds, ok := runItem["duration_seconds"].(int); ok {
+			totalDurationSeconds += durationSeconds
+		}
+	}
+
+	var successRatePercentage float64
+	var averageDurationSeconds int
+	if totalRunsRecorded > 0 {
+		successRatePercentage = math.Round((float64(successfulRunsCount)/float64(totalRunsRecorded))*1000) / 10
+		averageDurationSeconds = totalDurationSeconds / totalRunsRecorded
+	}
+
+	return gin.H{
+		"total_runs_recorded":  totalRunsRecorded,
+		"successful_runs":      successfulRunsCount,
+		"failed_runs":          failedRunsCount,
+		"success_rate_pct":     successRatePercentage,
+		"avg_duration_seconds": averageDurationSeconds,
+	}
 }

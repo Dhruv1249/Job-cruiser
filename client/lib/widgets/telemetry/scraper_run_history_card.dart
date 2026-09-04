@@ -137,7 +137,7 @@ class _ScraperRunHistoryCardState extends State<ScraperRunHistoryCard> {
               separatorBuilder: (context, index) => const Divider(height: 12, color: AppColors.surfaceContainer),
               itemBuilder: (context, index) {
                 final run = visibleRuns[index];
-                final isFailed = run.status.toLowerCase() == 'failed';
+                final isFailed = run.status.toLowerCase() == 'failed' || run.status.toLowerCase() == 'error';
                 final isRunning = run.status.toLowerCase() == 'running';
 
                 return ExpansionTile(

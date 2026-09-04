@@ -185,3 +185,92 @@ func TestScraperTelemetryResponseStructure(t *testing.T) {
 	}
 }
 
+func TestCalculateRunHealth(t *testing.T) {
+	testCases := []struct {
+		name                        string
+		runs                        []gin.H
+		expectedTotalRuns           int
+		expectedSuccessfulRuns      int
+		expectedFailedRuns          int
+		expectedSuccessRate         float64
+		expectedAverageDuration     int
+	}{
+		{
+			name: "all successful runs with success status",
+			runs: []gin.H{
+				{"status": "success", "duration_seconds": 120},
+				{"status": "SUCCESS", "duration_seconds": 180},
+				{"status": "success ", "duration_seconds": 60},
+			},
+			expectedTotalRuns:       3,
+			expectedSuccessfulRuns:  3,
+			expectedFailedRuns:      0,
+			expectedSuccessRate:     100.0,
+			expectedAverageDuration: 120,
+		},
+		{
+			name: "mixed statuses with completed finished failed and error",
+			runs: []gin.H{
+				{"status": "completed", "duration_seconds": 100},
+				{"status": "finished", "duration_seconds": 100},
+				{"status": "failed", "duration_seconds": 50},
+				{"status": "error", "duration_seconds": 50},
+			},
+			expectedTotalRuns:       4,
+			expectedSuccessfulRuns:  2,
+			expectedFailedRuns:      2,
+			expectedSuccessRate:     50.0,
+			expectedAverageDuration: 75,
+		},
+		{
+			name:                    "empty runs slice",
+			runs:                    []gin.H{},
+			expectedTotalRuns:       0,
+			expectedSuccessfulRuns:  0,
+			expectedFailedRuns:      0,
+			expectedSuccessRate:     0.0,
+			expectedAverageDuration: 0,
+		},
+		{
+			name: "runs with running and success statuses",
+			runs: []gin.H{
+				{"status": "running", "duration_seconds": 200},
+				{"status": "success", "duration_seconds": 100},
+			},
+			expectedTotalRuns:       2,
+			expectedSuccessfulRuns:  1,
+			expectedFailedRuns:      0,
+			expectedSuccessRate:     50.0,
+			expectedAverageDuration: 150,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			result := handlers.CalculateRunHealth(testCase.runs)
+
+			actualTotalRuns, _ := result["total_runs_recorded"].(int)
+			actualSuccessfulRuns, _ := result["successful_runs"].(int)
+			actualFailedRuns, _ := result["failed_runs"].(int)
+			actualSuccessRate, _ := result["success_rate_pct"].(float64)
+			actualAverageDuration, _ := result["avg_duration_seconds"].(int)
+
+			if actualTotalRuns != testCase.expectedTotalRuns {
+				t.Errorf("expected total runs %d, got %d", testCase.expectedTotalRuns, actualTotalRuns)
+			}
+			if actualSuccessfulRuns != testCase.expectedSuccessfulRuns {
+				t.Errorf("expected successful runs %d, got %d", testCase.expectedSuccessfulRuns, actualSuccessfulRuns)
+			}
+			if actualFailedRuns != testCase.expectedFailedRuns {
+				t.Errorf("expected failed runs %d, got %d", testCase.expectedFailedRuns, actualFailedRuns)
+			}
+			if actualSuccessRate != testCase.expectedSuccessRate {
+				t.Errorf("expected success rate %f, got %f", testCase.expectedSuccessRate, actualSuccessRate)
+			}
+			if actualAverageDuration != testCase.expectedAverageDuration {
+				t.Errorf("expected average duration %d, got %d", testCase.expectedAverageDuration, actualAverageDuration)
+			}
+		})
+	}
+}
+
