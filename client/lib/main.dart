@@ -10,6 +10,7 @@ import 'onboarding.dart';
 import 'tracker.dart';
 import 'models/job.dart';
 import 'models/job_filter_state.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'services/api_service.dart';
 import 'services/notification_service.dart';
 import 'services/update_checker_service.dart';
@@ -195,28 +196,47 @@ class JobCruiserShell extends StatefulWidget {
   State<JobCruiserShell> createState() => _JobCruiserShellState();
 }
 
-class _JobCruiserShellState extends State<JobCruiserShell> {
+class _JobCruiserShellState extends State<JobCruiserShell> with WidgetsBindingObserver {
   int _currentIndex = 0;
   final ValueNotifier<int> _inboxRefreshTrigger = ValueNotifier<int>(0);
   final ApiService _apiService = ApiService();
   int _unreadNotificationCount = 0;
   Timer? _notificationPollingTimer;
+  StreamSubscription<String>? _notificationTapSubscription;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadUnreadNotificationsCount();
     _notificationPollingTimer = Timer.periodic(
       const Duration(seconds: 10),
       (_) => _loadUnreadNotificationsCount(),
     );
+    _notificationTapSubscription = NotificationService.instance.onNotificationTapped.listen(_handleNotificationJobTap);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _notificationTapSubscription?.cancel();
     _notificationPollingTimer?.cancel();
     _inboxRefreshTrigger.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadUnreadNotificationsCount();
+      _inboxRefreshTrigger.value++;
+    }
+  }
+
+  void _handleNotificationJobTap(String jobId) async {
+    final job = await _apiService.fetchJobById(jobId);
+    if (!mounted || job == null) return;
+    _openJobDetails(job);
   }
 
   Future<void> _loadUnreadNotificationsCount() async {
@@ -308,7 +328,7 @@ class _JobCruiserShellState extends State<JobCruiserShell> {
                 icon: const Icon(Icons.notifications_outlined, color: AppColors.primary),
                 tooltip: 'Notifications',
                 onPressed: () async {
-                  await showNotificationsSheet(context);
+                  await showNotificationsSheet(context, onSelectJob: _openJobDetails);
                   _loadUnreadNotificationsCount();
                 },
               ),
@@ -447,7 +467,7 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   final ApiService _apiService = ApiService();
   final UpdateCheckerService _updateCheckerService = UpdateCheckerService();
   final TextEditingController _searchController = TextEditingController();
@@ -467,11 +487,11 @@ class _MyHomePageState extends State<MyHomePage> {
   PendingUpdate? _pendingUpdate;
   bool _updateBannerDismissed = false;
   final Set<String> _seenNotificationIds = {};
-  bool _hasInitialNotificationSync = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.refreshTrigger?.addListener(_scrollToTopAndRefresh);
     _initializeFilterAndData();
     _notificationPollingTimer = Timer.periodic(
@@ -497,6 +517,14 @@ class _MyHomePageState extends State<MyHomePage> {
     _scrollController.addListener(_onScroll);
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadUnreadNotificationsCount();
+      _refreshMatchStatus();
+    }
+  }
+
   Future<void> _checkForUpdate() async {
     final update = await _updateCheckerService.checkForUpdate();
     if (!mounted || update == null) return;
@@ -504,6 +532,10 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _initializeFilterAndData() async {
+    final sharedPreferences = await SharedPreferences.getInstance();
+    final savedSeenIds = sharedPreferences.getStringList('seen_system_notification_ids') ?? [];
+    _seenNotificationIds.addAll(savedSeenIds);
+
     final savedFilters = await JobFilterState.loadFromStorage();
     if (!mounted) return;
 
@@ -538,34 +570,40 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Future<void> _loadUnreadNotificationsCount() async {
     final count = await _apiService.fetchUnreadNotificationsCount();
+    if (!mounted) return;
+    setState(() => _unreadNotificationCount = count);
 
-    if (!_hasInitialNotificationSync) {
-      _hasInitialNotificationSync = true;
-      final initialNotifications = await _apiService.fetchNotifications();
-      for (final item in initialNotifications) {
-        final id = item['id']?.toString() ?? '';
-        if (id.isNotEmpty) _seenNotificationIds.add(id);
-      }
-    } else if (count > _unreadNotificationCount) {
+    if (count > 0) {
       final notifications = await _apiService.fetchNotifications();
+      var hasNewDispatchedNotifications = false;
+
       for (final item in notifications) {
         final id = item['id']?.toString() ?? '';
         final isRead = item['is_read'] == true;
-        if (!isRead && !_seenNotificationIds.contains(id) && id.isNotEmpty) {
+        if (!isRead && id.isNotEmpty && !_seenNotificationIds.contains(id)) {
           _seenNotificationIds.add(id);
+          hasNewDispatchedNotifications = true;
           final title = item['title']?.toString() ?? 'Job Cruiser';
           final message = item['message']?.toString() ?? '';
+          final jobId = item['job_id']?.toString();
           NotificationService.instance.showLocalNotification(
             id: id.hashCode,
             title: title,
             body: message,
+            payload: jobId,
           );
         }
       }
-    }
 
-    if (!mounted) return;
-    setState(() => _unreadNotificationCount = count);
+      if (hasNewDispatchedNotifications) {
+        final sharedPreferences = await SharedPreferences.getInstance();
+        final trimmedIds = _seenNotificationIds.toList();
+        if (trimmedIds.length > 500) {
+          trimmedIds.removeRange(0, trimmedIds.length - 300);
+        }
+        await sharedPreferences.setStringList('seen_system_notification_ids', trimmedIds);
+      }
+    }
   }
 
   void _onScroll() {
@@ -589,6 +627,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.refreshTrigger?.removeListener(_scrollToTopAndRefresh);
     _notificationPollingTimer?.cancel();
     _searchDebounceTimer?.cancel();
@@ -864,7 +903,7 @@ class _MyHomePageState extends State<MyHomePage> {
               icon: const Icon(Icons.notifications_outlined, color: AppColors.primary),
               tooltip: 'Notifications',
               onPressed: () async {
-                await showNotificationsSheet(context);
+                await showNotificationsSheet(context, onSelectJob: widget.onSelectJob);
                 _loadUnreadNotificationsCount();
               },
             ),

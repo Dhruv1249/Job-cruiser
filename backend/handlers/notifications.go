@@ -22,8 +22,10 @@ NotificationItem represents a single notification record.
 type NotificationItem struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
+	JobID     *string   `json:"job_id,omitempty"`
 	Title     string    `json:"title"`
 	Message   string    `json:"message"`
+	Reasoning *string   `json:"reasoning,omitempty"`
 	IsRead    bool      `json:"is_read"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -55,7 +57,7 @@ func (handler *NotificationsHandler) GetNotifications(ginContext *gin.Context) {
 
 	rows, queryError := handler.DB.Query(
 		ginContext.Request.Context(),
-		`SELECT id, user_id, title, message, is_read, created_at
+		`SELECT id, user_id, title, message, is_read, created_at, job_id, reasoning
 		 FROM notifications
 		 WHERE user_id = $1
 		 ORDER BY created_at DESC
@@ -71,7 +73,7 @@ func (handler *NotificationsHandler) GetNotifications(ginContext *gin.Context) {
 	notificationsList := make([]NotificationItem, 0)
 	for rows.Next() {
 		var item NotificationItem
-		if scanError := rows.Scan(&item.ID, &item.UserID, &item.Title, &item.Message, &item.IsRead, &item.CreatedAt); scanError == nil {
+		if scanError := rows.Scan(&item.ID, &item.UserID, &item.Title, &item.Message, &item.IsRead, &item.CreatedAt, &item.JobID, &item.Reasoning); scanError == nil {
 			notificationsList = append(notificationsList, item)
 		}
 	}

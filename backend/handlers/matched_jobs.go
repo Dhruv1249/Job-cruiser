@@ -290,15 +290,41 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 GetMatchStatus checks whether AI matching evaluations are pending or active for recent jobs.
 */
 func (h *MatchedJobsHandler) GetMatchStatus(c *gin.Context) {
+	if h.DB == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"is_evaluating": false,
+			"pending_count": 0,
+		})
+		return
+	}
+
+	userIDValue, exists := c.Get("user_id")
 	var count int
-	query := `
-		SELECT COUNT(*) 
-		FROM jobs 
-		WHERE ai_evaluated = false 
-		  AND scraped_at >= NOW() - INTERVAL '14 days';
-	`
-	err := h.DB.QueryRow(c.Request.Context(), query).Scan(&count)
-	if err != nil {
+	var queryError error
+
+	if exists {
+		userID := fmt.Sprintf("%v", userIDValue)
+		query := `
+			SELECT COUNT(*) 
+			FROM jobs j
+			WHERE j.scraped_at >= NOW() - INTERVAL '14 days'
+			  AND (j.ai_evaluated = false OR NOT EXISTS (
+				  SELECT 1 FROM user_job_matches ujm
+				  WHERE ujm.job_id = j.id AND ujm.user_id = $1
+			  ));
+		`
+		queryError = h.DB.QueryRow(c.Request.Context(), query, userID).Scan(&count)
+	} else {
+		query := `
+			SELECT COUNT(*) 
+			FROM jobs 
+			WHERE ai_evaluated = false 
+			  AND scraped_at >= NOW() - INTERVAL '14 days';
+		`
+		queryError = h.DB.QueryRow(c.Request.Context(), query).Scan(&count)
+	}
+
+	if queryError != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"is_evaluating": false,
 			"pending_count": 0,

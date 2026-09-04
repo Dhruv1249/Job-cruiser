@@ -703,7 +703,7 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 			}
 			failTitle := fmt.Sprintf("Tailoring Failed: %s", jRecord.Company)
 			failMessage := fmt.Sprintf("Failed connecting to Open-Overleaf for %s: %s", jRecord.Title, clientError.Error())
-			_, _ = handler.DB.Exec(backgroundCtx, `INSERT INTO notifications (user_id, title, message, is_read) VALUES ($1, $2, $3, false)`, uID, failTitle, failMessage)
+			_, _ = handler.DB.Exec(backgroundCtx, `INSERT INTO notifications (user_id, job_id, title, message, is_read) VALUES ($1, $2, $3, $4, false)`, uID, jID, failTitle, failMessage)
 			return
 		}
 
@@ -736,7 +736,7 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 			}
 			failTitle := fmt.Sprintf("Tailoring Failed: %s", jRecord.Company)
 			failMessage := fmt.Sprintf("Failed generating resume for %s: %s", jRecord.Title, resumeError.Error())
-			_, _ = handler.DB.Exec(backgroundCtx, `INSERT INTO notifications (user_id, title, message, is_read) VALUES ($1, $2, $3, false)`, uID, failTitle, failMessage)
+			_, _ = handler.DB.Exec(backgroundCtx, `INSERT INTO notifications (user_id, job_id, title, message, is_read) VALUES ($1, $2, $3, $4, false)`, uID, jID, failTitle, failMessage)
 			return
 		}
 
@@ -768,7 +768,7 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 			}
 			failTitle := fmt.Sprintf("Cover Letter Failed: %s", jRecord.Company)
 			failMessage := fmt.Sprintf("Resume succeeded but cover letter failed for %s: %s", jRecord.Title, coverError.Error())
-			_, _ = handler.DB.Exec(backgroundCtx, `INSERT INTO notifications (user_id, title, message, is_read) VALUES ($1, $2, $3, false)`, uID, failTitle, failMessage)
+			_, _ = handler.DB.Exec(backgroundCtx, `INSERT INTO notifications (user_id, job_id, title, message, is_read) VALUES ($1, $2, $3, $4, false)`, uID, jID, failTitle, failMessage)
 			return
 		}
 
@@ -788,8 +788,8 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 		successMessage := fmt.Sprintf("Your tailored resume (%d p) and cover letter (%d p) for %s at %s are ready in Open-Overleaf.", resumeResult.CompileResult.PageCount, coverResult.CompileResult.PageCount, jRecord.Title, jRecord.Company)
 		_, _ = handler.DB.Exec(
 			backgroundCtx,
-			`INSERT INTO notifications (user_id, title, message, is_read) VALUES ($1, $2, $3, false)`,
-			uID, successTitle, successMessage,
+			`INSERT INTO notifications (user_id, job_id, title, message, is_read) VALUES ($1, $2, $3, $4, false)`,
+			uID, jID, successTitle, successMessage,
 		)
 	}(context.Background(), userID, payload.JobID, jobRecord, userBio, targetResumePages, targetCoverLetterPages, resumeVersionID, coverVersionID, folderPath, resumeTemplatePath, coverLetterTemplatePath)
 

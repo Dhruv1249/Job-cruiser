@@ -279,7 +279,13 @@ func (s *GeminiBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context
 		return
 	}
 	if len(pendingJobs) == 0 {
-		log.Println("[GeminiBatchMatchService] Zero unevaluated jobs found.")
+		log.Println("[GeminiBatchMatchService] Zero unevaluated jobs found. Evaluating unmatched backlog for active users.")
+		for _, profile := range userProfiles {
+			unmatchedJobs, errUnmatched := fetchUnmatchedJobsForSingleUser(ctx, s.DB, profile.UserID)
+			if errUnmatched == nil && len(unmatchedJobs) > 0 {
+				s.EvaluateForSingleUser(ctx, profile.UserID)
+			}
+		}
 		return
 	}
 
@@ -674,7 +680,7 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 		}
 		_ = updateJobStandardizedLocationAndWorkModel(ctx, s.DB, resultItem.JobID, resultItem.StandardizedLocation, resultItem.WorkModel)
 		if matchedProfile != nil {
-			notifyUserOnHighMatch(ctx, s.DB, matchedProfile, resultItem.JobID, resultItem.MatchScore)
+			notifyUserOnHighMatch(ctx, s.DB, matchedProfile, resultItem.JobID, resultItem.MatchScore, resultItem.MatchReasoning)
 		}
 
 		evaluatedJobIDs[resultItem.JobID] = true

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 /// NotificationService manages system and heads-up notifications on mobile devices.
@@ -7,11 +8,15 @@ class NotificationService {
   static final NotificationService instance = NotificationService._internal();
 
   final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
+  final StreamController<String> _payloadStreamController = StreamController<String>.broadcast();
   bool _isInitialized = false;
 
   static const String _channelId = 'job_cruiser_tailor_channel';
   static const String _channelName = 'Job Cruiser Alerts';
   static const String _channelDescription = 'Notifications for resume tailoring, cover letters, and match updates';
+
+  /// Stream of notification payloads tapped by the user.
+  Stream<String> get onNotificationTapped => _payloadStreamController.stream;
 
   /// Initializes the local notification plugin with platform settings.
   Future<void> initialize() async {
@@ -32,7 +37,21 @@ class NotificationService {
 
     await _notificationsPlugin.initialize(
       settings: initializationSettings,
+      onDidReceiveNotificationResponse: (response) {
+        final payload = response.payload;
+        if (payload != null && payload.isNotEmpty) {
+          _payloadStreamController.add(payload);
+        }
+      },
     );
+
+    final launchDetails = await _notificationsPlugin.getNotificationAppLaunchDetails();
+    if (launchDetails != null && launchDetails.didNotificationLaunchApp) {
+      final payload = launchDetails.notificationResponse?.payload;
+      if (payload != null && payload.isNotEmpty) {
+        _payloadStreamController.add(payload);
+      }
+    }
 
     final androidImplementation =
         _notificationsPlugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
@@ -51,7 +70,7 @@ class NotificationService {
     _isInitialized = true;
   }
 
-  /// Displays an immediate system notification on the user's mobile device.
+  /// Displays an immediate system notification on the user's mobile device with full AI reasoning.
   Future<void> showLocalNotification({
     int id = 0,
     required String title,
@@ -62,7 +81,7 @@ class NotificationService {
       await initialize();
     }
 
-    const androidNotificationDetails = AndroidNotificationDetails(
+    final androidNotificationDetails = AndroidNotificationDetails(
       _channelId,
       _channelName,
       channelDescription: _channelDescription,
@@ -70,6 +89,11 @@ class NotificationService {
       priority: Priority.high,
       playSound: true,
       icon: '@mipmap/launcher_icon',
+      styleInformation: BigTextStyleInformation(
+        body,
+        contentTitle: title,
+        summaryText: 'Job Cruiser Match Alert',
+      ),
     );
 
     const darwinNotificationDetails = DarwinNotificationDetails(
@@ -78,7 +102,7 @@ class NotificationService {
       presentSound: true,
     );
 
-    const notificationDetails = NotificationDetails(
+    final notificationDetails = NotificationDetails(
       android: androidNotificationDetails,
       iOS: darwinNotificationDetails,
       macOS: darwinNotificationDetails,

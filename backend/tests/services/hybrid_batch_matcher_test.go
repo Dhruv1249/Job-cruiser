@@ -106,3 +106,14 @@ func TestHybridBatchMatchServicePipelineShutdownDisablesNim(t *testing.T) {
 	hybridService.EvaluatePendingForAllUsers(context.Background())
 	hybridService.EvaluateForSingleUser(context.Background(), "user-123")
 }
+
+/*
+TestNvidiaNimServiceEvaluatePendingForAllUsersNilDB verifies that EvaluatePendingForAllUsersWithResult handles nil database pool safely.
+*/
+func TestNvidiaNimServiceEvaluatePendingForAllUsersNilDB(t *testing.T) {
+	nvidiaService := services.NewNvidiaNimService(nil, "test-nvidia-key")
+	completed := nvidiaService.EvaluatePendingForAllUsersWithResult(context.Background())
+	if !completed {
+		t.Fatalf("expected EvaluatePendingForAllUsersWithResult to return true on nil DB")
+	}
+}

@@ -423,6 +423,12 @@ func (s *NvidiaNimService) EvaluatePendingForAllUsersWithResult(ctx context.Cont
 
 	pendingJobs, errJobs := fetchRecentUnevaluatedJobs(ctx, s.DB)
 	if errJobs != nil || len(pendingJobs) == 0 {
+		for _, profile := range userProfiles {
+			unmatchedJobs, errUnmatched := fetchUnmatchedJobsForSingleUser(ctx, s.DB, profile.UserID)
+			if errUnmatched == nil && len(unmatchedJobs) > 0 {
+				s.EvaluateForSingleUserWithResult(ctx, profile.UserID)
+			}
+		}
 		return true
 	}
 
@@ -927,7 +933,7 @@ func (s *NvidiaNimService) evaluateJobBatchWithBackoff(
 		}
 		_ = updateJobStandardizedLocationAndWorkModel(ctx, s.DB, res.JobID, res.StandardizedLocation, res.WorkModel)
 		if matchedProfile != nil {
-			notifyUserOnHighMatch(ctx, s.DB, matchedProfile, res.JobID, res.MatchScore)
+			notifyUserOnHighMatch(ctx, s.DB, matchedProfile, res.JobID, res.MatchScore, res.MatchReasoning)
 		}
 		syncMutex.Lock()
 		evaluatedJobIDs[res.JobID] = true
@@ -1482,7 +1488,7 @@ func updateJobStandardizedLocationAndWorkModel(ctx context.Context, databasePool
 	return errExec
 }
 
-func notifyUserOnHighMatch(ctx context.Context, databasePool *pgxpool.Pool, profile *UserProfileData, jobID string, matchScore int) {
+func notifyUserOnHighMatch(ctx context.Context, databasePool *pgxpool.Pool, profile *UserProfileData, jobID string, matchScore int, matchReasoning string) {
 	if databasePool == nil || profile == nil || !profile.MatchThresholdNotificationEnabled {
 		return
 	}
@@ -1519,12 +1525,16 @@ func notifyUserOnHighMatch(ctx context.Context, databasePool *pgxpool.Pool, prof
 
 	notificationTitle := fmt.Sprintf("High Match Found (%d%%): %s", matchScore, jobTitle)
 	notificationMessage := fmt.Sprintf("New high match (%d%%) for %s at %s based on your profile preferences.", matchScore, jobTitle, companyName)
+	cleanReasoning := strings.TrimSpace(matchReasoning)
+	if cleanReasoning != "" {
+		notificationMessage = fmt.Sprintf("%s\n\nAI Reasoning:\n%s", notificationMessage, cleanReasoning)
+	}
 
 	insertNotificationQuery := `
-		INSERT INTO notifications (user_id, title, message, is_read)
-		VALUES ($1, $2, $3, false);
+		INSERT INTO notifications (user_id, job_id, title, message, reasoning, is_read)
+		VALUES ($1, $2, $3, $4, $5, false);
 	`
-	_, insertError := databasePool.Exec(ctx, insertNotificationQuery, profile.UserID, notificationTitle, notificationMessage)
+	_, insertError := databasePool.Exec(ctx, insertNotificationQuery, profile.UserID, jobID, notificationTitle, notificationMessage, cleanReasoning)
 	if insertError == nil {
 		markNotifiedQuery := `
 			UPDATE user_job_matches
