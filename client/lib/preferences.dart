@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
@@ -7,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'auth.dart';
 import 'main.dart' show AppColors;
 import 'services/api_service.dart';
+import 'services/app_version_service.dart';
 
 void main() {
   runApp(const SetPreferencesApp());
@@ -74,7 +76,7 @@ class SetPreferencesApp extends StatelessWidget {
       theme: ThemeData(
         scaffoldBackgroundColor: AppColors.background,
         useMaterial3: true,
-        fontFamily: 'Inter', // Defaulting to Inter for body/headlines
+        fontFamily: 'Inter',
         colorScheme: const ColorScheme.light(
           primary: AppColors.primary,
           surface: AppColors.surface,
@@ -118,6 +120,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   late double _baseSalary;
   late String _equityExpectation;
   final Set<String> _selectedWorkModels = {'remote', 'hybrid'};
+  AppVersionDetails? _appVersionDetails;
 
   bool _anyWorkModel = false;
   bool _anyLocation = false;
@@ -201,6 +204,14 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
         widget.initialPreferences?.equityExpectation ?? 'Meaningful';
 
     _loadSavedPreferences();
+    _loadAppVersionDetails();
+  }
+
+  Future<void> _loadAppVersionDetails() async {
+    const service = AppVersionService();
+    final details = await service.getVersionDetails();
+    if (!mounted) return;
+    setState(() => _appVersionDetails = details);
   }
 
   void _addCustomLink({String label = '', String url = ''}) {
@@ -383,8 +394,12 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             _buildOverleafCard(),
             const SizedBox(height: 24),
             _buildPageBudgetCard(),
+            const SizedBox(height: 24),
+            _buildAppVersionCard(),
             const SizedBox(height: 32),
             _buildSaveButton(),
+            const SizedBox(height: 24),
+            _buildVersionFooter(),
             const SizedBox(height: 48),
           ],
         ),
@@ -764,6 +779,99 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             }).toList(),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAppVersionCard() {
+    final versionText = _appVersionDetails?.compactVersion ?? 'v1.0.0+1';
+    final platformText = _appVersionDetails?.platformName ?? (kIsWeb ? 'Web' : 'Mobile');
+    final buildText = _appVersionDetails != null ? 'Build ${_appVersionDetails!.buildNumber}' : 'Build 1';
+
+    return _buildSectionCard(
+      icon: Icons.info_outline,
+      title: 'App Version & Environment',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Current client build specifications and deployment platform runtime.',
+            style: TextStyle(fontSize: 13, color: AppColors.onSurfaceVariant),
+          ),
+          const SizedBox(height: 16),
+          _buildVersionRow(
+            icon: Icons.info_outline,
+            label: 'Version',
+            value: versionText,
+          ),
+          const Divider(height: 20, color: AppColors.surfaceContainerHigh),
+          _buildVersionRow(
+            icon: kIsWeb ? Icons.language : Icons.devices,
+            label: 'Platform',
+            value: platformText,
+          ),
+          const Divider(height: 20, color: AppColors.surfaceContainerHigh),
+          _buildVersionRow(
+            icon: Icons.tag,
+            label: 'Build Number',
+            value: buildText,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVersionRow({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Icon(icon, color: AppColors.secondary, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: AppColors.onSurface,
+              ),
+            ),
+          ],
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            value,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppColors.onSurface,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVersionFooter() {
+    final displayText = _appVersionDetails?.displayVersion ?? 'v1.0.0 • ${kIsWeb ? 'Web' : 'Mobile'}';
+    return Center(
+      child: Text(
+        'Job Cruiser $displayText',
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: AppColors.outline,
+        ),
       ),
     );
   }

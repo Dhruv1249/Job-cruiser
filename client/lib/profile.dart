@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'services/api_service.dart';
+import 'services/app_version_service.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'preferences.dart' as preferences_page;
 import 'main.dart' show AppColors;
@@ -50,12 +52,21 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Map<String, dynamic>? _userProfile;
   bool _isLoadingProfile = true;
+  AppVersionDetails? _appVersionDetails;
 
   @override
   void initState() {
     super.initState();
     _loadSavedPreferences();
     _loadUserProfile();
+    _loadAppVersionDetails();
+  }
+
+  Future<void> _loadAppVersionDetails() async {
+    const service = AppVersionService();
+    final details = await service.getVersionDetails();
+    if (!mounted) return;
+    setState(() => _appVersionDetails = details);
   }
 
   Future<void> _loadUserProfile() async {
@@ -124,6 +135,12 @@ class _ProfilePageState extends State<ProfilePage> {
                 _buildSectionTitle('ACCOUNT & SECURITY'),
                 const SizedBox(height: 8),
                 _buildSecuritySection(),
+                const SizedBox(height: 24),
+                _buildSectionTitle('APP INFORMATION'),
+                const SizedBox(height: 8),
+                _buildAppInfoSection(),
+                const SizedBox(height: 24),
+                _buildVersionFooter(),
               ],
             ),
           ),
@@ -535,6 +552,116 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  Widget _buildAppInfoSection() {
+    final versionText = _appVersionDetails?.compactVersion ?? 'v1.0.0+1';
+    final platformText = _appVersionDetails?.platformName ?? (kIsWeb ? 'Web' : 'Mobile');
+    final buildText = _appVersionDetails != null ? 'Build ${_appVersionDetails!.buildNumber}' : 'Build 1';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          _buildInfoRow(
+            icon: Icons.info_outline,
+            label: 'Application Version',
+            value: versionText,
+            hasBorder: true,
+          ),
+          _buildInfoRow(
+            icon: kIsWeb ? Icons.language : Icons.devices,
+            label: 'Platform & Environment',
+            value: platformText,
+            hasBorder: true,
+          ),
+          _buildInfoRow(
+            icon: Icons.tag,
+            label: 'Build Number',
+            value: buildText,
+            hasBorder: false,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    required bool hasBorder,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        border: hasBorder
+            ? Border(
+                bottom: BorderSide(
+                  color: AppColors.outlineVariant.withValues(alpha: 0.5),
+                ),
+              )
+            : null,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: AppColors.primary, size: 20),
+              const SizedBox(width: 12),
+              Text(
+                label,
+                style: const TextStyle(fontSize: 14, color: AppColors.primary),
+              ),
+            ],
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.onSurface,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVersionFooter() {
+    final displayText = _appVersionDetails?.displayVersion ?? 'v1.0.0 • ${kIsWeb ? 'Web' : 'Mobile'}';
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Text(
+          'Job Cruiser $displayText',
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+            color: AppColors.outline,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.only(left: 4),
@@ -543,7 +670,7 @@ class _ProfilePageState extends State<ProfilePage> {
         style: const TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w500,
-          letterSpacing: 0.6, // tracking-widest approximation
+          letterSpacing: 0.6,
           color: AppColors.onSurfaceVariant,
         ),
       ),

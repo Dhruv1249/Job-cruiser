@@ -42,6 +42,14 @@ jobs:
           cd client
           flutter test
 
+      - name: Calculate next semantic version
+        id: version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: python3 .github/scripts/calculate_next_version.py
+
       - name: Build Flutter Web Release
         env:
           RAW_API_URL: ${{ secrets.API_BASE_URL }}
@@ -50,7 +58,11 @@ jobs:
           cd client
           API_URL=$(echo "$RAW_API_URL" | tr -d '\r\n')
           CLIENT_ID=$(echo "$RAW_CLIENT_ID" | tr -d '\r\n')
-          flutter build web --release --dart-define=API_BASE_URL="$API_URL" --dart-define=GOOGLE_CLIENT_ID="$CLIENT_ID"
+          flutter build web --release \
+            --build-name=${{ steps.version.outputs.name }} \
+            --build-number=${{ steps.version.outputs.code }} \
+            --dart-define=API_BASE_URL="$API_URL" \
+            --dart-define=GOOGLE_CLIENT_ID="$CLIENT_ID"
 
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
