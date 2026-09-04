@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:logger/logger.dart';
 import '../models/job.dart';
 import '../models/application.dart';
+import '../models/scraper_telemetry_models.dart';
 
 /// Central API Service handling network interactions with the Go Backend.
 class ApiService {
@@ -653,6 +654,20 @@ class ApiService {
       final response = await _dio.get('/admin/scraper-stats');
       if (response.data is Map<String, dynamic>) {
         return response.data as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      _logger.e(e);
+      return null;
+    }
+  }
+
+  /// Fetches strongly-typed scraper telemetry dataset for dashboard analytics.
+  Future<ScraperTelemetryData?> fetchScraperTelemetryData() async {
+    try {
+      final response = await _dio.get('/admin/scraper-stats');
+      if (response.data is Map<String, dynamic>) {
+        return ScraperTelemetryData.fromJson(response.data as Map<String, dynamic>);
       }
       return null;
     } catch (e) {

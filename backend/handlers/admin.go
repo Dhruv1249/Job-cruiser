@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"log"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -484,7 +485,8 @@ func (h *AdminHandler) ResetUserMatches(c *gin.Context) {
 }
 
 /*
-GetScraperStats retrieves total scraped jobs, 24h scraped jobs, unique companies, and recent scraper run telemetry logs.
+GetScraperStats retrieves comprehensive scraper telemetry including source volume breakdown,
+match quality by source, 14-day ingestion timeline, score tier distribution, and run health metrics.
 */
 func (h *AdminHandler) GetScraperStats(c *gin.Context) {
 	if !h.EnsureMasterAdmin(c) {
@@ -499,31 +501,229 @@ func (h *AdminHandler) GetScraperStats(c *gin.Context) {
 	var jobsLast24h int
 	_ = h.DB.QueryRow(ctx, `SELECT COUNT(*) FROM jobs WHERE scraped_at >= NOW() - INTERVAL '24 hours';`).Scan(&jobsLast24h)
 
+	var jobsLast7d int
+	_ = h.DB.QueryRow(ctx, `SELECT COUNT(*) FROM jobs WHERE scraped_at >= NOW() - INTERVAL '7 days';`).Scan(&jobsLast7d)
+
 	var uniqueCompanies int
 	_ = h.DB.QueryRow(ctx, `SELECT COUNT(*) FROM companies;`).Scan(&uniqueCompanies)
 
-	query := `
-		SELECT id, started_at, COALESCE(finished_at, started_at), status, jobs_added, COALESCE(sources_hit::text, '[]')
+	var remoteJobsCount int
+	_ = h.DB.QueryRow(ctx, `SELECT COUNT(*) FROM jobs WHERE is_remote = true;`).Scan(&remoteJobsCount)
+
+	var remoteJobsPct float64
+	if totalJobs > 0 {
+		remoteJobsPct = math.Round((float64(remoteJobsCount)/float64(totalJobs))*1000) / 10
+	}
+
+	sourcesVolumeRows, sourcesVolumeErr := h.DB.Query(ctx, `
+		SELECT source,
+		       COUNT(*) AS total_jobs,
+		       COUNT(*) FILTER (WHERE scraped_at >= NOW() - INTERVAL '24 hours') AS jobs_24h,
+		       COUNT(*) FILTER (WHERE scraped_at >= NOW() - INTERVAL '7 days') AS jobs_7d,
+		       COUNT(*) FILTER (WHERE is_remote = true) AS remote_jobs,
+		       COUNT(*) FILTER (WHERE is_remote = false) AS onsite_jobs
+		FROM jobs
+		GROUP BY source
+		ORDER BY total_jobs DESC;
+	`)
+
+	var sourcesVolume []gin.H
+	var topVolumeSource string
+	if sourcesVolumeErr == nil {
+		defer sourcesVolumeRows.Close()
+		for sourcesVolumeRows.Next() {
+			var sourceName string
+			var sourceTotal, source24h, source7d, remoteCount, onsiteCount int
+			if scanErr := sourcesVolumeRows.Scan(&sourceName, &sourceTotal, &source24h, &source7d, &remoteCount, &onsiteCount); scanErr == nil {
+				if topVolumeSource == "" {
+					topVolumeSource = sourceName
+				}
+				var sharePct float64
+				if totalJobs > 0 {
+					sharePct = math.Round((float64(sourceTotal)/float64(totalJobs))*1000) / 10
+				}
+				sourcesVolume = append(sourcesVolume, gin.H{
+					"source":        sourceName,
+					"total_jobs":    sourceTotal,
+					"jobs_last_24h": source24h,
+					"jobs_last_7d":  source7d,
+					"remote_jobs":   remoteCount,
+					"onsite_jobs":   onsiteCount,
+					"share_pct":     sharePct,
+				})
+			}
+		}
+	}
+	if sourcesVolume == nil {
+		sourcesVolume = []gin.H{}
+	}
+
+	sourcesQualityRows, sourcesQualityErr := h.DB.Query(ctx, `
+		SELECT j.source,
+		       COUNT(m.job_id) AS evaluated_count,
+		       COALESCE(ROUND(AVG(m.match_score), 1), 0) AS avg_score,
+		       COUNT(*) FILTER (WHERE m.match_score >= 80) AS elite_matches,
+		       COUNT(*) FILTER (WHERE m.match_score >= 60 AND m.match_score < 80) AS good_matches,
+		       COUNT(*) FILTER (WHERE m.match_score < 60) AS low_matches
+		FROM jobs j
+		JOIN user_job_matches m ON j.id = m.job_id
+		GROUP BY j.source
+		ORDER BY avg_score DESC, elite_matches DESC;
+	`)
+
+	var sourcesQuality []gin.H
+	var topQualitySource string
+	if sourcesQualityErr == nil {
+		defer sourcesQualityRows.Close()
+		for sourcesQualityRows.Next() {
+			var sourceName string
+			var evaluatedCount, eliteMatches, goodMatches, lowMatches int
+			var avgScore float64
+			if scanErr := sourcesQualityRows.Scan(&sourceName, &evaluatedCount, &avgScore, &eliteMatches, &goodMatches, &lowMatches); scanErr == nil {
+				if topQualitySource == "" && evaluatedCount >= 3 {
+					topQualitySource = sourceName
+				}
+				var highMatchYieldPct float64
+				if evaluatedCount > 0 {
+					highMatchYieldPct = math.Round((float64(eliteMatches)/float64(evaluatedCount))*1000) / 10
+				}
+				sourcesQuality = append(sourcesQuality, gin.H{
+					"source":               sourceName,
+					"evaluated_count":      evaluatedCount,
+					"avg_score":            avgScore,
+					"elite_matches":        eliteMatches,
+					"good_matches":         goodMatches,
+					"low_matches":          lowMatches,
+					"high_match_yield_pct": highMatchYieldPct,
+				})
+			}
+		}
+	}
+	if sourcesQuality == nil {
+		sourcesQuality = []gin.H{}
+	}
+
+	timelineRows, timelineErr := h.DB.Query(ctx, `
+		SELECT TO_CHAR(scraped_at, 'YYYY-MM-DD') AS scrape_date,
+		       COUNT(*) AS jobs_count
+		FROM jobs
+		WHERE scraped_at >= NOW() - INTERVAL '14 days'
+		GROUP BY TO_CHAR(scraped_at, 'YYYY-MM-DD')
+		ORDER BY scrape_date ASC;
+	`)
+
+	var ingestionTimeline []gin.H
+	if timelineErr == nil {
+		defer timelineRows.Close()
+		for timelineRows.Next() {
+			var scrapeDate string
+			var jobsCount int
+			if scanErr := timelineRows.Scan(&scrapeDate, &jobsCount); scanErr == nil {
+				ingestionTimeline = append(ingestionTimeline, gin.H{
+					"date":       scrapeDate,
+					"jobs_count": jobsCount,
+				})
+			}
+		}
+	}
+	if ingestionTimeline == nil {
+		ingestionTimeline = []gin.H{}
+	}
+
+	var tier90To100, tier80To89, tier60To79, tierBelow60 int
+	var overallAvgScore float64
+	_ = h.DB.QueryRow(ctx, `
+		SELECT COUNT(*) FILTER (WHERE match_score >= 90) AS tier_90_100,
+		       COUNT(*) FILTER (WHERE match_score >= 80 AND match_score < 90) AS tier_80_89,
+		       COUNT(*) FILTER (WHERE match_score >= 60 AND match_score < 80) AS tier_60_79,
+		       COUNT(*) FILTER (WHERE match_score < 60) AS tier_below_60,
+		       COALESCE(ROUND(AVG(match_score), 1), 0) AS avg_score
+		FROM user_job_matches;
+	`).Scan(&tier90To100, &tier80To89, &tier60To79, &tierBelow60, &overallAvgScore)
+
+	evaluatedJobsCount := tier90To100 + tier80To89 + tier60To79 + tierBelow60
+	unevaluatedCount := totalJobs - evaluatedJobsCount
+	if unevaluatedCount < 0 {
+		unevaluatedCount = 0
+	}
+
+	var evaluationCoveragePct float64
+	if totalJobs > 0 {
+		evaluationCoveragePct = math.Round((float64(evaluatedJobsCount)/float64(totalJobs))*1000) / 10
+	}
+
+	scoreDistribution := gin.H{
+		"tier_90_100":       tier90To100,
+		"tier_80_89":        tier80To89,
+		"tier_60_79":        tier60To79,
+		"tier_below_60":     tierBelow60,
+		"unevaluated_count": unevaluatedCount,
+		"avg_score":         overallAvgScore,
+	}
+
+	topCompaniesRows, topCompaniesErr := h.DB.Query(ctx, `
+		SELECT c.name, COUNT(j.id) AS job_count
+		FROM companies c
+		JOIN jobs j ON c.id = j.company_id
+		GROUP BY c.id, c.name
+		ORDER BY job_count DESC
+		LIMIT 10;
+	`)
+
+	var topCompanies []gin.H
+	if topCompaniesErr == nil {
+		defer topCompaniesRows.Close()
+		for topCompaniesRows.Next() {
+			var companyName string
+			var companyJobCount int
+			if scanErr := topCompaniesRows.Scan(&companyName, &companyJobCount); scanErr == nil {
+				topCompanies = append(topCompanies, gin.H{
+					"company_name": companyName,
+					"job_count":    companyJobCount,
+				})
+			}
+		}
+	}
+	if topCompanies == nil {
+		topCompanies = []gin.H{}
+	}
+
+	runsRows, runsErr := h.DB.Query(ctx, `
+		SELECT id, started_at, COALESCE(finished_at, started_at), status, jobs_added,
+		       COALESCE(sources_hit::text, '[]'),
+		       COALESCE(error_message, ''),
+		       EXTRACT(EPOCH FROM (COALESCE(finished_at, started_at) - started_at))::INT AS duration_seconds
 		FROM scraper_runs
 		ORDER BY started_at DESC
 		LIMIT 50;
-	`
-	rows, err := h.DB.Query(ctx, query)
+	`)
+
 	var runs []gin.H
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var runID, status, sourcesRaw string
+	var successfulRunsCount, failedRunsCount int
+	var totalDurationSeconds int
+	if runsErr == nil {
+		defer runsRows.Close()
+		for runsRows.Next() {
+			var runID, status, sourcesRaw, errorMessage string
 			var startedAt, finishedAt time.Time
-			var jobsAdded int
-			if scanErr := rows.Scan(&runID, &startedAt, &finishedAt, &status, &jobsAdded, &sourcesRaw); scanErr == nil {
+			var jobsAdded, durationSeconds int
+			if scanErr := runsRows.Scan(&runID, &startedAt, &finishedAt, &status, &jobsAdded, &sourcesRaw, &errorMessage, &durationSeconds); scanErr == nil {
+				if status == "completed" {
+					successfulRunsCount++
+				} else if status == "failed" {
+					failedRunsCount++
+				}
+				totalDurationSeconds += durationSeconds
+
 				runs = append(runs, gin.H{
-					"run_id":      runID,
-					"started_at":  startedAt.Format(time.RFC3339),
-					"finished_at": finishedAt.Format(time.RFC3339),
-					"status":      status,
-					"jobs_added":  jobsAdded,
-					"sources_hit": sourcesRaw,
+					"run_id":           runID,
+					"started_at":       startedAt.Format(time.RFC3339),
+					"finished_at":      finishedAt.Format(time.RFC3339),
+					"status":           status,
+					"jobs_added":       jobsAdded,
+					"sources_hit":      sourcesRaw,
+					"error_message":    errorMessage,
+					"duration_seconds": durationSeconds,
 				})
 			}
 		}
@@ -532,10 +732,48 @@ func (h *AdminHandler) GetScraperStats(c *gin.Context) {
 		runs = []gin.H{}
 	}
 
+	totalRunsRecorded := len(runs)
+	var successRatePct float64
+	var avgDurationSeconds int
+	if totalRunsRecorded > 0 {
+		successRatePct = math.Round((float64(successfulRunsCount)/float64(totalRunsRecorded))*1000) / 10
+		avgDurationSeconds = totalDurationSeconds / totalRunsRecorded
+	}
+
+	runHealth := gin.H{
+		"total_runs_recorded":  totalRunsRecorded,
+		"successful_runs":      successfulRunsCount,
+		"failed_runs":          failedRunsCount,
+		"success_rate_pct":     successRatePct,
+		"avg_duration_seconds": avgDurationSeconds,
+	}
+
+	kpis := gin.H{
+		"total_jobs":              totalJobs,
+		"jobs_last_24h":           jobsLast24h,
+		"jobs_last_7d":            jobsLast7d,
+		"unique_companies":        uniqueCompanies,
+		"evaluated_jobs_count":    evaluatedJobsCount,
+		"evaluation_coverage_pct": evaluationCoveragePct,
+		"overall_avg_match_score": overallAvgScore,
+		"remote_jobs_count":       remoteJobsCount,
+		"remote_jobs_pct":         remoteJobsPct,
+		"top_volume_source":       topVolumeSource,
+		"top_quality_source":      topQualitySource,
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"total_jobs":       totalJobs,
-		"jobs_last_24h":    jobsLast24h,
-		"unique_companies": uniqueCompanies,
-		"runs":             runs,
+		"total_jobs":         totalJobs,
+		"jobs_last_24h":      jobsLast24h,
+		"jobs_last_7d":       jobsLast7d,
+		"unique_companies":   uniqueCompanies,
+		"kpis":               kpis,
+		"sources_volume":     sourcesVolume,
+		"sources_quality":    sourcesQuality,
+		"ingestion_timeline": ingestionTimeline,
+		"score_distribution": scoreDistribution,
+		"run_health":         runHealth,
+		"top_companies":      topCompanies,
+		"runs":               runs,
 	})
 }

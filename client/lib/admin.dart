@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 import 'main.dart' show AppColors;
+import 'models/scraper_telemetry_models.dart';
 import 'services/api_service.dart';
+import 'widgets/telemetry/ingestion_timeline_chart.dart';
+import 'widgets/telemetry/score_distribution_chart.dart';
+import 'widgets/telemetry/scraper_run_history_card.dart';
+import 'widgets/telemetry/source_quality_leaderboard.dart';
+import 'widgets/telemetry/source_volume_chart.dart';
+import 'widgets/telemetry/telemetry_kpi_grid.dart';
 
 /// Screen for Master Admin Control Panel.
 class MasterAdminScreen extends StatefulWidget {
@@ -23,7 +30,7 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
   List<Map<String, dynamic>> _pendingKeywords = [];
   List<Map<String, dynamic>> _masterKeywords = [];
   List<Map<String, dynamic>> _registeredUsers = [];
-  Map<String, dynamic>? _scraperStats;
+  ScraperTelemetryData? _telemetryData;
   bool _isLoading = true;
 
   @override
@@ -51,7 +58,7 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
     final keywords = await _apiService.fetchPendingKeywords();
     final masterKw = await _apiService.fetchMasterKeywordsForAdmin();
     final users = await _apiService.fetchUsersForAdmin();
-    final stats = await _apiService.fetchScraperStats();
+    final telemetry = await _apiService.fetchScraperTelemetryData();
 
     if (!mounted) return;
 
@@ -60,7 +67,7 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
       _pendingKeywords = keywords;
       _masterKeywords = masterKw;
       _registeredUsers = users;
-      _scraperStats = stats;
+      _telemetryData = telemetry;
       _isLoading = false;
     });
   }
@@ -332,7 +339,6 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Section 1: Manual Keyword Creation Form
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -378,8 +384,6 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
             ),
           ),
           const SizedBox(height: 24),
-
-          // Section 2: Pending Recommendations
           const Text(
             'Pending Keyword Recommendations from Gemini Flash',
             style: TextStyle(
@@ -447,8 +451,6 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
                   },
                 ),
           const SizedBox(height: 24),
-
-          // Section 3: Active Master Keywords
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -600,138 +602,135 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
   }
 
   Widget _buildScraperTelemetryTab() {
-    final totalJobs = _scraperStats?['total_jobs'] ?? 0;
-    final jobsLast24h = _scraperStats?['jobs_last_24h'] ?? 0;
-    final uniqueCompanies = _scraperStats?['unique_companies'] ?? 0;
-    final List runs = (_scraperStats?['runs'] as List?) ?? [];
-
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        const Text(
-          'Scraper Telemetry Dashboard',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            color: AppColors.primary,
-          ),
-        ),
-        const SizedBox(height: 4),
-        const Text(
-          'Track live scraper run performance and new unique job metrics.',
-          style: TextStyle(
-            fontSize: 13,
-            color: AppColors.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Row(
+    if (_telemetryData == null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Expanded(child: _buildStatCard('Total Jobs', '$totalJobs', Icons.work_outline)),
-            const SizedBox(width: 10),
-            Expanded(child: _buildStatCard('New 24h Jobs', '$jobsLast24h', Icons.schedule)),
-            const SizedBox(width: 10),
-            Expanded(child: _buildStatCard('Companies', '$uniqueCompanies', Icons.business)),
+            const Icon(Icons.insights, size: 48, color: AppColors.secondary),
+            const SizedBox(height: 12),
+            const Text(
+              'No Telemetry Data Available',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Failed to retrieve scraper statistics or runs are still initializing.',
+              style: TextStyle(fontSize: 13, color: AppColors.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _loadAdminData,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 24),
-        const Text(
-          'Scraper Run Logs',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: AppColors.primary,
-          ),
+      );
+    }
+
+    final telemetry = _telemetryData!;
+
+    return RefreshIndicator(
+      onRefresh: _loadAdminData,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Scraper Telemetry Dashboard',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.primary,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Live ingest volume, AI match quality analytics, source yields, and run logs',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: AppColors.onSurfaceVariant.withValues(alpha: 0.85),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh, color: AppColors.primary),
+                  tooltip: 'Refresh Telemetry',
+                  onPressed: _loadAdminData,
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            TelemetryKpiGrid(kpis: telemetry.kpis),
+            const SizedBox(height: 16),
+            IngestionTimelineChart(timeline: telemetry.ingestionTimeline),
+            const SizedBox(height: 16),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth >= 960) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: SourceQualityLeaderboard(
+                          sourcesQuality: telemetry.sourcesQuality,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: SourceVolumeChart(
+                          sourcesVolume: telemetry.sourcesVolume,
+                        ),
+                      ),
+                    ],
+                  );
+                }
+                return Column(
+                  children: [
+                    SourceQualityLeaderboard(
+                      sourcesQuality: telemetry.sourcesQuality,
+                    ),
+                    const SizedBox(height: 16),
+                    SourceVolumeChart(
+                      sourcesVolume: telemetry.sourcesVolume,
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+            ScoreDistributionChart(
+              scoreDistribution: telemetry.scoreDistribution,
+              topCompanies: telemetry.topCompanies,
+            ),
+            const SizedBox(height: 16),
+            ScraperRunHistoryCard(
+              runHealth: telemetry.runHealth,
+              runs: telemetry.runs,
+            ),
+            const SizedBox(height: 32),
+          ],
         ),
-        const SizedBox(height: 12),
-        if (runs.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 20),
-            child: Center(
-              child: Text(
-                'No scraper run logs recorded yet.',
-                style: TextStyle(color: AppColors.onSurfaceVariant),
-              ),
-            ),
-          )
-        else
-          ...runs.map((r) {
-            final runMap = Map<String, dynamic>.from(r as Map);
-            final status = runMap['status'] ?? 'completed';
-            final jobsAdded = runMap['jobs_added'] ?? 0;
-            final startedAt = runMap['started_at'] ?? '';
-
-            return Card(
-              margin: const EdgeInsets.only(bottom: 10),
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-                side: const BorderSide(color: AppColors.outlineVariant),
-              ),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: status == 'completed'
-                      ? AppColors.matchGreen
-                      : AppColors.primaryContainer,
-                  child: Icon(
-                    status == 'completed' ? Icons.check : Icons.sync,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
-                title: Text(
-                  'New Unique Jobs Found: $jobsAdded',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                    color: AppColors.primary,
-                  ),
-                ),
-                subtitle: Text(
-                  'Started: $startedAt • Status: ${status.toString().toUpperCase()}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            );
-          }),
-      ],
-    );
-  }
-
-  Widget _buildStatCard(String title, String value, IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 20, color: AppColors.primary),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: AppColors.primary,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 11,
-              color: AppColors.onSurfaceVariant,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
       ),
     );
   }
