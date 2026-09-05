@@ -90,6 +90,7 @@ SINGLE_CALL_FEED_SITES = [
     Site.HIMALAYAS,
     Site.JOBSPRESSO,
     Site.WORKING_NOMADS,
+    Site.DIRECT_CAREERS,
 ]
 
 KEYWORD_SEARCHABLE_INDIA_SITES = [
@@ -598,6 +599,10 @@ def run_orchestration() -> dict:
                         "results_wanted": 200,
                         "hours_old": 24,
                     }
+                    if target_site == Site.DIRECT_CAREERS:
+                        scraping_arguments["results_wanted"] = 5000
+                        scraping_arguments.pop("hours_old", None)
+
                     if target_location:
                         scraping_arguments["location"] = target_location
                     if is_remote_search:
@@ -640,12 +645,19 @@ def run_orchestration() -> dict:
 
             board_futures = []
 
-            for feed_site in SINGLE_CALL_FEED_SITES:
+            keyword_feed_sites = [site for site in SINGLE_CALL_FEED_SITES if site != Site.DIRECT_CAREERS]
+            for feed_site in keyword_feed_sites:
                 board_futures.append(
                     primary_executor.submit(
                         scrape_board_site_keyword, feed_site, "software engineer", None, True
                     )
                 )
+
+            board_futures.append(
+                primary_executor.submit(
+                    scrape_board_site_keyword, Site.DIRECT_CAREERS, None, None, True
+                )
+            )
 
             for search_term in KEYWORDS:
                 for india_site in KEYWORD_SEARCHABLE_INDIA_SITES:
