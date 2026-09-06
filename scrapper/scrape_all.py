@@ -609,6 +609,8 @@ def run_orchestration() -> dict:
                         scraping_arguments["is_remote"] = True
                     if target_site == Site.INDEED and target_location == "India":
                         scraping_arguments["country_indeed"] = "india"
+                    if target_site == Site.LINKEDIN:
+                        scraping_arguments["linkedin_fetch_description"] = True
                     if target_site in PROXY_REQUIRED_SITES and PROXIES:
                         scraping_arguments["proxies"] = PROXIES
 

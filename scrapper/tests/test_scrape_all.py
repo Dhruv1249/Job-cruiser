@@ -4,6 +4,7 @@ Unit tests for the job search scraper orchestrator module.
 
 import unittest
 from unittest.mock import Mock, patch
+from jobspy.model import Site
 from scrape_all import (
     normalize_job_post,
     deduplicate_jobs,
@@ -173,6 +174,45 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         mock_process_company.assert_any_call("airbnb", "greenhouse", "run-test-123")
         mock_process_company.assert_any_call("spotify", "lever", "run-test-123")
         mock_finish_run.assert_called_once_with("run-test-123", "success")
+
+    @patch("scrape_all.fetch_ats_slugs")
+    @patch("scrape_all.scrape_jobs")
+    @patch("scrape_all.process_company")
+    @patch("scrape_all.start_run")
+    @patch("scrape_all.finish_run")
+    @patch("scrape_all.save_json")
+    def test_run_orchestration_passes_linkedin_fetch_description(
+        self,
+        mock_save_json,
+        mock_finish_run,
+        mock_start_run,
+        mock_process_company,
+        mock_scrape_jobs,
+        mock_fetch_slugs,
+    ):
+        """
+        Verify that linkedin_fetch_description is enabled when scraping LinkedIn keyword feeds.
+        """
+        mock_fetch_slugs.return_value = {}
+        mock_start_run.return_value = "run-test-linkedin"
+        mock_dataframe = Mock()
+        mock_dataframe.empty = True
+        mock_dataframe.itertuples.return_value = []
+        mock_scrape_jobs.return_value = mock_dataframe
+
+        with patch("scrape_all.KEYWORDS", ["backend engineer"]), \
+             patch("scrape_all.KEYWORD_SEARCHABLE_INDIA_SITES", [Site.LINKEDIN]), \
+             patch("scrape_all.KEYWORD_SEARCHABLE_REMOTE_SITES", []), \
+             patch("scrape_all.SINGLE_CALL_FEED_SITES", []):
+            run_orchestration()
+
+        linkedin_calls = [
+            call_kwargs for _, call_kwargs in mock_scrape_jobs.call_args_list
+            if call_kwargs.get("site_name") == [Site.LINKEDIN]
+        ]
+        self.assertTrue(len(linkedin_calls) > 0)
+        for call_kwargs in linkedin_calls:
+            self.assertTrue(call_kwargs.get("linkedin_fetch_description"))
 
 
 if __name__ == "__main__":
