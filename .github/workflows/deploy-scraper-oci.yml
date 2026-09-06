@@ -56,10 +56,10 @@ jobs:
 
             cat << "EOF" > /etc/systemd/system/jobcruiser-scraper.timer
             [Unit]
-            Description=Run JobCruiser Scraper twice daily (10:00 AM and 5:00 PM IST)
+            Description=Run JobCruiser Scraper three times daily (06:00 AM, 01:00 PM, 09:00 PM IST)
 
             [Timer]
-            OnCalendar=*-*-* 10,17:00:00 Asia/Kolkata
+            OnCalendar=*-*-* 06,13,21:00:00 Asia/Kolkata
             Persistent=true
 
             [Install]

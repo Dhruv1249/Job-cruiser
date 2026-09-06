@@ -597,7 +597,7 @@ def run_orchestration() -> dict:
                         "site_name": [target_site],
                         "search_term": search_query,
                         "results_wanted": 200,
-                        "hours_old": 24,
+                        "hours_old": 12,
                     }
                     if target_site == Site.DIRECT_CAREERS:
                         scraping_arguments["results_wanted"] = 5000
