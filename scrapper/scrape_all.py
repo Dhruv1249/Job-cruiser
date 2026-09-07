@@ -689,11 +689,16 @@ def enrich_linkedin_descriptions(cooldown_seconds: int = 180, max_jobs: int = 50
     return len(enriched_updates)
 
 
-def run_orchestration() -> dict:
+def run_orchestration(target_platform: str | None = None) -> dict:
     """
     Executes the entire job scraping, career page discovery, and ingestion pipeline concurrently.
     """
     ensure_dir(DATA_DIR)
+
+    if target_platform is None:
+        target_platform = os.environ.get("TARGET_SITE") or os.environ.get("TARGET_PLATFORM")
+    if target_platform:
+        target_platform = target_platform.strip().lower()
 
     active_ats_platform_slugs = fetch_ats_slugs()
     run_identifier = start_run()
@@ -712,10 +717,15 @@ def run_orchestration() -> dict:
 
     try:
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as primary_executor:
-            discovery_future = primary_executor.submit(probe_unmapped_companies, MAX_WORKERS, 500)
+            if target_platform is None:
+                discovery_future = primary_executor.submit(probe_unmapped_companies, MAX_WORKERS, 500)
+            else:
+                discovery_future = None
 
             company_futures = []
             for platform_name, company_slugs in active_ats_platform_slugs.items():
+                if target_platform is not None and target_platform != platform_name:
+                    continue
                 for company_slug in company_slugs:
                     company_futures.append(
                         primary_executor.submit(process_company, company_slug, platform_name, run_identifier)
@@ -793,33 +803,41 @@ def run_orchestration() -> dict:
 
             board_futures = []
 
-            keyword_feed_sites = [site for site in SINGLE_CALL_FEED_SITES if site != Site.DIRECT_CAREERS]
-            for feed_site in keyword_feed_sites:
-                board_futures.append(
-                    primary_executor.submit(
-                        scrape_board_site_keyword, feed_site, "software engineer", None, True
-                    )
-                )
-
-            board_futures.append(
-                primary_executor.submit(
-                    scrape_board_site_keyword, Site.DIRECT_CAREERS, None, None, True
-                )
-            )
-
-            for search_term in KEYWORDS:
-                for india_site in KEYWORD_SEARCHABLE_INDIA_SITES:
+            if target_platform is None or target_platform not in active_ats_platform_slugs:
+                keyword_feed_sites = [site for site in SINGLE_CALL_FEED_SITES if site != Site.DIRECT_CAREERS]
+                for feed_site in keyword_feed_sites:
+                    if target_platform is not None and target_platform != feed_site.value:
+                        continue
                     board_futures.append(
                         primary_executor.submit(
-                            scrape_board_site_keyword, india_site, search_term, "India", False
+                            scrape_board_site_keyword, feed_site, "software engineer", None, True
                         )
                     )
-                for remote_site in KEYWORD_SEARCHABLE_REMOTE_SITES:
+
+                if target_platform is None or target_platform == Site.DIRECT_CAREERS.value:
                     board_futures.append(
                         primary_executor.submit(
-                            scrape_board_site_keyword, remote_site, search_term, None, True
+                            scrape_board_site_keyword, Site.DIRECT_CAREERS, None, None, True
                         )
                     )
+
+                for search_term in KEYWORDS:
+                    for india_site in KEYWORD_SEARCHABLE_INDIA_SITES:
+                        if target_platform is not None and target_platform != india_site.value:
+                            continue
+                        board_futures.append(
+                            primary_executor.submit(
+                                scrape_board_site_keyword, india_site, search_term, "India", False
+                            )
+                        )
+                    for remote_site in KEYWORD_SEARCHABLE_REMOTE_SITES:
+                        if target_platform is not None and target_platform != remote_site.value:
+                            continue
+                        board_futures.append(
+                            primary_executor.submit(
+                                scrape_board_site_keyword, remote_site, search_term, None, True
+                            )
+                        )
 
             for completed_future in as_completed(company_futures):
                 execution_result = completed_future.result()
@@ -837,12 +855,13 @@ def run_orchestration() -> dict:
             for completed_future in as_completed(board_futures):
                 completed_future.result()
 
-            try:
-                discovered_count = discovery_future.result()
-                if discovered_count > 0:
-                    print(f"[Discovery] Successfully identified and registered {discovered_count} new ATS boards during run.")
-            except Exception:
-                pass
+            if discovery_future is not None:
+                try:
+                    discovered_count = discovery_future.result()
+                    if discovered_count > 0:
+                        print(f"[Discovery] Successfully identified and registered {discovered_count} new ATS boards during run.")
+                except Exception:
+                    pass
 
         deduplicated_job_records = deduplicate_jobs(aggregated_raw_jobs)
 
@@ -900,10 +919,11 @@ def run_orchestration() -> dict:
         if run_identifier:
             finish_run(run_identifier, "success")
 
-        try:
-            enrich_linkedin_descriptions()
-        except Exception as enrichment_err:
-            print(f"[Enrichment] Enrichment pass failed: {enrichment_err}", flush=True)
+        if target_platform is None or target_platform == Site.LINKEDIN.value:
+            try:
+                enrich_linkedin_descriptions()
+            except Exception as enrichment_err:
+                print(f"[Enrichment] Enrichment pass failed: {enrichment_err}", flush=True)
 
         return {"status": "success", "manifest": run_manifest, "source_stats": source_statistics}
 
@@ -917,4 +937,12 @@ if __name__ == "__main__":
     if "--test" in sys.argv:
         KEYWORDS[:] = ["golang developer", "backend engineer"]
         print(f"[Scraper] Running in TEST mode. Keywords reduced to: {KEYWORDS}", flush=True)
-    run_orchestration()
+
+    selected_platform = None
+    for arg_index, arg_value in enumerate(sys.argv):
+        if arg_value in ("--platform", "--site") and arg_index + 1 < len(sys.argv):
+            selected_platform = sys.argv[arg_index + 1].lower()
+            print(f"[Scraper] Target platform filter active: {selected_platform}", flush=True)
+            break
+
+    run_orchestration(target_platform=selected_platform)
