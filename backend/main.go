@@ -185,6 +185,8 @@ func main() {
 		scraperIngest.GET("/ats-slugs", ingestHandler.GetATSSlugs)
 		scraperIngest.POST("/register-ats-slug", ingestHandler.RegisterATSSlug)
 		scraperIngest.GET("/companies", ingestHandler.GetAllCompanyNames)
+		scraperIngest.GET("/jobs-without-description", ingestHandler.GetJobsWithoutDescription)
+		scraperIngest.POST("/enrich-descriptions", ingestHandler.EnrichJobDescriptions)
 	}
 
 	// Protected Routes (Requires JWT)

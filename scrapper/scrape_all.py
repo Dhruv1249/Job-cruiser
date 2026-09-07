@@ -5,6 +5,7 @@ Unified scraper orchestrator running ATS company boards, job board sources, and 
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -102,7 +103,6 @@ KEYWORD_SEARCHABLE_REMOTE_SITES = [
     Site.INDEED,
     Site.DICE,
     Site.AMAZON,
-    Site.LINKEDIN,
 ]
 
 PROXY_REQUIRED_SITES = {
@@ -442,6 +442,16 @@ def is_location_in_scope(location_string: str, is_remote_position: bool = False)
     return False
 
 
+def sanitize_scalar(value, default=None):
+    """
+    Returns a JSON-safe scalar, replacing any float nan/inf (which pandas uses for missing values)
+    with the specified default so json.dumps never raises ValueError.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return default
+    return value
+
+
 def normalize_job_post(raw_job_record, source_identifier: str, company_name: str | None = None) -> dict:
     """
     Normalizes a job listing from diverse source objects into a uniform dictionary representation.
@@ -456,31 +466,46 @@ def normalize_job_post(raw_job_record, source_identifier: str, company_name: str
         updated_timestamp = raw_job_record.get("updated_at") or raw_job_record.get("date_posted") or ""
         job_departments = raw_job_record.get("departments") or []
         job_offices = raw_job_record.get("offices") or []
+        salary_min = raw_job_record.get("salary_min") or 0
+        salary_max = raw_job_record.get("salary_max") or 0
+        currency = raw_job_record.get("currency") or ""
     else:
-        job_identifier = getattr(raw_job_record, "id", "") or getattr(raw_job_record, "job_id", "") or ""
-        job_title = getattr(raw_job_record, "title", "")
-        extracted_company = company_name or getattr(raw_job_record, "company_name", "") or getattr(raw_job_record, "company", "") or ""
-        job_url = getattr(raw_job_record, "job_url", "") or getattr(raw_job_record, "absolute_url", "") or ""
+        job_identifier = sanitize_scalar(getattr(raw_job_record, "id", "")) or sanitize_scalar(getattr(raw_job_record, "job_id", "")) or ""
+        job_title = sanitize_scalar(getattr(raw_job_record, "title", ""), default="") or ""
+        extracted_company = company_name or sanitize_scalar(getattr(raw_job_record, "company_name", ""), default="") or sanitize_scalar(getattr(raw_job_record, "company", ""), default="") or ""
+        job_url = sanitize_scalar(getattr(raw_job_record, "job_url", ""), default="") or sanitize_scalar(getattr(raw_job_record, "absolute_url", ""), default="") or ""
 
         location_attribute = getattr(raw_job_record, "location", None)
         if location_attribute and hasattr(location_attribute, "display_location"):
             job_location = location_attribute.display_location()
         else:
-            job_location = str(location_attribute) if location_attribute else ""
+            job_location = str(location_attribute) if location_attribute and not (isinstance(location_attribute, float) and not math.isfinite(location_attribute)) else ""
 
-        job_description = getattr(raw_job_record, "description", "") or getattr(raw_job_record, "description_text", "") or ""
+        job_description = sanitize_scalar(getattr(raw_job_record, "description", ""), default="") or sanitize_scalar(getattr(raw_job_record, "description_text", ""), default="") or ""
 
         date_posted_attribute = getattr(raw_job_record, "date_posted", None)
-        if date_posted_attribute:
+        if date_posted_attribute and not (isinstance(date_posted_attribute, float) and not math.isfinite(date_posted_attribute)):
             if hasattr(date_posted_attribute, "isoformat"):
                 updated_timestamp = date_posted_attribute.isoformat() + "T00:00:00Z"
             else:
                 updated_timestamp = str(date_posted_attribute)
         else:
-            updated_timestamp = getattr(raw_job_record, "updated_at", "") or ""
+            updated_timestamp = sanitize_scalar(getattr(raw_job_record, "updated_at", ""), default="") or ""
 
-        job_departments = getattr(raw_job_record, "departments", [])
-        job_offices = getattr(raw_job_record, "offices", [])
+        job_departments = getattr(raw_job_record, "departments", []) or []
+        job_offices = getattr(raw_job_record, "offices", []) or []
+
+        raw_salary_min = sanitize_scalar(getattr(raw_job_record, "min_amount", None), default=None)
+        raw_salary_max = sanitize_scalar(getattr(raw_job_record, "max_amount", None), default=None)
+        try:
+            salary_min = int(raw_salary_min) if raw_salary_min is not None else 0
+        except (TypeError, ValueError):
+            salary_min = 0
+        try:
+            salary_max = int(raw_salary_max) if raw_salary_max is not None else 0
+        except (TypeError, ValueError):
+            salary_max = 0
+        currency = sanitize_scalar(getattr(raw_job_record, "currency", ""), default="") or ""
 
     return {
         "job_id": str(job_identifier),
@@ -488,11 +513,14 @@ def normalize_job_post(raw_job_record, source_identifier: str, company_name: str
         "updated_at": updated_timestamp,
         "absolute_url": job_url,
         "location": job_location,
-        "departments": job_departments,
-        "offices": job_offices,
+        "departments": job_departments if isinstance(job_departments, list) else [],
+        "offices": job_offices if isinstance(job_offices, list) else [],
         "description_text": job_description,
         "company": sanitize_company_name(extracted_company),
         "source": source_identifier,
+        "salary_min": salary_min,
+        "salary_max": salary_max,
+        "currency": currency,
     }
 
 
@@ -541,6 +569,124 @@ def process_company(company_slug: str, platform_name: str, run_id: str | None = 
         "jobs": extracted_jobs,
         "status": execution_status,
     }
+
+
+def enrich_linkedin_descriptions(cooldown_seconds: int = 180, max_jobs: int = 50) -> int:
+    """
+    Fetches job descriptions for LinkedIn jobs with empty descriptions after a rate-limit cooldown.
+    """
+    if max_jobs <= 0:
+        return 0
+
+    request_headers = {
+        "X-Ingest-Key": INGEST_API_KEY,
+    }
+    pending_endpoint = f"{BACKEND_API_URL}/scraper/jobs-without-description?source=linkedin&limit={max_jobs}"
+    try:
+        response = requests.get(pending_endpoint, headers=request_headers, timeout=15)
+        if response.status_code != 200:
+            return 0
+        pending_jobs = response.json().get("data", [])
+    except Exception:
+        return 0
+
+    if not pending_jobs:
+        return 0
+
+    print(f"[Enrichment] Found {len(pending_jobs)} LinkedIn jobs awaiting descriptions.", flush=True)
+    if cooldown_seconds > 0:
+        print(f"[Enrichment] Waiting {cooldown_seconds}s cooldown before fetching LinkedIn descriptions...", flush=True)
+        time.sleep(cooldown_seconds)
+
+    enrichment_session = requests.Session()
+    enrichment_session.headers.update(
+        {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+    )
+
+    enriched_updates = []
+    consecutive_rate_limits = 0
+
+    for job_item in pending_jobs:
+        job_id = job_item.get("id")
+        job_url = job_item.get("url", "")
+        if not job_id or not job_url:
+            continue
+
+        linkedin_id_match = re.search(r"/view/(?:[a-zA-Z0-9-]+-)?(\d+)", job_url)
+        if not linkedin_id_match:
+            continue
+        linkedin_job_id = linkedin_id_match.group(1)
+
+        try:
+            detail_response = enrichment_session.get(
+                f"https://www.linkedin.com/jobs/view/{linkedin_job_id}",
+                timeout=12,
+            )
+            if detail_response.status_code == 429:
+                consecutive_rate_limits += 1
+                if consecutive_rate_limits >= 2:
+                    print("[Enrichment] Encountered 429 rate limit twice, halting enrichment pass.", flush=True)
+                    break
+                time.sleep(10)
+                continue
+
+            consecutive_rate_limits = 0
+            if detail_response.status_code == 200:
+                blocked_redirect_markers = [
+                    "linkedin.com/signup",
+                    "linkedin.com/authwall",
+                    "linkedin.com/checkpoint",
+                    "expired_jd_redirect",
+                ]
+                if any(marker in detail_response.url for marker in blocked_redirect_markers):
+                    continue
+
+                detail_soup = BeautifulSoup(detail_response.text, "html.parser")
+                description_element = detail_soup.find(
+                    "div", class_=lambda class_name: class_name and "show-more-less-html__markup" in class_name
+                )
+                if description_element is None:
+                    description_element = detail_soup.select_one(".description__text") or detail_soup.select_one(".show-more-less-html")
+                    if description_element is not None:
+                        for button_element in description_element.find_all(
+                            ["button", "span"], class_=lambda class_name: class_name and "show-more-less" in class_name
+                        ):
+                            button_element.decompose()
+
+                if description_element is not None:
+                    description_text = description_element.get_text("\n", strip=True)
+                    if description_text:
+                        enriched_updates.append(
+                            {
+                                "id": job_id,
+                                "description_text": description_text,
+                            }
+                        )
+
+        except Exception:
+            pass
+
+        time.sleep(2.5)
+
+    if enriched_updates:
+        enrich_endpoint = f"{BACKEND_API_URL}/scraper/enrich-descriptions"
+        try:
+            update_response = requests.post(
+                enrich_endpoint,
+                json={"updates": enriched_updates},
+                headers=request_headers,
+                timeout=20,
+            )
+            if update_response.status_code == 200:
+                print(f"[Enrichment] Successfully updated {len(enriched_updates)} LinkedIn job descriptions.", flush=True)
+        except Exception:
+            pass
+
+    return len(enriched_updates)
 
 
 def run_orchestration() -> dict:
@@ -610,7 +756,7 @@ def run_orchestration() -> dict:
                     if target_site == Site.INDEED and target_location == "India":
                         scraping_arguments["country_indeed"] = "india"
                     if target_site == Site.LINKEDIN:
-                        scraping_arguments["linkedin_fetch_description"] = True
+                        scraping_arguments["linkedin_fetch_description"] = False
                     if target_site in PROXY_REQUIRED_SITES and PROXIES:
                         scraping_arguments["proxies"] = PROXIES
 
@@ -753,6 +899,11 @@ def run_orchestration() -> dict:
 
         if run_identifier:
             finish_run(run_identifier, "success")
+
+        try:
+            enrich_linkedin_descriptions()
+        except Exception as enrichment_err:
+            print(f"[Enrichment] Enrichment pass failed: {enrichment_err}", flush=True)
 
         return {"status": "success", "manifest": run_manifest, "source_stats": source_statistics}
 

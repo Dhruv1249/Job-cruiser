@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Dhruv1249/Job-cruiser/backend/services"
@@ -113,93 +114,31 @@ func (h *IngestHandler) IngestRaw(c *gin.Context) {
 	insertedCount := 0
 	companyCache := make(map[string]string)
 
-	for _, job := range req.Jobs {
+	for jobIndex, job := range req.Jobs {
 		if job.AbsoluteURL == "" {
 			continue
 		}
 
-		companyName := utils.ExtractCompanyName(job.Company, job.AbsoluteURL, job.Title)
-
-		var companyID string
-		cacheKey := strings.ToLower(companyName)
-		if cachedID, exists := companyCache[cacheKey]; exists {
-			companyID = cachedID
-		} else {
-			compLookup := `SELECT id FROM companies WHERE LOWER(name) = LOWER($1)`
-			compErr := tx.QueryRow(ctx, compLookup, companyName).Scan(&companyID)
-			if compErr != nil {
-				insertCompQuery := `INSERT INTO companies (name) VALUES ($1) RETURNING id`
-				if scanErr := tx.QueryRow(ctx, insertCompQuery, companyName).Scan(&companyID); scanErr != nil {
-					continue
-				}
-			}
-			companyCache[cacheKey] = companyID
-		}
-
-		if inferredDomain := utils.ExtractCompanyDomain(job.AbsoluteURL); inferredDomain != "" {
-			updateDomainQuery := `UPDATE companies SET domain = $1 WHERE id = $2 AND (domain IS NULL OR domain = '')`
-			_, _ = tx.Exec(ctx, updateDomainQuery, inferredDomain, companyID)
-		}
-
-		loc := job.Location
-		isRemote := strings.Contains(strings.ToLower(loc), "remote") ||
-			strings.Contains(strings.ToLower(loc), "anywhere") ||
-			strings.Contains(strings.ToLower(loc), "wfh")
-
-		source := job.Source
-		if source == "" {
-			source = "unknown"
-		}
-
-		var tags []string
-		for _, dep := range job.Departments {
-			if dep != "" {
-				tags = append(tags, strings.ToLower(dep))
-			}
-		}
-		for _, ts := range job.TechStack {
-			if ts != "" {
-				tags = append(tags, strings.ToLower(ts))
-			}
-		}
-		tagsJSON, _ := json.Marshal(tags)
-
-		jobType := "Full-time"
-		titleLower := strings.ToLower(job.Title)
-		if strings.Contains(titleLower, "intern") || strings.Contains(titleLower, "co-op") {
-			jobType = "Internship"
-		} else if strings.Contains(titleLower, "contract") {
-			jobType = "Contract"
-		}
-
-		var salMinParam, salMaxParam *int
-		if job.SalaryMin > 0 {
-			salMinParam = &job.SalaryMin
-		}
-		if job.SalaryMax > 0 {
-			salMaxParam = &job.SalaryMax
-		}
-		curr := job.Currency
-		if curr == "" {
-			curr = "USD"
-		}
-
-		upsertQuery := `
-			INSERT INTO jobs (company_id, title, location, is_remote, source, url, tags, raw_desc, job_type,
-			                  salary_min, salary_max, currency, scraped_at, ai_evaluated)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, false)
-			ON CONFLICT (url) DO NOTHING
-			RETURNING id;
-		`
-		var insertedID string
-		execErr := tx.QueryRow(ctx, upsertQuery,
-			companyID, job.Title, loc, isRemote, source, job.AbsoluteURL,
-			tagsJSON, job.DescriptionText, jobType, salMinParam, salMaxParam, curr,
-		).Scan(&insertedID)
-		if execErr != nil {
+		savepointName := fmt.Sprintf("sp_%d", jobIndex)
+		if _, spErr := tx.Exec(ctx, fmt.Sprintf("SAVEPOINT %s", savepointName)); spErr != nil {
+			log.Printf("IngestRaw: failed to set savepoint for job %d: %v", jobIndex, spErr)
 			continue
 		}
-		if insertedID != "" {
+
+		jobInserted, insertErr := insertSingleJob(ctx, tx, job, companyCache)
+		if insertErr != nil {
+			log.Printf("IngestRaw: rolling back job %d (%s) due to error: %v", jobIndex, job.AbsoluteURL, insertErr)
+			if _, rbErr := tx.Exec(ctx, fmt.Sprintf("ROLLBACK TO SAVEPOINT %s", savepointName)); rbErr != nil {
+				log.Printf("IngestRaw: savepoint rollback failed for job %d, aborting batch: %v", jobIndex, rbErr)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit raw job ingestion"})
+				return
+			}
+			continue
+		}
+		if _, relErr := tx.Exec(ctx, fmt.Sprintf("RELEASE SAVEPOINT %s", savepointName)); relErr != nil {
+			log.Printf("IngestRaw: failed to release savepoint for job %d: %v", jobIndex, relErr)
+		}
+		if jobInserted {
 			insertedCount++
 		}
 	}
@@ -220,6 +159,94 @@ func (h *IngestHandler) IngestRaw(c *gin.Context) {
 		"message":    "Raw jobs ingested successfully",
 		"jobs_added": insertedCount,
 	})
+}
+
+// insertSingleJob performs all database operations for one job within an existing transaction,
+// returning true if the job was newly inserted (not a duplicate) and any error that should
+// trigger a savepoint rollback.
+func insertSingleJob(ctx context.Context, tx pgx.Tx, job IngestJobPayload, companyCache map[string]string) (bool, error) {
+	companyName := utils.ExtractCompanyName(job.Company, job.AbsoluteURL, job.Title)
+
+	var companyID string
+	cacheKey := strings.ToLower(companyName)
+	if cachedID, exists := companyCache[cacheKey]; exists {
+		companyID = cachedID
+	} else {
+		compLookup := `SELECT id FROM companies WHERE LOWER(name) = LOWER($1)`
+		compErr := tx.QueryRow(ctx, compLookup, companyName).Scan(&companyID)
+		if compErr != nil {
+			insertCompQuery := `INSERT INTO companies (name) VALUES ($1) RETURNING id`
+			if scanErr := tx.QueryRow(ctx, insertCompQuery, companyName).Scan(&companyID); scanErr != nil {
+				return false, fmt.Errorf("upsert company %q: %w", companyName, scanErr)
+			}
+		}
+		companyCache[cacheKey] = companyID
+	}
+
+	if inferredDomain := utils.ExtractCompanyDomain(job.AbsoluteURL); inferredDomain != "" {
+		updateDomainQuery := `UPDATE companies SET domain = $1 WHERE id = $2 AND (domain IS NULL OR domain = '')`
+		_, _ = tx.Exec(ctx, updateDomainQuery, inferredDomain, companyID)
+	}
+
+	loc := job.Location
+	isRemote := strings.Contains(strings.ToLower(loc), "remote") ||
+		strings.Contains(strings.ToLower(loc), "anywhere") ||
+		strings.Contains(strings.ToLower(loc), "wfh")
+
+	source := job.Source
+	if source == "" {
+		source = "unknown"
+	}
+
+	var tags []string
+	for _, dep := range job.Departments {
+		if dep != "" {
+			tags = append(tags, strings.ToLower(dep))
+		}
+	}
+	for _, ts := range job.TechStack {
+		if ts != "" {
+			tags = append(tags, strings.ToLower(ts))
+		}
+	}
+	tagsJSON, _ := json.Marshal(tags)
+
+	jobType := "Full-time"
+	titleLower := strings.ToLower(job.Title)
+	if strings.Contains(titleLower, "intern") || strings.Contains(titleLower, "co-op") {
+		jobType = "Internship"
+	} else if strings.Contains(titleLower, "contract") {
+		jobType = "Contract"
+	}
+
+	var salMinParam, salMaxParam *int
+	if job.SalaryMin > 0 {
+		salMinParam = &job.SalaryMin
+	}
+	if job.SalaryMax > 0 {
+		salMaxParam = &job.SalaryMax
+	}
+	curr := job.Currency
+	if curr == "" {
+		curr = "USD"
+	}
+
+	upsertQuery := `
+		INSERT INTO jobs (company_id, title, location, is_remote, source, url, tags, raw_desc, job_type,
+		                  salary_min, salary_max, currency, scraped_at, ai_evaluated)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, false)
+		ON CONFLICT (url) DO NOTHING
+		RETURNING id;
+	`
+	var insertedID string
+	execErr := tx.QueryRow(ctx, upsertQuery,
+		companyID, job.Title, loc, isRemote, source, job.AbsoluteURL,
+		tagsJSON, job.DescriptionText, jobType, salMinParam, salMaxParam, curr,
+	).Scan(&insertedID)
+	if execErr != nil && execErr.Error() != "no rows in result set" {
+		return false, fmt.Errorf("upsert job %q: %w", job.AbsoluteURL, execErr)
+	}
+	return insertedID != "", nil
 }
 
 // IngestJobs processes a batch of jobs for a company and registers them in CockroachDB
@@ -635,4 +662,77 @@ func ExtractExperience(title, description string) string {
 	}
 
 	return ""
+}
+
+type JobWithoutDescriptionItem struct {
+	ID    string `json:"id"`
+	URL   string `json:"url"`
+	Title string `json:"title"`
+}
+
+type EnrichJobDescriptionItem struct {
+	ID              string `json:"id" binding:"required"`
+	DescriptionText string `json:"description_text" binding:"required"`
+}
+
+type EnrichJobDescriptionsRequest struct {
+	Updates []EnrichJobDescriptionItem `json:"updates" binding:"required"`
+}
+
+func (h *IngestHandler) GetJobsWithoutDescription(c *gin.Context) {
+	source := c.DefaultQuery("source", "linkedin")
+	limitStr := c.DefaultQuery("limit", "50")
+	limit := 50
+	if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 && parsedLimit <= 100 {
+		limit = parsedLimit
+	}
+
+	query := `
+		SELECT id, url, title
+		FROM jobs
+		WHERE source = $1 AND (raw_desc IS NULL OR raw_desc = '')
+		ORDER BY scraped_at DESC
+		LIMIT $2;
+	`
+	rows, err := h.DB.Query(c.Request.Context(), query, source, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query pending description jobs"})
+		return
+	}
+	defer rows.Close()
+
+	var jobs []JobWithoutDescriptionItem
+	for rows.Next() {
+		var item JobWithoutDescriptionItem
+		if scanErr := rows.Scan(&item.ID, &item.URL, &item.Title); scanErr == nil {
+			jobs = append(jobs, item)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": jobs})
+}
+
+func (h *IngestHandler) EnrichJobDescriptions(c *gin.Context) {
+	var req EnrichJobDescriptionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload: " + err.Error()})
+		return
+	}
+
+	ctx := c.Request.Context()
+	updatedCount := 0
+	for _, updateItem := range req.Updates {
+		if updateItem.ID == "" || updateItem.DescriptionText == "" {
+			continue
+		}
+		query := `UPDATE jobs SET raw_desc = $1 WHERE id = $2;`
+		if _, execErr := h.DB.Exec(ctx, query, updateItem.DescriptionText, updateItem.ID); execErr == nil {
+			updatedCount++
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "Descriptions updated successfully",
+		"updated_count": updatedCount,
+	})
 }

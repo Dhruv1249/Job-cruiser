@@ -224,3 +224,42 @@ func TestIsAlphanumericClassifiesCorrectly(t *testing.T) {
 		}
 	}
 }
+
+func TestEnrichJobDescriptionsPayloadSerialization(t *testing.T) {
+	requestPayload := handlers.EnrichJobDescriptionsRequest{
+		Updates: []handlers.EnrichJobDescriptionItem{
+			{
+				ID:              "job-uuid-123",
+				DescriptionText: "Experienced backend engineer required.",
+			},
+		},
+	}
+
+	if len(requestPayload.Updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(requestPayload.Updates))
+	}
+	if requestPayload.Updates[0].ID != "job-uuid-123" {
+		t.Errorf("expected ID 'job-uuid-123', got %s", requestPayload.Updates[0].ID)
+	}
+	if requestPayload.Updates[0].DescriptionText != "Experienced backend engineer required." {
+		t.Errorf("expected DescriptionText match, got %s", requestPayload.Updates[0].DescriptionText)
+	}
+}
+
+func TestJobWithoutDescriptionItemSerialization(t *testing.T) {
+	item := handlers.JobWithoutDescriptionItem{
+		ID:    "job-uuid-456",
+		URL:   "https://www.linkedin.com/jobs/view/456",
+		Title: "Staff Software Engineer",
+	}
+
+	if item.ID != "job-uuid-456" {
+		t.Errorf("expected ID 'job-uuid-456', got %s", item.ID)
+	}
+	if item.URL != "https://www.linkedin.com/jobs/view/456" {
+		t.Errorf("expected URL match, got %s", item.URL)
+	}
+	if item.Title != "Staff Software Engineer" {
+		t.Errorf("expected Title match, got %s", item.Title)
+	}
+}

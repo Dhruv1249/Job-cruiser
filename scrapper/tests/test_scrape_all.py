@@ -12,6 +12,7 @@ from scrape_all import (
     is_location_in_scope,
     extract_ats_slug,
     sanitize_company_name,
+    enrich_linkedin_descriptions,
 )
 
 
@@ -57,6 +58,12 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         mock_job_post.company_name = "Notion"
         mock_job_post.job_url = "https://jobs.notion.so/123"
         mock_job_post.description = "We are hiring..."
+        mock_job_post.min_amount = None
+        mock_job_post.max_amount = None
+        mock_job_post.currency = None
+        mock_job_post.departments = []
+        mock_job_post.offices = []
+        mock_job_post.updated_at = ""
 
         mock_location = Mock()
         mock_location.display_location.return_value = "San Francisco, CA"
@@ -74,6 +81,9 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         self.assertEqual(normalized["location"], "San Francisco, CA")
         self.assertEqual(normalized["description_text"], "We are hiring...")
         self.assertEqual(normalized["updated_at"], "2026-07-19T00:00:00Z")
+        self.assertEqual(normalized["salary_min"], 0)
+        self.assertEqual(normalized["salary_max"], 0)
+        self.assertEqual(normalized["currency"], "")
 
     def test_deduplicate_jobs(self):
         """
@@ -133,6 +143,7 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         self.assertEqual(sanitize_company_name(None), "Unknown")
         self.assertEqual(sanitize_company_name(""), "Unknown")
 
+    @patch("scrape_all.enrich_linkedin_descriptions")
     @patch("scrape_all.fetch_ats_slugs")
     @patch("scrape_all.scrape_jobs")
     @patch("scrape_all.process_company")
@@ -147,9 +158,10 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         mock_process_company,
         mock_scrape_jobs,
         mock_fetch_slugs,
+        mock_enrich,
     ):
         """
-        Verify the orchestration pipeline execution with mocked ATS slugs and job sources.
+        Verify the orchestration pipeline execution with mocked ATS slugs, job sources, and enrichment trigger.
         """
         mock_fetch_slugs.return_value = {
             "greenhouse": ["airbnb"],
@@ -174,14 +186,16 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         mock_process_company.assert_any_call("airbnb", "greenhouse", "run-test-123")
         mock_process_company.assert_any_call("spotify", "lever", "run-test-123")
         mock_finish_run.assert_called_once_with("run-test-123", "success")
+        mock_enrich.assert_called_once()
 
+    @patch("scrape_all.enrich_linkedin_descriptions")
     @patch("scrape_all.fetch_ats_slugs")
     @patch("scrape_all.scrape_jobs")
     @patch("scrape_all.process_company")
     @patch("scrape_all.start_run")
     @patch("scrape_all.finish_run")
     @patch("scrape_all.save_json")
-    def test_run_orchestration_passes_linkedin_fetch_description(
+    def test_run_orchestration_disables_linkedin_fetch_description_in_discovery(
         self,
         mock_save_json,
         mock_finish_run,
@@ -189,9 +203,10 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         mock_process_company,
         mock_scrape_jobs,
         mock_fetch_slugs,
+        mock_enrich,
     ):
         """
-        Verify that linkedin_fetch_description is enabled when scraping LinkedIn keyword feeds.
+        Verify that linkedin_fetch_description is disabled during discovery pass and enrichment is triggered.
         """
         mock_fetch_slugs.return_value = {}
         mock_start_run.return_value = "run-test-linkedin"
@@ -212,7 +227,66 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         ]
         self.assertTrue(len(linkedin_calls) > 0)
         for call_kwargs in linkedin_calls:
-            self.assertTrue(call_kwargs.get("linkedin_fetch_description"))
+            self.assertFalse(call_kwargs.get("linkedin_fetch_description", False))
+        mock_enrich.assert_called_once()
+
+    @patch("scrape_all.time.sleep")
+    @patch("requests.post")
+    @patch("requests.Session")
+    @patch("requests.get")
+    def test_enrich_linkedin_descriptions(
+        self,
+        mock_requests_get,
+        mock_session_class,
+        mock_requests_post,
+        mock_sleep,
+    ):
+        """
+        Verify that pending LinkedIn jobs are fetched from backend, descriptions are scraped and posted.
+        """
+        mock_pending_response = Mock()
+        mock_pending_response.status_code = 200
+        mock_pending_response.json.return_value = {
+            "data": [
+                {
+                    "id": "job-uuid-1",
+                    "url": "https://www.linkedin.com/jobs/view/backend-dev-4462613977",
+                    "title": "Backend Dev",
+                }
+            ]
+        }
+        mock_requests_get.return_value = mock_pending_response
+
+        mock_session_instance = Mock()
+        mock_detail_response = Mock()
+        mock_detail_response.status_code = 200
+        mock_detail_response.url = "https://www.linkedin.com/jobs/view/4462613977"
+        mock_detail_response.text = """
+        <html>
+            <body>
+                <div class="description__text">
+                    <p>We are looking for a Go engineer to scale distributed databases.</p>
+                    <button class="show-more-less-button">Show more</button>
+                </div>
+            </body>
+        </html>
+        """
+        mock_session_instance.get.return_value = mock_detail_response
+        mock_session_class.return_value = mock_session_instance
+
+        mock_update_response = Mock()
+        mock_update_response.status_code = 200
+        mock_requests_post.return_value = mock_update_response
+
+        enriched_count = enrich_linkedin_descriptions(cooldown_seconds=0, max_jobs=10)
+        self.assertEqual(enriched_count, 1)
+
+        mock_requests_post.assert_called_once()
+        post_kwargs = mock_requests_post.call_args[1]
+        self.assertEqual(len(post_kwargs["json"]["updates"]), 1)
+        self.assertEqual(post_kwargs["json"]["updates"][0]["id"], "job-uuid-1")
+        self.assertIn("Go engineer", post_kwargs["json"]["updates"][0]["description_text"])
+        self.assertNotIn("Show more", post_kwargs["json"]["updates"][0]["description_text"])
 
 
 if __name__ == "__main__":
