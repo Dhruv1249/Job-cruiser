@@ -30,10 +30,16 @@ from config import (
 from jobspy import scrape_jobs
 from jobspy.model import Site
 
-logger = logging.getLogger('scraper')
-logger.setLevel(logging.DEBUG)
+IS_VERBOSE = (
+    "--verbose" in sys.argv
+    or "-v" in sys.argv
+    or os.environ.get("VERBOSE", "").lower() in ("1", "true", "yes")
+)
+
+logger = logging.getLogger("scraper")
+logger.setLevel(logging.DEBUG if IS_VERBOSE else logging.INFO)
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter('%(asctime)s IST [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+handler.setFormatter(logging.Formatter("%(asctime)s IST [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
 logger.addHandler(handler)
 
 
@@ -590,6 +596,7 @@ def process_company(company_slug: str, platform_name: str, run_id: str | None = 
             site_name=[platform_name],
             search_term=company_slug,
             results_wanted=100,
+            verbose=2 if IS_VERBOSE else 1,
         )
 
     try:
@@ -865,6 +872,7 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                             "search_term": search_query,
                             "results_wanted": 200,
                             "hours_old": 24,
+                            "verbose": 2 if IS_VERBOSE else 1,
                         }
                         if target_site == Site.DIRECT_CAREERS:
                             scraping_arguments["results_wanted"] = 5000
@@ -1081,6 +1089,9 @@ def run_orchestration(target_platform: str | None = None) -> dict:
 
 
 if __name__ == "__main__":
+    if IS_VERBOSE:
+        logger.info("[orchestrator] Verbose debug logging active (--verbose)")
+
     if "--test" in sys.argv:
         KEYWORDS[:] = ["golang developer", "backend engineer"]
         logger.info(f"[orchestrator] Running in TEST mode. Keywords reduced to: {KEYWORDS}")
