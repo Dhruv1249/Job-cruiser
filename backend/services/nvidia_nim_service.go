@@ -435,11 +435,6 @@ func (s *NvidiaNimService) EvaluatePendingForAllUsersWithResult(ctx context.Cont
 		return true
 	}
 
-	if IsScraperRunActive(ctx, s.DB) {
-		log.Println("[NvidiaNimService] Scraper run is currently active, deferring evaluation until scraper finishes.")
-		return true
-	}
-
 	pendingJobs, errJobs := fetchRecentUnevaluatedJobs(ctx, s.DB)
 	if errJobs != nil || len(pendingJobs) == 0 {
 		for _, profile := range userProfiles {
@@ -1414,6 +1409,11 @@ func fetchRecentUnevaluatedJobs(ctx context.Context, databasePool *pgxpool.Pool)
 		LEFT JOIN companies c ON j.company_id = c.id
 		WHERE j.ai_evaluated = false
 		  AND j.scraped_at >= NOW() - INTERVAL '14 days'
+		  AND (
+			j.source != 'linkedin'
+			OR LENGTH(COALESCE(j.raw_desc, '')) > 100
+			OR NOT EXISTS (SELECT 1 FROM scraper_runs WHERE status = 'running' AND started_at >= NOW() - INTERVAL '2 hours')
+		  )
 		ORDER BY j.scraped_at DESC;
 	`
 	rows, errQuery := databasePool.Query(ctx, sqlQuery)

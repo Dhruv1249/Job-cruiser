@@ -13,6 +13,7 @@ from scrape_all import (
     extract_ats_slug,
     sanitize_company_name,
     enrich_linkedin_descriptions,
+    process_direct_career_company,
 )
 
 
@@ -143,6 +144,7 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         self.assertEqual(sanitize_company_name(None), "Unknown")
         self.assertEqual(sanitize_company_name(""), "Unknown")
 
+    @patch("scrape_all.load_career_pages")
     @patch("scrape_all.enrich_linkedin_descriptions")
     @patch("scrape_all.fetch_ats_slugs")
     @patch("scrape_all.scrape_jobs")
@@ -159,10 +161,12 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         mock_scrape_jobs,
         mock_fetch_slugs,
         mock_enrich,
+        mock_load_career_pages,
     ):
         """
         Verify the orchestration pipeline execution with mocked ATS slugs, job sources, and enrichment trigger.
         """
+        mock_load_career_pages.return_value = []
         mock_fetch_slugs.return_value = {
             "greenhouse": ["airbnb"],
             "lever": ["spotify"],
@@ -189,6 +193,7 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         mock_finish_run.assert_called_once_with("run-test-123", "success", None, ANY, ANY)
         mock_enrich.assert_called_once()
 
+    @patch("scrape_all.load_career_pages")
     @patch("scrape_all.enrich_linkedin_descriptions")
     @patch("scrape_all.fetch_ats_slugs")
     @patch("scrape_all.scrape_jobs")
@@ -205,10 +210,12 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         mock_scrape_jobs,
         mock_fetch_slugs,
         mock_enrich,
+        mock_load_career_pages,
     ):
         """
         Verify that linkedin_fetch_description is disabled during discovery pass and enrichment is triggered.
         """
+        mock_load_career_pages.return_value = []
         mock_fetch_slugs.return_value = {}
         mock_start_run.return_value = "run-test-linkedin"
         mock_dataframe = Mock()
@@ -400,6 +407,31 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         self.assertEqual(total_enriched, 0)
         self.assertEqual(mock_requests_get.call_count, 2)
         mock_requests_post.assert_not_called()
+
+    @patch("scrape_all.stream_ingest_jobs")
+    def test_process_direct_career_company(self, mock_stream_ingest):
+        """
+        Verify process_direct_career_company scrapes, normalizes, filters in-scope jobs, and streams them.
+        """
+        mock_scraper = Mock()
+        mock_job = Mock()
+        mock_job.id = "https://stripe.com/jobs/1"
+        mock_job.title = "Software Engineer"
+        mock_job.company = "Stripe"
+        mock_job.job_url = "https://stripe.com/jobs/1"
+        mock_job.location = Mock(country="Remote")
+        mock_job.description = "Go backend engineer"
+        mock_job.is_remote = True
+        mock_job.date_posted = None
+
+        mock_scraper.scrape_single_company.return_value = [mock_job]
+
+        result = process_direct_career_company("Stripe", "https://stripe.com/jobs", mock_scraper, "run-test-dc")
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(len(result["jobs"]), 1)
+        self.assertEqual(result["jobs"][0]["company"], "Stripe")
+        mock_stream_ingest.assert_called_once_with(result["jobs"], "run-test-dc")
 
 
 if __name__ == "__main__":

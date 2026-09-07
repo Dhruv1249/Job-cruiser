@@ -377,6 +377,7 @@ class TestIngestPipelineEndToEnd(unittest.TestCase):
         mock_start_run.return_value = None
 
         with patch("scrape_all.fetch_ats_slugs", return_value={}), \
+             patch("scrape_all.load_career_pages", return_value=[]), \
              patch("scrape_all.scrape_jobs") as mock_scrape, \
              patch("scrape_all.save_json"), \
              patch("scrape_all.time.sleep"), \

@@ -28,7 +28,8 @@ from config import (
 )
 
 from jobspy import scrape_jobs
-from jobspy.model import Site
+from jobspy.direct_careers import load_career_pages, DirectCareers
+from jobspy.model import DescriptionFormat, Site
 
 IS_VERBOSE = (
     "--verbose" in sys.argv
@@ -41,6 +42,70 @@ logger.setLevel(logging.DEBUG if IS_VERBOSE else logging.INFO)
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("%(asctime)s IST [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
 logger.addHandler(handler)
+
+STREAM_INGEST_LOCK = threading.Lock()
+SEEN_STREAM_KEYS: set = set()
+STREAM_AGGREGATED_JOBS: list[dict] = []
+TOTAL_STREAM_JOBS_ADDED = 0
+
+
+def stream_ingest_jobs(new_jobs: list[dict], run_id: str | None) -> int:
+    """
+    Thread-safely deduplicates new jobs, registers discovered ATS slugs,
+    and immediately pushes them to the backend /scraper/ingest-raw endpoint.
+    """
+    global TOTAL_STREAM_JOBS_ADDED
+    if not new_jobs or not run_id:
+        return 0
+
+    unique_batch = []
+    with STREAM_INGEST_LOCK:
+        for job_record in new_jobs:
+            dedup_key = (
+                (job_record.get("company") or "").strip().lower(),
+                (job_record.get("title") or "").strip().lower(),
+                (job_record.get("location") or "").strip().lower(),
+            )
+            if dedup_key not in SEEN_STREAM_KEYS:
+                SEEN_STREAM_KEYS.add(dedup_key)
+                unique_batch.append(job_record)
+                STREAM_AGGREGATED_JOBS.append(job_record)
+
+    if not unique_batch:
+        return 0
+
+    for job_record in unique_batch:
+        job_url = job_record.get("absolute_url") or ""
+        discovered_ats = extract_ats_slug(job_url)
+        if discovered_ats:
+            register_discovered_ats_slug(discovered_ats[0], discovered_ats[1])
+
+    ingest_request_headers = {
+        "X-Ingest-Key": INGEST_API_KEY,
+        "Content-Type": "application/json",
+    }
+    ingest_endpoint_url = f"{BACKEND_API_URL}/scraper/ingest-raw"
+
+    try:
+        response = requests.post(
+            ingest_endpoint_url,
+            json={"run_id": run_id, "jobs": unique_batch},
+            headers=ingest_request_headers,
+            timeout=30,
+        )
+        if response.status_code == 200:
+            added = response.json().get("jobs_added", 0)
+            with STREAM_INGEST_LOCK:
+                TOTAL_STREAM_JOBS_ADDED += added
+            source_tag = unique_batch[0].get("source", "unknown") if unique_batch else "unknown"
+            logger.info(f"[ingest] Streamed {len(unique_batch)} jobs → {added} new to DB ({source_tag})")
+            return added
+        else:
+            logger.warning(f"[ingest] Stream batch returned HTTP {response.status_code}: {response.text[:200]}")
+    except Exception as stream_err:
+        logger.error(f"[ingest] Stream batch failed: {type(stream_err).__name__}: {stream_err}")
+
+    return 0
 
 
 def retry_with_backoff(func, max_attempts, backoff_seconds, label):
@@ -121,7 +186,6 @@ SINGLE_CALL_FEED_SITES = [
     Site.HIMALAYAS,
     Site.JOBSPRESSO,
     Site.WORKING_NOMADS,
-    Site.DIRECT_CAREERS,
 ]
 
 KEYWORD_SEARCHABLE_INDIA_SITES = [
@@ -615,12 +679,76 @@ def process_company(company_slug: str, platform_name: str, run_id: str | None = 
         execution_status = "success"
         elapsed = time.time() - start_time
         logger.info(f"[{platform_name}:{company_slug}] Scraped {raw_count} raw → {len(extracted_jobs)} in-scope jobs in {elapsed:.1f}s")
+        if extracted_jobs and run_id:
+            stream_ingest_jobs(extracted_jobs, run_id)
     except Exception as e:
         logger.error(f"[{platform_name}:{company_slug}] All 3 attempts failed, skipping.")
 
     return {
         "company": company_slug,
         "platform": platform_name,
+        "jobs": extracted_jobs,
+        "status": execution_status,
+    }
+
+
+def process_direct_career_company(
+    company_name: str,
+    career_url: str,
+    direct_careers_scraper: DirectCareers | None = None,
+    run_id: str | None = None,
+) -> dict:
+    """
+    Scrapes a single direct company career page with an isolated 3-minute timeout and streams in-scope jobs immediately.
+    """
+    logger.info(f"[direct_careers:{company_name}] Starting scrape ({career_url})")
+    start_time = time.time()
+    extracted_jobs = []
+    execution_status = "failed"
+    local_scraper = direct_careers_scraper or DirectCareers()
+
+    def do_scrape():
+        return local_scraper.scrape_single_company(
+            company_name=company_name,
+            career_url=career_url,
+            description_format=DescriptionFormat.MARKDOWN,
+        )
+
+    sub_executor = ThreadPoolExecutor(max_workers=1)
+    company_jobs = []
+    try:
+        future = sub_executor.submit(do_scrape)
+        company_jobs = future.result(timeout=180)
+        sub_executor.shutdown(wait=False)
+        if company_jobs:
+            for job in company_jobs:
+                normalized_post = normalize_job_post(job, Site.DIRECT_CAREERS.value, company_name)
+                is_remote_flag = getattr(job, "is_remote", False) or "remote" in normalized_post["location"].lower()
+                if is_location_in_scope(normalized_post["location"], is_remote_flag):
+                    extracted_jobs.append(normalized_post)
+                else:
+                    logger.debug(
+                        f"[direct_careers:{company_name}] Filtered out '{normalized_post['title']}' at '{normalized_post['location']}' (not in scope)"
+                    )
+        execution_status = "success"
+    except TimeoutError:
+        sub_executor.shutdown(wait=False, cancel_futures=True)
+        logger.warning(f"[direct_careers:{company_name}] Timed out after 180s (3 min), skipping.")
+    except Exception as scrape_error:
+        sub_executor.shutdown(wait=False, cancel_futures=True)
+        logger.error(f"[direct_careers:{company_name}] Scrape error: {type(scrape_error).__name__}: {scrape_error}")
+
+    elapsed = time.time() - start_time
+    logger.info(
+        f"[direct_careers:{company_name}] Scraped {len(company_jobs)} raw → {len(extracted_jobs)} in-scope jobs in {elapsed:.1f}s"
+    )
+
+    if extracted_jobs and run_id:
+        stream_ingest_jobs(extracted_jobs, run_id)
+
+    return {
+        "company": company_name,
+        "platform": "direct_careers",
         "jobs": extracted_jobs,
         "status": execution_status,
     }
@@ -819,6 +947,12 @@ def run_orchestration(target_platform: str | None = None) -> dict:
         
     logger.info(f"[orchestrator] Startup: fetched ATS slugs across {len(active_ats_platform_slugs)} platforms, keywords={keyword_count}, site_lists_active={site_lists_active}")
 
+    global SEEN_STREAM_KEYS, STREAM_AGGREGATED_JOBS, TOTAL_STREAM_JOBS_ADDED
+    with STREAM_INGEST_LOCK:
+        SEEN_STREAM_KEYS.clear()
+        STREAM_AGGREGATED_JOBS.clear()
+        TOTAL_STREAM_JOBS_ADDED = 0
+
     run_identifier = start_run()
     aggregated_raw_jobs = []
     run_manifest = []
@@ -932,24 +1066,18 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                 if parsed_posts:
                     with board_raw_jobs_lock:
                         aggregated_raw_jobs.extend(parsed_posts)
+                    if run_identifier:
+                        stream_ingest_jobs(parsed_posts, run_identifier)
 
             board_futures = []
 
             if target_platform is None or target_platform not in active_ats_platform_slugs:
-                keyword_feed_sites = [site for site in SINGLE_CALL_FEED_SITES if site != Site.DIRECT_CAREERS]
-                for feed_site in keyword_feed_sites:
+                for feed_site in SINGLE_CALL_FEED_SITES:
                     if target_platform is not None and target_platform != feed_site.value:
                         continue
                     board_futures.append(
                         primary_executor.submit(
                             scrape_board_site_keyword, feed_site, "software engineer", None, True
-                        )
-                    )
-
-                if target_platform is None or target_platform == Site.DIRECT_CAREERS.value:
-                    board_futures.append(
-                        primary_executor.submit(
-                            scrape_board_site_keyword, Site.DIRECT_CAREERS, None, None, True
                         )
                     )
 
@@ -971,7 +1099,26 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                             )
                         )
             
-            logger.info(f"[orchestrator] Total futures submitted: {len(company_futures) + len(board_futures)}")
+            direct_career_futures = []
+            if target_platform is None or target_platform == Site.DIRECT_CAREERS.value:
+                all_direct_pages = load_career_pages()
+                if "--test" in sys.argv:
+                    all_direct_pages = all_direct_pages[:3]
+                shared_dc_scraper = DirectCareers()
+                for dc_company, dc_url, _ in all_direct_pages:
+                    direct_career_futures.append(
+                        primary_executor.submit(
+                            process_direct_career_company,
+                            dc_company,
+                            dc_url,
+                            shared_dc_scraper,
+                            run_identifier,
+                        )
+                    )
+
+            logger.info(
+                f"[orchestrator] Total futures submitted: {len(company_futures) + len(board_futures) + len(direct_career_futures)}"
+            )
 
             for completed_future in as_completed(company_futures):
                 execution_result = completed_future.result()
@@ -983,8 +1130,17 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                         "status": execution_result["status"],
                     }
                 )
-                if execution_result["status"] == "success":
-                    aggregated_raw_jobs.extend(execution_result["jobs"])
+
+            for completed_future in as_completed(direct_career_futures):
+                execution_result = completed_future.result()
+                run_manifest.append(
+                    {
+                        "company": execution_result["company"],
+                        "platform": execution_result["platform"],
+                        "job_count": len(execution_result.get("jobs", [])),
+                        "status": execution_result["status"],
+                    }
+                )
 
             for completed_future in as_completed(board_futures):
                 completed_future.result()
@@ -997,78 +1153,24 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                 except Exception as discovery_error:
                     logger.error(f"[ats-discovery] Discovery worker raised {type(discovery_error).__name__}: {discovery_error}")
 
-        raw_count_before = len(aggregated_raw_jobs)
-        deduplicated_job_records = deduplicate_jobs(aggregated_raw_jobs)
-        removed_count = raw_count_before - len(deduplicated_job_records)
-        logger.info(f"[orchestrator] Deduplication: {raw_count_before} raw → {len(deduplicated_job_records)} unique jobs (removed {removed_count})")
-
-        for job_record in deduplicated_job_records:
-            discovered_ats_details = extract_ats_slug(job_record["absolute_url"])
-            if discovered_ats_details:
-                register_discovered_ats_slug(discovered_ats_details[0], discovered_ats_details[1])
-
-        save_json(deduplicated_job_records, DATA_DIR / "raw_jobs.json")
+        save_json(STREAM_AGGREGATED_JOBS, DATA_DIR / "raw_jobs.json")
         save_json(source_statistics, DATA_DIR / "source_stats.json")
-        logger.info(f"[orchestrator] Saved {len(deduplicated_job_records)} raw scraped jobs to raw_jobs.json")
-        logger.info(f"[orchestrator] Recorded telemetry across {len(source_statistics)} source search combinations.")
-
-        if not run_identifier:
-            run_identifier = start_run()
-
-        total_jobs_added = 0
-        if run_identifier:
-            ingest_request_headers = {
-                "X-Ingest-Key": INGEST_API_KEY,
-                "Content-Type": "application/json",
-            }
-            ingest_endpoint_url = f"{BACKEND_API_URL}/scraper/ingest-raw"
-            batch_chunk_size = 500
-            total_batches = (len(deduplicated_job_records) + batch_chunk_size - 1) // batch_chunk_size
-            for chunk_offset in range(0, len(deduplicated_job_records), batch_chunk_size):
-                job_batch_chunk = deduplicated_job_records[chunk_offset:chunk_offset + batch_chunk_size]
-                batch_number = chunk_offset // batch_chunk_size + 1
-                
-                def do_ingest():
-                    resp = requests.post(
-                        ingest_endpoint_url,
-                        json={"run_id": run_identifier, "jobs": job_batch_chunk},
-                        headers=ingest_request_headers,
-                        timeout=REQUEST_TIMEOUT,
-                    )
-                    if resp.status_code != 200:
-                        logger.warning(f"[ingest] Batch {batch_number} HTTP {resp.status_code}: {resp.text[:200]}")
-                        return 0
-                    return resp.json().get("jobs_added", 0)
-                
-                try:
-                    added_count = retry_with_backoff(do_ingest, 3, 5, f"[ingest] Batch {batch_number}")
-                    if added_count is None:
-                        added_count = 0
-                    total_jobs_added += added_count
-                    logger.info(f"[ingest] Batch {batch_number}/{total_batches}: sending {len(job_batch_chunk)} jobs → got {added_count} new (cumulative {total_jobs_added})")
-                except Exception as batch_error:
-                    logger.error(f"[ingest] Batch {batch_number} POST failed: {batch_error}")
-            
-            logger.info(f"[orchestrator] Backend raw ingestion complete. Total jobs added: {total_jobs_added}")
-
         save_json(run_manifest, DATA_DIR / "manifest.json")
+        logger.info(f"[orchestrator] Saved {len(STREAM_AGGREGATED_JOBS)} raw scraped jobs to raw_jobs.json")
+        logger.info(f"[orchestrator] Recorded telemetry across {len(source_statistics)} source search combinations.")
+        logger.info(f"[orchestrator] Streaming ingestion complete. Total new jobs added to DB: {TOTAL_STREAM_JOBS_ADDED}")
 
         if target_platform is None or target_platform == Site.LINKEDIN.value:
             current_run_linkedin_count = sum(
-                1 for job_record in deduplicated_job_records
+                1 for job_record in STREAM_AGGREGATED_JOBS
                 if job_record.get("source") == Site.LINKEDIN.value or job_record.get("source") == "linkedin"
             )
             try:
-                enrich_linkedin_descriptions(
-                    cooldown_seconds=60,
-                    batch_size=100,
-                    max_jobs=current_run_linkedin_count,
-                    since_minutes=120,
-                )
+                enrich_linkedin_descriptions(cooldown_seconds=15, max_jobs=300)
             except Exception as enrichment_err:
                 logger.error(f"[enrichment] Enrichment pass failed: {enrichment_err}")
 
-        logger.info(f"[orchestrator] Run complete: {len(deduplicated_job_records)} unique jobs scraped, {total_jobs_added} new jobs ingested to DB")
+        logger.info(f"[orchestrator] Run complete: {len(STREAM_AGGREGATED_JOBS)} unique jobs scraped, {TOTAL_STREAM_JOBS_ADDED} new jobs ingested to DB")
         
         if source_statistics:
             logger.info("[orchestrator] Source summary:")
@@ -1078,7 +1180,7 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                 logger.info(f"  {src_key:<35} →  {stats.get('jobs_found', 0)} jobs  ({stats.get('duration_seconds', 0.0)}s){err_str}")
 
         if run_identifier:
-            finish_run(run_identifier, "success", None, source_statistics, total_jobs_added)
+            finish_run(run_identifier, "success", None, source_statistics, TOTAL_STREAM_JOBS_ADDED)
 
         return {"status": "success", "manifest": run_manifest, "source_stats": source_statistics}
 
