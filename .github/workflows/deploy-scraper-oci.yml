@@ -41,7 +41,7 @@ jobs:
             cd ~/Job-cruiser/scrapper
             git fetch origin
             git reset --hard origin/main
-            docker build -t jobcruiser-scraper:latest .
+            docker build --no-cache -t jobcruiser-scraper:latest .
 
             sudo bash -c 'cat << "EOF" > /etc/systemd/system/jobcruiser-scraper.service
             [Unit]

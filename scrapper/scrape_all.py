@@ -5,6 +5,7 @@ Unified scraper orchestrator running ATS company boards, job board sources, and 
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
@@ -28,6 +29,29 @@ from config import (
 
 from jobspy import scrape_jobs
 from jobspy.model import Site
+
+logger = logging.getLogger('scraper')
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(asctime)s IST [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+logger.addHandler(handler)
+
+
+def retry_with_backoff(func, max_attempts, backoff_seconds, label):
+    """
+    Executes a function with retries and exponential backoff.
+    """
+    attempt = 1
+    while attempt <= max_attempts:
+        try:
+            return func()
+        except Exception as e:
+            if attempt == max_attempts:
+                raise e
+            logger.warning(f"{label} Failed (attempt {attempt}/{max_attempts}): {type(e).__name__}: {str(e)}")
+            time.sleep(backoff_seconds)
+            attempt += 1
+
 
 DEFAULT_KEYWORDS = [
     "backend engineer",
@@ -75,8 +99,8 @@ def fetch_master_keywords() -> list[str]:
             received_keywords = response.json().get("data", [])
             if received_keywords:
                 return received_keywords
-    except Exception:
-        pass
+    except Exception as keyword_fetch_error:
+        logger.warning(f"[orchestrator] Failed to fetch master keywords from backend: {type(keyword_fetch_error).__name__}: {keyword_fetch_error}. Using defaults.")
     return DEFAULT_KEYWORDS
 
 
@@ -139,16 +163,17 @@ def fetch_ats_slugs() -> dict[str, list[str]]:
     request_headers = {
         "X-Ingest-Key": INGEST_API_KEY,
     }
+    url = f"{BACKEND_API_URL}/scraper/ats-slugs"
+    logger.debug(f"[ats-slugs] Fetching from {url}")
     try:
-        response = requests.get(
-            f"{BACKEND_API_URL}/scraper/ats-slugs",
-            headers=request_headers,
-            timeout=15,
-        )
+        response = requests.get(url, headers=request_headers, timeout=15)
         if response.status_code == 200:
-            return response.json().get("data", {})
-    except Exception:
-        pass
+            data = response.json().get("data", {})
+            slugs_str = ", ".join(f"{k}={len(v)}" for k, v in data.items())
+            logger.info(f"[ats-slugs] Fetched: {slugs_str}")
+            return data
+    except Exception as e:
+        logger.error(f"[ats-slugs] Failed to fetch ats slugs: {e}")
     return {}
 
 
@@ -173,8 +198,8 @@ def register_discovered_ats_slug(platform_name: str, company_slug: str) -> None:
             headers=request_headers,
             timeout=10,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"[ats-discovery] Error registering discovered slug {platform_name} {company_slug}: {e}")
 
 
 def generate_career_page_candidates(company_name: str, company_domain: str = "") -> list[str]:
@@ -214,7 +239,7 @@ def generate_career_page_candidates(company_name: str, company_domain: str = "")
     return unique_candidates
 
 
-def probe_single_career_page(company_name: str, company_domain: str = "") -> tuple[str, str] | None:
+def probe_single_career_page(company_name: str, company_domain: str = "") -> tuple[str, str, str] | None:
     """
     Probes candidate URLs for a company and extracts ATS configuration details if matched.
     """
@@ -223,10 +248,11 @@ def probe_single_career_page(company_name: str, company_domain: str = "") -> tup
             response = HTTP_PROBE_SESSION.get(candidate_url, timeout=8, allow_redirects=True)
             for pattern, platform_name in ATS_DETECTION_PATTERNS:
                 if pattern.search(response.url):
-                    return platform_name, pattern.search(response.url).group(1).lower().strip("/")
+                    return platform_name, pattern.search(response.url).group(1).lower().strip("/"), response.url
                 if response.status_code == 200 and pattern.search(response.text):
-                    return platform_name, pattern.search(response.text).group(1).lower().strip("/")
-        except Exception:
+                    return platform_name, pattern.search(response.text).group(1).lower().strip("/"), response.url
+        except Exception as probe_error:
+            logger.debug(f"[ats-discovery] Probe failed for {candidate_url}: {type(probe_error).__name__}: {probe_error}")
             continue
     return None
 
@@ -247,7 +273,8 @@ def probe_unmapped_companies(concurrency: int = 20, max_probes_per_run: int = 50
         if api_response.status_code != 200:
             return 0
         raw_company_data = api_response.json().get("data", [])
-    except Exception:
+    except Exception as e:
+        logger.error(f"[ats-discovery] Failed to fetch unmapped companies: {e}")
         return 0
 
     probed_batch = raw_company_data[:max_probes_per_run]
@@ -271,11 +298,12 @@ def probe_unmapped_companies(concurrency: int = 20, max_probes_per_run: int = 50
             try:
                 result = future.result()
                 if result:
-                    platform_name, company_slug = result
+                    platform_name, company_slug, url = result
+                    logger.info(f"[ats-discovery] Found new {platform_name} slug: {company_slug} at {url}")
                     register_discovered_ats_slug(platform_name, company_slug)
                     discovered_count += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[ats-discovery] Probe failed: {e}")
 
     return discovered_count
 
@@ -292,13 +320,15 @@ def start_run() -> str | None:
         target_endpoint = f"{BACKEND_API_URL}/scraper/start"
         response = requests.post(target_endpoint, headers=request_headers, timeout=20)
         if response.status_code == 200:
-            return response.json().get("run_id")
-    except Exception:
-        pass
+            run_id = response.json().get("run_id")
+            logger.info(f"[orchestrator] Started run {run_id}")
+            return run_id
+    except Exception as e:
+        logger.error(f"[orchestrator] Failed to start run: {e}")
     return None
 
 
-def finish_run(run_id: str, run_status: str, error_message: str | None = None) -> None:
+def finish_run(run_id: str, run_status: str, error_message: str | None = None, source_statistics: dict | None = None, total_jobs: int = 0) -> None:
     """
     Notifies the backend telemetry system that the scraper run has concluded.
     """
@@ -310,12 +340,14 @@ def finish_run(run_id: str, run_status: str, error_message: str | None = None) -
         "run_id": run_id,
         "status": run_status,
         "error_message": error_message,
+        "sources_hit": source_statistics or {},
     }
+    logger.info(f"[orchestrator] Run {run_id} finished with status={run_status}, jobs_added={total_jobs}")
     try:
         target_endpoint = f"{BACKEND_API_URL}/scraper/finish"
         requests.post(target_endpoint, json=request_payload, headers=request_headers, timeout=20)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"[orchestrator] Failed to finish run {run_id}: {e}")
 
 
 def save_json(data_payload, target_file_path: Path) -> None:
@@ -548,22 +580,36 @@ def process_company(company_slug: str, platform_name: str, run_id: str | None = 
     """
     Scrapes job listings for a designated company slug on a specific ATS platform.
     """
-    try:
-        scraped_dataframe = scrape_jobs(
+    logger.info(f"[{platform_name}:{company_slug}] Starting scrape")
+    start_time = time.time()
+    extracted_jobs = []
+    execution_status = "failed"
+    
+    def do_scrape():
+        return scrape_jobs(
             site_name=[platform_name],
             search_term=company_slug,
             results_wanted=100,
         )
-        extracted_jobs = []
-        for job_row in scraped_dataframe.itertuples():
-            normalized_post = normalize_job_post(job_row, platform_name, company_slug)
-            is_remote_flag = getattr(job_row, "is_remote", False) or "remote" in normalized_post["location"].lower()
-            if is_location_in_scope(normalized_post["location"], is_remote_flag):
-                extracted_jobs.append(normalized_post)
+
+    try:
+        scraped_dataframe = retry_with_backoff(do_scrape, 3, 5, f"[{platform_name}:{company_slug}]")
+        raw_count = 0
+        if scraped_dataframe is not None and not scraped_dataframe.empty:
+            raw_count = len(scraped_dataframe)
+            for job_row in scraped_dataframe.itertuples():
+                normalized_post = normalize_job_post(job_row, platform_name, company_slug)
+                is_remote_flag = getattr(job_row, "is_remote", False) or "remote" in normalized_post["location"].lower()
+                if is_location_in_scope(normalized_post["location"], is_remote_flag):
+                    extracted_jobs.append(normalized_post)
+                else:
+                    logger.debug(f"[{platform_name}:{company_slug}] Filtered out '{normalized_post['title']}' at '{normalized_post['location']}' (not in scope)")
+        
         execution_status = "success"
-    except Exception:
-        extracted_jobs = []
-        execution_status = "failed"
+        elapsed = time.time() - start_time
+        logger.info(f"[{platform_name}:{company_slug}] Scraped {raw_count} raw → {len(extracted_jobs)} in-scope jobs in {elapsed:.1f}s")
+    except Exception as e:
+        logger.error(f"[{platform_name}:{company_slug}] All 3 attempts failed, skipping.")
 
     return {
         "company": company_slug,
@@ -590,7 +636,7 @@ def enrich_linkedin_descriptions(
     }
 
     if cooldown_seconds > 0:
-        print(f"[Enrichment] Waiting {cooldown_seconds}s cooldown before fetching LinkedIn descriptions...", flush=True)
+        logger.info(f"[enrichment] Waiting {cooldown_seconds}s cooldown before fetching LinkedIn descriptions...")
         time.sleep(cooldown_seconds)
 
     enrichment_session = requests.Session()
@@ -623,7 +669,8 @@ def enrich_linkedin_descriptions(
             if response.status_code != 200:
                 break
             pending_jobs = response.json().get("data", [])
-        except Exception:
+        except Exception as fetch_error:
+            logger.error(f"[enrichment] Failed to fetch pending LinkedIn jobs from backend: {type(fetch_error).__name__}: {fetch_error}")
             break
 
         unattempted_jobs = [
@@ -632,10 +679,7 @@ def enrich_linkedin_descriptions(
         if not unattempted_jobs:
             break
 
-        print(
-            f"[Enrichment] Found {len(unattempted_jobs)} pending LinkedIn jobs awaiting descriptions.",
-            flush=True,
-        )
+        logger.info(f"[enrichment] Fetched batch of {len(unattempted_jobs)} pending LinkedIn jobs")
 
         batch_enriched_updates = []
         for job_record in unattempted_jobs:
@@ -657,6 +701,8 @@ def enrich_linkedin_descriptions(
                 continue
             linkedin_job_identifier = linkedin_id_match.group(1)
 
+            logger.debug(f"[enrichment] Fetching description for job {job_identifier} ({job_url})")
+
             try:
                 detail_response = enrichment_session.get(
                     f"https://www.linkedin.com/jobs/view/{linkedin_job_identifier}",
@@ -664,11 +710,9 @@ def enrich_linkedin_descriptions(
                 )
                 if detail_response.status_code == 429:
                     consecutive_rate_limits += 1
+                    logger.warning(f"[enrichment] Rate limited (429) on job {job_identifier}, sleeping 10s (consecutive={consecutive_rate_limits})")
                     if consecutive_rate_limits >= 2:
-                        print(
-                            "[Enrichment] Encountered 429 rate limit twice, halting enrichment pass.",
-                            flush=True,
-                        )
+                        logger.info("[enrichment] Encountered 429 rate limit twice, halting enrichment pass.")
                         break
                     time.sleep(10)
                     continue
@@ -682,6 +726,7 @@ def enrich_linkedin_descriptions(
                         "expired_jd_redirect",
                     ]
                     if any(marker in detail_response.url for marker in blocked_redirect_markers):
+                        logger.info(f"[enrichment] Job {job_identifier} redirected to auth wall, skipping")
                         continue
 
                     detail_soup = BeautifulSoup(detail_response.text, "html.parser")
@@ -703,15 +748,20 @@ def enrich_linkedin_descriptions(
                     if description_element is not None:
                         description_text = description_element.get_text("\n", strip=True)
                         if description_text:
+                            logger.debug(f"[enrichment] Got description for job {job_identifier} ({len(description_text)} chars)")
                             batch_enriched_updates.append(
                                 {
                                     "id": job_identifier,
                                     "description_text": description_text,
                                 }
                             )
+                        else:
+                            logger.debug(f"[enrichment] No description element found for job {job_identifier}")
+                    else:
+                        logger.debug(f"[enrichment] No description element found for job {job_identifier}")
 
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"[enrichment] Exception on job {job_identifier}: {e}")
 
             time.sleep(1.0)
 
@@ -726,16 +776,16 @@ def enrich_linkedin_descriptions(
                 )
                 if update_response.status_code == 200:
                     total_enriched_count += len(batch_enriched_updates)
-                    print(
-                        f"[Enrichment] Successfully updated {len(batch_enriched_updates)} LinkedIn job descriptions ({total_enriched_count} total).",
-                        flush=True,
+                    logger.info(
+                        f"[enrichment] Successfully updated {len(batch_enriched_updates)} LinkedIn job descriptions ({total_enriched_count} total)."
                     )
-            except Exception:
-                pass
+            except Exception as enrich_post_error:
+                logger.error(f"[enrichment] Failed to POST description batch to backend: {type(enrich_post_error).__name__}: {enrich_post_error}")
 
         if consecutive_rate_limits >= 2:
             break
 
+    logger.info(f"[enrichment] Pass complete: {total_enriched_count} descriptions updated")
     return total_enriched_count
 
 
@@ -751,6 +801,17 @@ def run_orchestration(target_platform: str | None = None) -> dict:
         target_platform = target_platform.strip().lower()
 
     active_ats_platform_slugs = fetch_ats_slugs()
+    
+    total_ats_count = sum(len(slugs) for slugs in active_ats_platform_slugs.values())
+    keyword_count = len(KEYWORDS)
+    site_lists_active = []
+    if target_platform is None or target_platform not in active_ats_platform_slugs:
+        site_lists_active.append("board")
+    if total_ats_count > 0:
+        site_lists_active.append("ats")
+        
+    logger.info(f"[orchestrator] Startup: fetched ATS slugs across {len(active_ats_platform_slugs)} platforms, keywords={keyword_count}, site_lists_active={site_lists_active}")
+
     run_identifier = start_run()
     aggregated_raw_jobs = []
     run_manifest = []
@@ -793,45 +854,55 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                 Scrapes a single job board for a designated search query and location with 5-minute timeout.
                 """
                 telemetry_key = f"{target_site.value}:{search_query}:{target_location or 'remote'}"
+                logger.info(f"[{telemetry_key}] Submitting board scrape")
                 start_timestamp = time.time()
-                sub_executor = ThreadPoolExecutor(max_workers=1)
-                scraped_dataframe = None
-                caught_error = None
+                
+                def do_board_scrape():
+                    sub_executor = ThreadPoolExecutor(max_workers=1)
+                    try:
+                        scraping_arguments = {
+                            "site_name": [target_site],
+                            "search_term": search_query,
+                            "results_wanted": 200,
+                            "hours_old": 24,
+                        }
+                        if target_site == Site.DIRECT_CAREERS:
+                            scraping_arguments["results_wanted"] = 5000
+                            scraping_arguments.pop("hours_old", None)
 
-                try:
-                    scraping_arguments = {
-                        "site_name": [target_site],
-                        "search_term": search_query,
-                        "results_wanted": 200,
-                        "hours_old": 24,
-                    }
-                    if target_site == Site.DIRECT_CAREERS:
-                        scraping_arguments["results_wanted"] = 5000
-                        scraping_arguments.pop("hours_old", None)
-
-                    if target_location:
-                        scraping_arguments["location"] = target_location
-                    if is_remote_search:
-                        scraping_arguments["is_remote"] = True
-                    if target_site == Site.INDEED and target_location == "India":
-                        scraping_arguments["country_indeed"] = "india"
-                    if target_site == Site.LINKEDIN:
-                        scraping_arguments["linkedin_fetch_description"] = False
-                        with LINKEDIN_QUERY_LOCK:
+                        if target_location:
+                            scraping_arguments["location"] = target_location
+                        if is_remote_search:
+                            scraping_arguments["is_remote"] = True
+                        if target_site == Site.INDEED and target_location == "India":
+                            scraping_arguments["country_indeed"] = "india"
+                        if target_site == Site.LINKEDIN:
+                            scraping_arguments["linkedin_fetch_description"] = False
+                            with LINKEDIN_QUERY_LOCK:
+                                future_result = sub_executor.submit(scrape_jobs, **scraping_arguments)
+                                scraped_dataframe = future_result.result(timeout=REQUEST_TIMEOUT)
+                                time.sleep(2.0)
+                        else:
                             future_result = sub_executor.submit(scrape_jobs, **scraping_arguments)
                             scraped_dataframe = future_result.result(timeout=REQUEST_TIMEOUT)
-                            time.sleep(2.0)
-                    else:
-                        future_result = sub_executor.submit(scrape_jobs, **scraping_arguments)
-                        scraped_dataframe = future_result.result(timeout=REQUEST_TIMEOUT)
-                    sub_executor.shutdown(wait=False)
-                except Exception as execution_err:
-                    caught_error = str(execution_err)
-                    sub_executor.shutdown(wait=False, cancel_futures=True)
+                        sub_executor.shutdown(wait=False)
+                        return scraped_dataframe
+                    except Exception as execution_err:
+                        sub_executor.shutdown(wait=False, cancel_futures=True)
+                        raise execution_err
+
+                caught_error = None
+                scraped_dataframe = None
+                try:
+                    scraped_dataframe = retry_with_backoff(do_board_scrape, 2, 10, f"[{telemetry_key}]")
+                except Exception as e:
+                    caught_error = str(e)
+                    logger.error(f"[{telemetry_key}] Failed after retries: {type(e).__name__}: {str(e)}")
 
                 elapsed_time = time.time() - start_timestamp
 
                 if scraped_dataframe is None or scraped_dataframe.empty:
+                    logger.info(f"[{telemetry_key}] Returned 0 results (empty dataframe)")
                     record_source_telemetry(telemetry_key, 0, elapsed_time, caught_error)
                     return
 
@@ -847,6 +918,7 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                     if is_location_in_scope(normalized_post["location"], is_remote_flag):
                         parsed_posts.append(normalized_post)
 
+                logger.info(f"[{telemetry_key}] Got {len(scraped_dataframe)} raw → {len(parsed_posts)} in-scope in {elapsed_time:.1f}s")
                 record_source_telemetry(telemetry_key, len(parsed_posts), elapsed_time, caught_error)
 
                 if parsed_posts:
@@ -890,6 +962,8 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                                 scrape_board_site_keyword, remote_site, search_term, None, True
                             )
                         )
+            
+            logger.info(f"[orchestrator] Total futures submitted: {len(company_futures) + len(board_futures)}")
 
             for completed_future in as_completed(company_futures):
                 execution_result = completed_future.result()
@@ -911,11 +985,14 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                 try:
                     discovered_count = discovery_future.result()
                     if discovered_count > 0:
-                        print(f"[Discovery] Successfully identified and registered {discovered_count} new ATS boards during run.")
-                except Exception:
-                    pass
+                        logger.info(f"[ats-discovery] Successfully identified and registered {discovered_count} new ATS boards during run.")
+                except Exception as discovery_error:
+                    logger.error(f"[ats-discovery] Discovery worker raised {type(discovery_error).__name__}: {discovery_error}")
 
+        raw_count_before = len(aggregated_raw_jobs)
         deduplicated_job_records = deduplicate_jobs(aggregated_raw_jobs)
+        removed_count = raw_count_before - len(deduplicated_job_records)
+        logger.info(f"[orchestrator] Deduplication: {raw_count_before} raw → {len(deduplicated_job_records)} unique jobs (removed {removed_count})")
 
         for job_record in deduplicated_job_records:
             discovered_ats_details = extract_ats_slug(job_record["absolute_url"])
@@ -924,12 +1001,13 @@ def run_orchestration(target_platform: str | None = None) -> dict:
 
         save_json(deduplicated_job_records, DATA_DIR / "raw_jobs.json")
         save_json(source_statistics, DATA_DIR / "source_stats.json")
-        print(f"[Scraper] Saved {len(deduplicated_job_records)} raw scraped jobs to raw_jobs.json", flush=True)
-        print(f"[Scraper] Recorded telemetry across {len(source_statistics)} source search combinations.", flush=True)
+        logger.info(f"[orchestrator] Saved {len(deduplicated_job_records)} raw scraped jobs to raw_jobs.json")
+        logger.info(f"[orchestrator] Recorded telemetry across {len(source_statistics)} source search combinations.")
 
         if not run_identifier:
             run_identifier = start_run()
 
+        total_jobs_added = 0
         if run_identifier:
             ingest_request_headers = {
                 "X-Ingest-Key": INGEST_API_KEY,
@@ -937,34 +1015,33 @@ def run_orchestration(target_platform: str | None = None) -> dict:
             }
             ingest_endpoint_url = f"{BACKEND_API_URL}/scraper/ingest-raw"
             batch_chunk_size = 500
-            total_jobs_added = 0
+            total_batches = (len(deduplicated_job_records) + batch_chunk_size - 1) // batch_chunk_size
             for chunk_offset in range(0, len(deduplicated_job_records), batch_chunk_size):
                 job_batch_chunk = deduplicated_job_records[chunk_offset:chunk_offset + batch_chunk_size]
-                try:
-                    ingest_response = requests.post(
+                batch_number = chunk_offset // batch_chunk_size + 1
+                
+                def do_ingest():
+                    resp = requests.post(
                         ingest_endpoint_url,
                         json={"run_id": run_identifier, "jobs": job_batch_chunk},
                         headers=ingest_request_headers,
                         timeout=REQUEST_TIMEOUT,
                     )
-                    if ingest_response.status_code == 200:
-                        added_count = ingest_response.json().get("jobs_added", 0)
-                        total_jobs_added += added_count
-                        print(
-                            f"[Scraper] Ingested batch {chunk_offset // batch_chunk_size + 1}/{(len(deduplicated_job_records) + batch_chunk_size - 1) // batch_chunk_size} ({added_count} jobs)",
-                            flush=True,
-                        )
-                    else:
-                        print(
-                            f"[Scraper] Batch {chunk_offset // batch_chunk_size + 1} returned {ingest_response.status_code}: {ingest_response.text[:200]}",
-                            flush=True,
-                        )
+                    if resp.status_code != 200:
+                        logger.warning(f"[ingest] Batch {batch_number} HTTP {resp.status_code}: {resp.text[:200]}")
+                        return 0
+                    return resp.json().get("jobs_added", 0)
+                
+                try:
+                    added_count = retry_with_backoff(do_ingest, 3, 5, f"[ingest] Batch {batch_number}")
+                    if added_count is None:
+                        added_count = 0
+                    total_jobs_added += added_count
+                    logger.info(f"[ingest] Batch {batch_number}/{total_batches}: sending {len(job_batch_chunk)} jobs → got {added_count} new (cumulative {total_jobs_added})")
                 except Exception as batch_error:
-                    print(
-                        f"[Scraper] Failed to POST chunk {chunk_offset // batch_chunk_size + 1}: {batch_error}",
-                        flush=True,
-                    )
-            print(f"[Scraper] Backend raw ingestion complete. Total jobs added: {total_jobs_added}", flush=True)
+                    logger.error(f"[ingest] Batch {batch_number} POST failed: {batch_error}")
+            
+            logger.info(f"[orchestrator] Backend raw ingestion complete. Total jobs added: {total_jobs_added}")
 
         save_json(run_manifest, DATA_DIR / "manifest.json")
 
@@ -981,29 +1058,38 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                     since_minutes=120,
                 )
             except Exception as enrichment_err:
-                print(f"[Enrichment] Enrichment pass failed: {enrichment_err}", flush=True)
+                logger.error(f"[enrichment] Enrichment pass failed: {enrichment_err}")
+
+        logger.info(f"[orchestrator] Run complete: {len(deduplicated_job_records)} unique jobs scraped, {total_jobs_added} new jobs ingested to DB")
+        
+        if source_statistics:
+            logger.info("[orchestrator] Source summary:")
+            sorted_stats = sorted(source_statistics.items(), key=lambda x: x[1].get("jobs_found", 0), reverse=True)
+            for src_key, stats in sorted_stats:
+                err_str = f" ERROR: {stats['error']}" if stats.get("error") else ""
+                logger.info(f"  {src_key:<35} →  {stats.get('jobs_found', 0)} jobs  ({stats.get('duration_seconds', 0.0)}s){err_str}")
 
         if run_identifier:
-            finish_run(run_identifier, "success")
+            finish_run(run_identifier, "success", None, source_statistics, total_jobs_added)
 
         return {"status": "success", "manifest": run_manifest, "source_stats": source_statistics}
 
     except Exception as execution_exception:
         if run_identifier:
-            finish_run(run_identifier, "failed", str(execution_exception))
+            finish_run(run_identifier, "failed", str(execution_exception), source_statistics, 0)
         raise execution_exception
 
 
 if __name__ == "__main__":
     if "--test" in sys.argv:
         KEYWORDS[:] = ["golang developer", "backend engineer"]
-        print(f"[Scraper] Running in TEST mode. Keywords reduced to: {KEYWORDS}", flush=True)
+        logger.info(f"[orchestrator] Running in TEST mode. Keywords reduced to: {KEYWORDS}")
 
     selected_platform = None
     for arg_index, arg_value in enumerate(sys.argv):
         if arg_value in ("--platform", "--site") and arg_index + 1 < len(sys.argv):
             selected_platform = sys.argv[arg_index + 1].lower()
-            print(f"[Scraper] Target platform filter active: {selected_platform}", flush=True)
+            logger.info(f"[orchestrator] Target platform filter active: {selected_platform}")
             break
 
     run_orchestration(target_platform=selected_platform)
