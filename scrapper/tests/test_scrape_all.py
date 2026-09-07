@@ -180,7 +180,8 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         mock_dataframe.itertuples.return_value = []
         mock_scrape_jobs.return_value = mock_dataframe
 
-        pipeline_result = run_orchestration()
+        with patch("scrape_all.KEYWORDS", ["backend engineer"]):
+            pipeline_result = run_orchestration()
 
         self.assertIn("manifest", pipeline_result)
         mock_process_company.assert_any_call("airbnb", "greenhouse", "run-test-123")

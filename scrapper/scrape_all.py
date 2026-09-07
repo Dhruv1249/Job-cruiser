@@ -109,6 +109,8 @@ PROXY_REQUIRED_SITES = {
     Site.LINKEDIN,
 }
 
+LINKEDIN_QUERY_LOCK = threading.Lock()
+
 ATS_DETECTION_PATTERNS = [
     (re.compile(r"(?:boards|job-boards|boards\.eu)\.greenhouse\.io/([^/?#]+)"), "greenhouse"),
     (re.compile(r"jobs\.lever\.co/([^/?#]+)"), "lever"),
@@ -767,11 +769,13 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                         scraping_arguments["country_indeed"] = "india"
                     if target_site == Site.LINKEDIN:
                         scraping_arguments["linkedin_fetch_description"] = False
-                    if target_site in PROXY_REQUIRED_SITES and PROXIES:
-                        scraping_arguments["proxies"] = PROXIES
-
-                    future_result = sub_executor.submit(scrape_jobs, **scraping_arguments)
-                    scraped_dataframe = future_result.result(timeout=REQUEST_TIMEOUT)
+                        with LINKEDIN_QUERY_LOCK:
+                            future_result = sub_executor.submit(scrape_jobs, **scraping_arguments)
+                            scraped_dataframe = future_result.result(timeout=REQUEST_TIMEOUT)
+                            time.sleep(2.0)
+                    else:
+                        future_result = sub_executor.submit(scrape_jobs, **scraping_arguments)
+                        scraped_dataframe = future_result.result(timeout=REQUEST_TIMEOUT)
                     sub_executor.shutdown(wait=False)
                 except Exception as execution_err:
                     caught_error = str(execution_err)
