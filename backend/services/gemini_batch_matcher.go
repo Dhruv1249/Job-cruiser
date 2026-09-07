@@ -273,6 +273,11 @@ func (s *GeminiBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context
 		return
 	}
 
+	if IsScraperRunActive(ctx, s.DB) {
+		log.Println("[GeminiBatchMatchService] Scraper run is currently active, deferring evaluation until scraper finishes.")
+		return
+	}
+
 	pendingJobs, errJobs := fetchRecentUnevaluatedJobs(ctx, s.DB)
 	if errJobs != nil {
 		log.Printf("[GeminiBatchMatchService] Failed to fetch unevaluated jobs: %v", errJobs)

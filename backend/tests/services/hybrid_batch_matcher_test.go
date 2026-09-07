@@ -119,6 +119,16 @@ func TestNvidiaNimServiceEvaluatePendingForAllUsersNilDB(t *testing.T) {
 }
 
 /*
+TestIsScraperRunActiveNilDB verifies that IsScraperRunActive returns false when database pool is nil.
+*/
+func TestIsScraperRunActiveNilDB(t *testing.T) {
+	active := services.IsScraperRunActive(context.Background(), nil)
+	if active {
+		t.Fatalf("expected IsScraperRunActive to return false on nil database pool")
+	}
+}
+
+/*
 TestHybridBatchMatchServiceResetPipeline verifies that ResetPipeline clears stopped state across all engines.
 */
 func TestHybridBatchMatchServiceResetPipeline(t *testing.T) {

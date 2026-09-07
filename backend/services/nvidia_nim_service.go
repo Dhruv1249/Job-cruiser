@@ -435,6 +435,11 @@ func (s *NvidiaNimService) EvaluatePendingForAllUsersWithResult(ctx context.Cont
 		return true
 	}
 
+	if IsScraperRunActive(ctx, s.DB) {
+		log.Println("[NvidiaNimService] Scraper run is currently active, deferring evaluation until scraper finishes.")
+		return true
+	}
+
 	pendingJobs, errJobs := fetchRecentUnevaluatedJobs(ctx, s.DB)
 	if errJobs != nil || len(pendingJobs) == 0 {
 		for _, profile := range userProfiles {
@@ -1383,6 +1388,20 @@ func fetchSingleUserProfileByID(ctx context.Context, databasePool *pgxpool.Pool,
 	}
 	item.ExperienceYears = calculateTotalExperienceYears(item.MasterCVText)
 	return &item, nil
+}
+
+// IsScraperRunActive checks whether a scraper run is currently in progress within the last two hours.
+func IsScraperRunActive(ctx context.Context, databasePool *pgxpool.Pool) bool {
+	if databasePool == nil {
+		return false
+	}
+	var isActive bool
+	query := `SELECT EXISTS (SELECT 1 FROM scraper_runs WHERE status = 'running' AND started_at >= NOW() - INTERVAL '2 hours');`
+	queryError := databasePool.QueryRow(ctx, query).Scan(&isActive)
+	if queryError != nil {
+		return false
+	}
+	return isActive
 }
 
 func fetchRecentUnevaluatedJobs(ctx context.Context, databasePool *pgxpool.Pool) ([]JobSnippetData, error) {

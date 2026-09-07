@@ -573,29 +573,21 @@ def process_company(company_slug: str, platform_name: str, run_id: str | None = 
     }
 
 
-def enrich_linkedin_descriptions(cooldown_seconds: int = 180, max_jobs: int = 50) -> int:
+def enrich_linkedin_descriptions(
+    cooldown_seconds: int = 60,
+    batch_size: int = 50,
+    max_jobs: int | None = None,
+) -> int:
     """
-    Fetches job descriptions for LinkedIn jobs with empty descriptions after a rate-limit cooldown.
+    Fetches job descriptions for LinkedIn jobs with empty descriptions in batches after a rate-limit cooldown.
     """
-    if max_jobs <= 0:
+    if max_jobs is not None and max_jobs <= 0:
         return 0
 
     request_headers = {
         "X-Ingest-Key": INGEST_API_KEY,
     }
-    pending_endpoint = f"{BACKEND_API_URL}/scraper/jobs-without-description?source=linkedin&limit={max_jobs}"
-    try:
-        response = requests.get(pending_endpoint, headers=request_headers, timeout=15)
-        if response.status_code != 200:
-            return 0
-        pending_jobs = response.json().get("data", [])
-    except Exception:
-        return 0
 
-    if not pending_jobs:
-        return 0
-
-    print(f"[Enrichment] Found {len(pending_jobs)} LinkedIn jobs awaiting descriptions.", flush=True)
     if cooldown_seconds > 0:
         print(f"[Enrichment] Waiting {cooldown_seconds}s cooldown before fetching LinkedIn descriptions...", flush=True)
         time.sleep(cooldown_seconds)
@@ -609,86 +601,141 @@ def enrich_linkedin_descriptions(cooldown_seconds: int = 180, max_jobs: int = 50
         }
     )
 
-    enriched_updates = []
+    total_enriched_count = 0
+    attempted_job_identifiers = set()
     consecutive_rate_limits = 0
 
-    for job_item in pending_jobs:
-        job_id = job_item.get("id")
-        job_url = job_item.get("url", "")
-        if not job_id or not job_url:
-            continue
+    while True:
+        if max_jobs is not None and total_enriched_count >= max_jobs:
+            break
 
-        linkedin_id_match = re.search(r"/view/(?:[a-zA-Z0-9-]+-)?(\d+)", job_url)
-        if not linkedin_id_match:
-            continue
-        linkedin_job_id = linkedin_id_match.group(1)
+        current_batch_limit = batch_size
+        if max_jobs is not None:
+            remaining_quota = max_jobs - total_enriched_count
+            current_batch_limit = min(batch_size, remaining_quota)
 
+        pending_endpoint = (
+            f"{BACKEND_API_URL}/scraper/jobs-without-description?source=linkedin&limit={current_batch_limit}"
+        )
         try:
-            detail_response = enrichment_session.get(
-                f"https://www.linkedin.com/jobs/view/{linkedin_job_id}",
-                timeout=12,
-            )
-            if detail_response.status_code == 429:
-                consecutive_rate_limits += 1
-                if consecutive_rate_limits >= 2:
-                    print("[Enrichment] Encountered 429 rate limit twice, halting enrichment pass.", flush=True)
-                    break
-                time.sleep(10)
+            response = requests.get(pending_endpoint, headers=request_headers, timeout=15)
+            if response.status_code != 200:
+                break
+            pending_jobs = response.json().get("data", [])
+        except Exception:
+            break
+
+        unattempted_jobs = [
+            job_record for job_record in pending_jobs if job_record.get("id") not in attempted_job_identifiers
+        ]
+        if not unattempted_jobs:
+            break
+
+        print(
+            f"[Enrichment] Found {len(unattempted_jobs)} pending LinkedIn jobs awaiting descriptions.",
+            flush=True,
+        )
+
+        batch_enriched_updates = []
+        for job_record in unattempted_jobs:
+            if max_jobs is not None and total_enriched_count + len(batch_enriched_updates) >= max_jobs:
+                break
+
+            job_identifier = job_record.get("id")
+            job_url = job_record.get("url", "")
+            if not job_identifier:
                 continue
 
-            consecutive_rate_limits = 0
-            if detail_response.status_code == 200:
-                blocked_redirect_markers = [
-                    "linkedin.com/signup",
-                    "linkedin.com/authwall",
-                    "linkedin.com/checkpoint",
-                    "expired_jd_redirect",
-                ]
-                if any(marker in detail_response.url for marker in blocked_redirect_markers):
+            attempted_job_identifiers.add(job_identifier)
+
+            if not job_url:
+                continue
+
+            linkedin_id_match = re.search(r"/view/(?:[a-zA-Z0-9-]+-)?(\d+)", job_url)
+            if not linkedin_id_match:
+                continue
+            linkedin_job_identifier = linkedin_id_match.group(1)
+
+            try:
+                detail_response = enrichment_session.get(
+                    f"https://www.linkedin.com/jobs/view/{linkedin_job_identifier}",
+                    timeout=12,
+                )
+                if detail_response.status_code == 429:
+                    consecutive_rate_limits += 1
+                    if consecutive_rate_limits >= 2:
+                        print(
+                            "[Enrichment] Encountered 429 rate limit twice, halting enrichment pass.",
+                            flush=True,
+                        )
+                        break
+                    time.sleep(10)
                     continue
 
-                detail_soup = BeautifulSoup(detail_response.text, "html.parser")
-                description_element = detail_soup.find(
-                    "div", class_=lambda class_name: class_name and "show-more-less-html__markup" in class_name
-                )
-                if description_element is None:
-                    description_element = detail_soup.select_one(".description__text") or detail_soup.select_one(".show-more-less-html")
+                consecutive_rate_limits = 0
+                if detail_response.status_code == 200:
+                    blocked_redirect_markers = [
+                        "linkedin.com/signup",
+                        "linkedin.com/authwall",
+                        "linkedin.com/checkpoint",
+                        "expired_jd_redirect",
+                    ]
+                    if any(marker in detail_response.url for marker in blocked_redirect_markers):
+                        continue
+
+                    detail_soup = BeautifulSoup(detail_response.text, "html.parser")
+                    description_element = detail_soup.find(
+                        "div",
+                        class_=lambda class_name: class_name and "show-more-less-html__markup" in class_name,
+                    )
+                    if description_element is None:
+                        description_element = detail_soup.select_one(
+                            ".description__text"
+                        ) or detail_soup.select_one(".show-more-less-html")
+                        if description_element is not None:
+                            for button_element in description_element.find_all(
+                                ["button", "span"],
+                                class_=lambda class_name: class_name and "show-more-less" in class_name,
+                            ):
+                                button_element.decompose()
+
                     if description_element is not None:
-                        for button_element in description_element.find_all(
-                            ["button", "span"], class_=lambda class_name: class_name and "show-more-less" in class_name
-                        ):
-                            button_element.decompose()
+                        description_text = description_element.get_text("\n", strip=True)
+                        if description_text:
+                            batch_enriched_updates.append(
+                                {
+                                    "id": job_identifier,
+                                    "description_text": description_text,
+                                }
+                            )
 
-                if description_element is not None:
-                    description_text = description_element.get_text("\n", strip=True)
-                    if description_text:
-                        enriched_updates.append(
-                            {
-                                "id": job_id,
-                                "description_text": description_text,
-                            }
-                        )
+            except Exception:
+                pass
 
-        except Exception:
-            pass
+            time.sleep(2.5)
 
-        time.sleep(2.5)
+        if batch_enriched_updates:
+            enrich_endpoint = f"{BACKEND_API_URL}/scraper/enrich-descriptions"
+            try:
+                update_response = requests.post(
+                    enrich_endpoint,
+                    json={"updates": batch_enriched_updates},
+                    headers=request_headers,
+                    timeout=20,
+                )
+                if update_response.status_code == 200:
+                    total_enriched_count += len(batch_enriched_updates)
+                    print(
+                        f"[Enrichment] Successfully updated {len(batch_enriched_updates)} LinkedIn job descriptions ({total_enriched_count} total).",
+                        flush=True,
+                    )
+            except Exception:
+                pass
 
-    if enriched_updates:
-        enrich_endpoint = f"{BACKEND_API_URL}/scraper/enrich-descriptions"
-        try:
-            update_response = requests.post(
-                enrich_endpoint,
-                json={"updates": enriched_updates},
-                headers=request_headers,
-                timeout=20,
-            )
-            if update_response.status_code == 200:
-                print(f"[Enrichment] Successfully updated {len(enriched_updates)} LinkedIn job descriptions.", flush=True)
-        except Exception:
-            pass
+        if consecutive_rate_limits >= 2:
+            break
 
-    return len(enriched_updates)
+    return total_enriched_count
 
 
 def run_orchestration(target_platform: str | None = None) -> dict:
@@ -755,7 +802,7 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                         "site_name": [target_site],
                         "search_term": search_query,
                         "results_wanted": 200,
-                        "hours_old": 12,
+                        "hours_old": 24,
                     }
                     if target_site == Site.DIRECT_CAREERS:
                         scraping_arguments["results_wanted"] = 5000
@@ -920,14 +967,14 @@ def run_orchestration(target_platform: str | None = None) -> dict:
 
         save_json(run_manifest, DATA_DIR / "manifest.json")
 
-        if run_identifier:
-            finish_run(run_identifier, "success")
-
         if target_platform is None or target_platform == Site.LINKEDIN.value:
             try:
                 enrich_linkedin_descriptions()
             except Exception as enrichment_err:
                 print(f"[Enrichment] Enrichment pass failed: {enrichment_err}", flush=True)
+
+        if run_identifier:
+            finish_run(run_identifier, "success")
 
         return {"status": "success", "manifest": run_manifest, "source_stats": source_statistics}
 

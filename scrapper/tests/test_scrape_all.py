@@ -289,6 +289,118 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         self.assertIn("Go engineer", post_kwargs["json"]["updates"][0]["description_text"])
         self.assertNotIn("Show more", post_kwargs["json"]["updates"][0]["description_text"])
 
+    @patch("scrape_all.time.sleep")
+    @patch("requests.post")
+    @patch("requests.Session")
+    @patch("requests.get")
+    def test_enrich_linkedin_descriptions_multiple_batches(
+        self,
+        mock_requests_get,
+        mock_session_class,
+        mock_requests_post,
+        mock_sleep,
+    ):
+        """
+        Verify that enrichment iterates across multiple batches until pending jobs are exhausted.
+        """
+        batch_one_response = Mock()
+        batch_one_response.status_code = 200
+        batch_one_response.json.return_value = {
+            "data": [
+                {
+                    "id": "job-uuid-batch-1",
+                    "url": "https://www.linkedin.com/jobs/view/backend-1-11111",
+                    "title": "Backend 1",
+                }
+            ]
+        }
+
+        batch_two_response = Mock()
+        batch_two_response.status_code = 200
+        batch_two_response.json.return_value = {
+            "data": [
+                {
+                    "id": "job-uuid-batch-2",
+                    "url": "https://www.linkedin.com/jobs/view/backend-2-22222",
+                    "title": "Backend 2",
+                }
+            ]
+        }
+
+        empty_batch_response = Mock()
+        empty_batch_response.status_code = 200
+        empty_batch_response.json.return_value = {"data": []}
+
+        mock_requests_get.side_effect = [
+            batch_one_response,
+            batch_two_response,
+            empty_batch_response,
+        ]
+
+        mock_session_instance = Mock()
+        mock_detail_response = Mock()
+        mock_detail_response.status_code = 200
+        mock_detail_response.url = "https://www.linkedin.com/jobs/view/11111"
+        mock_detail_response.text = """
+        <html>
+            <body>
+                <div class="description__text">
+                    <p>Description for role.</p>
+                </div>
+            </body>
+        </html>
+        """
+        mock_session_instance.get.return_value = mock_detail_response
+        mock_session_class.return_value = mock_session_instance
+
+        mock_update_response = Mock()
+        mock_update_response.status_code = 200
+        mock_requests_post.return_value = mock_update_response
+
+        total_enriched = enrich_linkedin_descriptions(cooldown_seconds=0, batch_size=1)
+        self.assertEqual(total_enriched, 2)
+        self.assertEqual(mock_requests_post.call_count, 2)
+
+    @patch("scrape_all.time.sleep")
+    @patch("requests.post")
+    @patch("requests.Session")
+    @patch("requests.get")
+    def test_enrich_linkedin_descriptions_halts_when_batch_only_contains_attempted_jobs(
+        self,
+        mock_requests_get,
+        mock_session_class,
+        mock_requests_post,
+        mock_sleep,
+    ):
+        """
+        Verify that enrichment halts when all returned jobs in a batch were already attempted.
+        """
+        unparseable_job_response = Mock()
+        unparseable_job_response.status_code = 200
+        unparseable_job_response.json.return_value = {
+            "data": [
+                {
+                    "id": "job-uuid-authwall",
+                    "url": "https://www.linkedin.com/jobs/view/authwall-99999",
+                    "title": "Authwalled Job",
+                }
+            ]
+        }
+        mock_requests_get.return_value = unparseable_job_response
+
+        mock_session_instance = Mock()
+        mock_detail_response = Mock()
+        mock_detail_response.status_code = 200
+        mock_detail_response.url = "https://www.linkedin.com/authwall"
+        mock_detail_response.text = "<html><body>Authwall</body></html>"
+        mock_session_instance.get.return_value = mock_detail_response
+        mock_session_class.return_value = mock_session_instance
+
+        total_enriched = enrich_linkedin_descriptions(cooldown_seconds=0, batch_size=1)
+        self.assertEqual(total_enriched, 0)
+        self.assertEqual(mock_requests_get.call_count, 2)
+        mock_requests_post.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
