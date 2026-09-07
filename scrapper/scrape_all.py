@@ -575,8 +575,9 @@ def process_company(company_slug: str, platform_name: str, run_id: str | None = 
 
 def enrich_linkedin_descriptions(
     cooldown_seconds: int = 60,
-    batch_size: int = 50,
+    batch_size: int = 100,
     max_jobs: int | None = None,
+    since_minutes: int = 120,
 ) -> int:
     """
     Fetches job descriptions for LinkedIn jobs with empty descriptions in batches after a rate-limit cooldown.
@@ -615,7 +616,7 @@ def enrich_linkedin_descriptions(
             current_batch_limit = min(batch_size, remaining_quota)
 
         pending_endpoint = (
-            f"{BACKEND_API_URL}/scraper/jobs-without-description?source=linkedin&limit={current_batch_limit}"
+            f"{BACKEND_API_URL}/scraper/jobs-without-description?source=linkedin&limit={current_batch_limit}&since_minutes={since_minutes}"
         )
         try:
             response = requests.get(pending_endpoint, headers=request_headers, timeout=15)
@@ -712,7 +713,7 @@ def enrich_linkedin_descriptions(
             except Exception:
                 pass
 
-            time.sleep(2.5)
+            time.sleep(1.0)
 
         if batch_enriched_updates:
             enrich_endpoint = f"{BACKEND_API_URL}/scraper/enrich-descriptions"
@@ -968,8 +969,17 @@ def run_orchestration(target_platform: str | None = None) -> dict:
         save_json(run_manifest, DATA_DIR / "manifest.json")
 
         if target_platform is None or target_platform == Site.LINKEDIN.value:
+            current_run_linkedin_count = sum(
+                1 for job_record in deduplicated_job_records
+                if job_record.get("source") == Site.LINKEDIN.value or job_record.get("source") == "linkedin"
+            )
             try:
-                enrich_linkedin_descriptions()
+                enrich_linkedin_descriptions(
+                    cooldown_seconds=60,
+                    batch_size=100,
+                    max_jobs=current_run_linkedin_count,
+                    since_minutes=120,
+                )
             except Exception as enrichment_err:
                 print(f"[Enrichment] Enrichment pass failed: {enrichment_err}", flush=True)
 

@@ -681,20 +681,28 @@ type EnrichJobDescriptionsRequest struct {
 
 func (h *IngestHandler) GetJobsWithoutDescription(c *gin.Context) {
 	source := c.DefaultQuery("source", "linkedin")
-	limitStr := c.DefaultQuery("limit", "50")
-	limit := 50
-	if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 && parsedLimit <= 100 {
+	limitStr := c.DefaultQuery("limit", "100")
+	limit := 100
+	if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 && parsedLimit <= 200 {
 		limit = parsedLimit
+	}
+
+	sinceMinutesStr := c.DefaultQuery("since_minutes", "120")
+	sinceMinutes := 120
+	if parsedSinceMinutes, err := strconv.Atoi(sinceMinutesStr); err == nil && parsedSinceMinutes > 0 {
+		sinceMinutes = parsedSinceMinutes
 	}
 
 	query := `
 		SELECT id, url, title
 		FROM jobs
-		WHERE source = $1 AND (raw_desc IS NULL OR raw_desc = '')
+		WHERE source = $1 
+		  AND (raw_desc IS NULL OR raw_desc = '')
+		  AND scraped_at >= NOW() - ($3 || ' minutes')::interval
 		ORDER BY scraped_at DESC
 		LIMIT $2;
 	`
-	rows, err := h.DB.Query(c.Request.Context(), query, source, limit)
+	rows, err := h.DB.Query(c.Request.Context(), query, source, limit, strconv.Itoa(sinceMinutes))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query pending description jobs"})
 		return
