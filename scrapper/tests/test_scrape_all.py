@@ -3,7 +3,7 @@ Unit tests for the job search scraper orchestrator module.
 """
 
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, ANY
 from jobspy.model import Site
 from scrape_all import (
     normalize_job_post,
@@ -186,7 +186,7 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         self.assertIn("manifest", pipeline_result)
         mock_process_company.assert_any_call("airbnb", "greenhouse", "run-test-123")
         mock_process_company.assert_any_call("spotify", "lever", "run-test-123")
-        mock_finish_run.assert_called_once_with("run-test-123", "success")
+        mock_finish_run.assert_called_once_with("run-test-123", "success", None, ANY, ANY)
         mock_enrich.assert_called_once()
 
     @patch("scrape_all.enrich_linkedin_descriptions")
