@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import os
+import random
 import re
 import sys
 import threading
@@ -754,14 +755,100 @@ def process_direct_career_company(
     }
 
 
+def fetch_single_linkedin_description(
+    job_record: dict,
+    enrichment_session: requests.Session,
+    halt_event: threading.Event | None = None,
+) -> tuple[dict | None, int]:
+    """
+    Fetches and parses a single LinkedIn job description with random jitter delay.
+    """
+    if halt_event is not None and halt_event.is_set():
+        return None, 429
+
+    job_identifier = job_record.get("id")
+    job_url = job_record.get("url", "")
+    if not job_identifier or not job_url:
+        return None, 200
+
+    linkedin_id_match = re.search(r"/view/(?:[a-zA-Z0-9-]+-)?(\d+)", job_url)
+    if not linkedin_id_match:
+        return None, 200
+    linkedin_job_identifier = linkedin_id_match.group(1)
+
+    logger.debug(f"[enrichment] Fetching description for job {job_identifier} ({job_url})")
+    time.sleep(random.uniform(0.3, 0.8))
+
+    if halt_event is not None and halt_event.is_set():
+        return None, 429
+
+    try:
+        detail_response = enrichment_session.get(
+            f"https://www.linkedin.com/jobs/view/{linkedin_job_identifier}",
+            timeout=12,
+        )
+        if detail_response.status_code == 429:
+            logger.warning(f"[enrichment] Rate limited (429) on job {job_identifier}")
+            return None, 429
+
+        if detail_response.status_code != 200:
+            return None, detail_response.status_code
+
+        blocked_redirect_markers = [
+            "linkedin.com/signup",
+            "linkedin.com/authwall",
+            "linkedin.com/checkpoint",
+            "expired_jd_redirect",
+        ]
+        if any(marker in detail_response.url for marker in blocked_redirect_markers):
+            logger.info(f"[enrichment] Job {job_identifier} redirected to auth wall, skipping")
+            return None, 200
+
+        detail_soup = BeautifulSoup(detail_response.text, "html.parser")
+        description_element = detail_soup.find(
+            "div",
+            class_=lambda class_name: class_name and "show-more-less-html__markup" in class_name,
+        )
+        if description_element is None:
+            description_element = detail_soup.select_one(
+                ".description__text"
+            ) or detail_soup.select_one(".show-more-less-html")
+
+        if description_element is not None:
+            for button_element in description_element.find_all(
+                ["button", "span"],
+                class_=lambda class_name: class_name and "show-more-less" in class_name,
+            ):
+                button_element.decompose()
+
+            description_text = description_element.get_text("\n", strip=True)
+            if description_text:
+                logger.debug(f"[enrichment] Got description for job {job_identifier} ({len(description_text)} chars)")
+                return {
+                    "id": job_identifier,
+                    "description_text": description_text,
+                }, 200
+            else:
+                logger.debug(f"[enrichment] No description element found for job {job_identifier}")
+                return None, 200
+        else:
+            logger.debug(f"[enrichment] No description element found for job {job_identifier}")
+            return None, 200
+
+    except Exception as fetch_error:
+        logger.error(f"[enrichment] Exception on job {job_identifier}: {type(fetch_error).__name__}: {fetch_error}")
+        return None, 0
+
+
 def enrich_linkedin_descriptions(
     cooldown_seconds: int = 60,
     batch_size: int = 100,
     max_jobs: int | None = None,
     since_minutes: int = 120,
+    max_workers: int = 4,
 ) -> int:
     """
-    Fetches job descriptions for LinkedIn jobs with empty descriptions in batches after a rate-limit cooldown.
+    Fetches job descriptions for LinkedIn jobs with empty descriptions in parallel batches using a bounded worker pool.
     """
     if max_jobs is not None and max_jobs <= 0:
         return 0
@@ -786,8 +873,9 @@ def enrich_linkedin_descriptions(
     total_enriched_count = 0
     attempted_job_identifiers = set()
     consecutive_rate_limits = 0
+    halt_event = threading.Event()
 
-    while True:
+    while not halt_event.is_set():
         if max_jobs is not None and total_enriched_count >= max_jobs:
             break
 
@@ -816,89 +904,47 @@ def enrich_linkedin_descriptions(
 
         logger.info(f"[enrichment] Fetched batch of {len(unattempted_jobs)} pending LinkedIn jobs")
 
-        batch_enriched_updates = []
-        for job_record in unattempted_jobs:
-            if max_jobs is not None and total_enriched_count + len(batch_enriched_updates) >= max_jobs:
-                break
+        jobs_to_process = unattempted_jobs
+        if max_jobs is not None:
+            remaining_quota = max_jobs - total_enriched_count
+            jobs_to_process = unattempted_jobs[:remaining_quota]
 
+        for job_record in jobs_to_process:
             job_identifier = job_record.get("id")
-            job_url = job_record.get("url", "")
-            if not job_identifier:
-                continue
+            if job_identifier:
+                attempted_job_identifiers.add(job_identifier)
 
-            attempted_job_identifiers.add(job_identifier)
-
-            if not job_url:
-                continue
-
-            linkedin_id_match = re.search(r"/view/(?:[a-zA-Z0-9-]+-)?(\d+)", job_url)
-            if not linkedin_id_match:
-                continue
-            linkedin_job_identifier = linkedin_id_match.group(1)
-
-            logger.debug(f"[enrichment] Fetching description for job {job_identifier} ({job_url})")
-
-            try:
-                detail_response = enrichment_session.get(
-                    f"https://www.linkedin.com/jobs/view/{linkedin_job_identifier}",
-                    timeout=12,
+        batch_enriched_updates = []
+        actual_workers = max(1, min(max_workers, len(jobs_to_process)))
+        with ThreadPoolExecutor(max_workers=actual_workers) as pool_executor:
+            future_to_job = [
+                pool_executor.submit(
+                    fetch_single_linkedin_description,
+                    job_record,
+                    enrichment_session,
+                    halt_event,
                 )
-                if detail_response.status_code == 429:
+                for job_record in jobs_to_process
+            ]
+            for future in future_to_job:
+                update_payload, status_code = future.result()
+                if status_code == 429:
                     consecutive_rate_limits += 1
-                    logger.warning(f"[enrichment] Rate limited (429) on job {job_identifier}, sleeping 10s (consecutive={consecutive_rate_limits})")
+                    logger.warning(
+                        f"[enrichment] Rate limited (429), consecutive={consecutive_rate_limits}"
+                    )
                     if consecutive_rate_limits >= 2:
                         logger.info("[enrichment] Encountered 429 rate limit twice, halting enrichment pass.")
+                        halt_event.set()
+                        for pending_future in future_to_job:
+                            pending_future.cancel()
                         break
                     time.sleep(10)
                     continue
 
                 consecutive_rate_limits = 0
-                if detail_response.status_code == 200:
-                    blocked_redirect_markers = [
-                        "linkedin.com/signup",
-                        "linkedin.com/authwall",
-                        "linkedin.com/checkpoint",
-                        "expired_jd_redirect",
-                    ]
-                    if any(marker in detail_response.url for marker in blocked_redirect_markers):
-                        logger.info(f"[enrichment] Job {job_identifier} redirected to auth wall, skipping")
-                        continue
-
-                    detail_soup = BeautifulSoup(detail_response.text, "html.parser")
-                    description_element = detail_soup.find(
-                        "div",
-                        class_=lambda class_name: class_name and "show-more-less-html__markup" in class_name,
-                    )
-                    if description_element is None:
-                        description_element = detail_soup.select_one(
-                            ".description__text"
-                        ) or detail_soup.select_one(".show-more-less-html")
-                        if description_element is not None:
-                            for button_element in description_element.find_all(
-                                ["button", "span"],
-                                class_=lambda class_name: class_name and "show-more-less" in class_name,
-                            ):
-                                button_element.decompose()
-
-                    if description_element is not None:
-                        description_text = description_element.get_text("\n", strip=True)
-                        if description_text:
-                            logger.debug(f"[enrichment] Got description for job {job_identifier} ({len(description_text)} chars)")
-                            batch_enriched_updates.append(
-                                {
-                                    "id": job_identifier,
-                                    "description_text": description_text,
-                                }
-                            )
-                        else:
-                            logger.debug(f"[enrichment] No description element found for job {job_identifier}")
-                    else:
-                        logger.debug(f"[enrichment] No description element found for job {job_identifier}")
-
-            except Exception as e:
-                logger.error(f"[enrichment] Exception on job {job_identifier}: {e}")
-
-            time.sleep(1.0)
+                if update_payload is not None:
+                    batch_enriched_updates.append(update_payload)
 
         if batch_enriched_updates:
             enrich_endpoint = f"{BACKEND_API_URL}/scraper/enrich-descriptions"
@@ -917,7 +963,7 @@ def enrich_linkedin_descriptions(
             except Exception as enrich_post_error:
                 logger.error(f"[enrichment] Failed to POST description batch to backend: {type(enrich_post_error).__name__}: {enrich_post_error}")
 
-        if consecutive_rate_limits >= 2:
+        if consecutive_rate_limits >= 2 or halt_event.is_set():
             break
 
     logger.info(f"[enrichment] Pass complete: {total_enriched_count} descriptions updated")

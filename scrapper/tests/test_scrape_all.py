@@ -13,6 +13,7 @@ from scrape_all import (
     extract_ats_slug,
     sanitize_company_name,
     enrich_linkedin_descriptions,
+    fetch_single_linkedin_description,
     process_direct_career_company,
 )
 
@@ -432,6 +433,170 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         self.assertEqual(len(result["jobs"]), 1)
         self.assertEqual(result["jobs"][0]["company"], "Stripe")
         mock_stream_ingest.assert_called_once_with(result["jobs"], "run-test-dc")
+
+    @patch("scrape_all.time.sleep")
+    def test_fetch_single_linkedin_description_success(self, mock_sleep):
+        """
+        Verify fetch_single_linkedin_description extracts clean text and decomposes buttons.
+        """
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.url = "https://www.linkedin.com/jobs/view/9876543210"
+        mock_response.text = """
+        <html>
+            <body>
+                <div class="show-more-less-html__markup">
+                    <p>Seeking senior distributed systems engineer with Go and Python experience.</p>
+                    <button class="show-more-less-button">Show more</button>
+                </div>
+            </body>
+        </html>
+        """
+        mock_session.get.return_value = mock_response
+
+        job_input = {
+            "id": "job-success-1",
+            "url": "https://www.linkedin.com/jobs/view/9876543210",
+        }
+        update_result, status_code = fetch_single_linkedin_description(job_input, mock_session)
+
+        self.assertEqual(status_code, 200)
+        self.assertIsNotNone(update_result)
+        self.assertEqual(update_result["id"], "job-success-1")
+        self.assertIn("distributed systems", update_result["description_text"])
+        self.assertNotIn("Show more", update_result["description_text"])
+
+    @patch("scrape_all.time.sleep")
+    def test_fetch_single_linkedin_description_authwall(self, mock_sleep):
+        """
+        Verify fetch_single_linkedin_description skips jobs redirecting to LinkedIn authwalls.
+        """
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.url = "https://www.linkedin.com/authwall?trk=bf"
+        mock_response.text = "<html><body>Authwall</body></html>"
+        mock_session.get.return_value = mock_response
+
+        job_input = {
+            "id": "job-authwall-1",
+            "url": "https://www.linkedin.com/jobs/view/1234567890",
+        }
+        update_result, status_code = fetch_single_linkedin_description(job_input, mock_session)
+
+        self.assertEqual(status_code, 200)
+        self.assertIsNone(update_result)
+
+    @patch("scrape_all.time.sleep")
+    def test_fetch_single_linkedin_description_rate_limited(self, mock_sleep):
+        """
+        Verify fetch_single_linkedin_description returns 429 status code when rate limited.
+        """
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.status_code = 429
+        mock_response.url = "https://www.linkedin.com/jobs/view/1122334455"
+        mock_session.get.return_value = mock_response
+
+        job_input = {
+            "id": "job-rate-limited-1",
+            "url": "https://www.linkedin.com/jobs/view/1122334455",
+        }
+        update_result, status_code = fetch_single_linkedin_description(job_input, mock_session)
+
+        self.assertEqual(status_code, 429)
+        self.assertIsNone(update_result)
+
+    @patch("scrape_all.time.sleep")
+    @patch("requests.post")
+    @patch("requests.Session")
+    @patch("requests.get")
+    def test_enrich_linkedin_descriptions_parallel_workers(
+        self,
+        mock_requests_get,
+        mock_session_class,
+        mock_requests_post,
+        mock_sleep,
+    ):
+        """
+        Verify enrichment with bounded worker pool processes multiple jobs in parallel and posts updates.
+        """
+        mock_pending_response = Mock()
+        mock_pending_response.status_code = 200
+        mock_pending_response.json.return_value = {
+            "data": [
+                {
+                    "id": f"job-parallel-{index}",
+                    "url": f"https://www.linkedin.com/jobs/view/{1000 + index}",
+                    "title": f"Role {index}",
+                }
+                for index in range(4)
+            ]
+        }
+        mock_empty_response = Mock()
+        mock_empty_response.status_code = 200
+        mock_empty_response.json.return_value = {"data": []}
+        mock_requests_get.side_effect = [mock_pending_response, mock_empty_response]
+
+        mock_session_instance = Mock()
+        mock_detail_response = Mock()
+        mock_detail_response.status_code = 200
+        mock_detail_response.url = "https://www.linkedin.com/jobs/view/1000"
+        mock_detail_response.text = """
+        <html><body><div class="description__text">Software Engineer description</div></body></html>
+        """
+        mock_session_instance.get.return_value = mock_detail_response
+        mock_session_class.return_value = mock_session_instance
+
+        mock_update_response = Mock()
+        mock_update_response.status_code = 200
+        mock_requests_post.return_value = mock_update_response
+
+        total_enriched = enrich_linkedin_descriptions(cooldown_seconds=0, max_workers=4)
+        self.assertEqual(total_enriched, 4)
+        mock_requests_post.assert_called_once()
+        post_kwargs = mock_requests_post.call_args[1]
+        self.assertEqual(len(post_kwargs["json"]["updates"]), 4)
+
+    @patch("scrape_all.time.sleep")
+    @patch("requests.post")
+    @patch("requests.Session")
+    @patch("requests.get")
+    def test_enrich_linkedin_descriptions_halts_on_consecutive_rate_limits(
+        self,
+        mock_requests_get,
+        mock_session_class,
+        mock_requests_post,
+        mock_sleep,
+    ):
+        """
+        Verify enrichment stops processing when encountering consecutive 429 rate limit responses.
+        """
+        mock_pending_response = Mock()
+        mock_pending_response.status_code = 200
+        mock_pending_response.json.return_value = {
+            "data": [
+                {
+                    "id": f"job-rate-limited-{index}",
+                    "url": f"https://www.linkedin.com/jobs/view/{2000 + index}",
+                    "title": f"Role {index}",
+                }
+                for index in range(4)
+            ]
+        }
+        mock_requests_get.return_value = mock_pending_response
+
+        mock_session_instance = Mock()
+        mock_detail_response = Mock()
+        mock_detail_response.status_code = 429
+        mock_detail_response.url = "https://www.linkedin.com/jobs/view/2000"
+        mock_session_instance.get.return_value = mock_detail_response
+        mock_session_class.return_value = mock_session_instance
+
+        total_enriched = enrich_linkedin_descriptions(cooldown_seconds=0, max_workers=2)
+        self.assertEqual(total_enriched, 0)
+        mock_requests_post.assert_not_called()
 
 
 if __name__ == "__main__":
