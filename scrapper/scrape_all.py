@@ -759,9 +759,10 @@ def fetch_single_linkedin_description(
     job_record: dict,
     enrichment_session: requests.Session,
     halt_event: threading.Event | None = None,
+    proxy_url: str | None = None,
 ) -> tuple[dict | None, int]:
     """
-    Fetches and parses a single LinkedIn job description with random jitter delay.
+    Fetches and parses a single LinkedIn job description with random jitter delay and optional proxy routing.
     """
     if halt_event is not None and halt_event.is_set():
         return None, 429
@@ -776,16 +777,21 @@ def fetch_single_linkedin_description(
         return None, 200
     linkedin_job_identifier = linkedin_id_match.group(1)
 
-    logger.debug(f"[enrichment] Fetching description for job {job_identifier} ({job_url})")
-    time.sleep(random.uniform(0.3, 0.8))
+    logger.debug(f"[enrichment] Fetching description for job {job_identifier} ({job_url}) via proxy={proxy_url or 'direct'}")
+    time.sleep(random.uniform(1.0, 1.6))
 
     if halt_event is not None and halt_event.is_set():
         return None, 429
+
+    request_proxies = None
+    if proxy_url:
+        request_proxies = {"http": proxy_url, "https": proxy_url}
 
     try:
         detail_response = enrichment_session.get(
             f"https://www.linkedin.com/jobs/view/{linkedin_job_identifier}",
             timeout=12,
+            proxies=request_proxies,
         )
         if detail_response.status_code == 429:
             logger.warning(f"[enrichment] Rate limited (429) on job {job_identifier}")
@@ -841,17 +847,20 @@ def fetch_single_linkedin_description(
 
 
 def enrich_linkedin_descriptions(
-    cooldown_seconds: int = 60,
-    batch_size: int = 100,
+    cooldown_seconds: int = 15,
+    batch_size: int = 50,
     max_jobs: int | None = None,
-    since_minutes: int = 120,
-    max_workers: int = 4,
+    since_minutes: int = 1440,
+    max_workers: int | None = None,
 ) -> int:
     """
-    Fetches job descriptions for LinkedIn jobs with empty descriptions in parallel batches using a bounded worker pool.
+    Fetches job descriptions for LinkedIn jobs with empty descriptions using paced execution, dynamic proxy routing, and backoff.
     """
     if max_jobs is not None and max_jobs <= 0:
         return 0
+
+    available_routes = [None] + PROXIES
+    effective_max_workers = max_workers if max_workers is not None else len(available_routes)
 
     request_headers = {
         "X-Ingest-Key": INGEST_API_KEY,
@@ -915,7 +924,7 @@ def enrich_linkedin_descriptions(
                 attempted_job_identifiers.add(job_identifier)
 
         batch_enriched_updates = []
-        actual_workers = max(1, min(max_workers, len(jobs_to_process)))
+        actual_workers = max(1, min(effective_max_workers, len(jobs_to_process)))
         with ThreadPoolExecutor(max_workers=actual_workers) as pool_executor:
             future_to_job = [
                 pool_executor.submit(
@@ -923,8 +932,9 @@ def enrich_linkedin_descriptions(
                     job_record,
                     enrichment_session,
                     halt_event,
+                    available_routes[job_index % len(available_routes)],
                 )
-                for job_record in jobs_to_process
+                for job_index, job_record in enumerate(jobs_to_process)
             ]
             for future in future_to_job:
                 update_payload, status_code = future.result()
@@ -933,13 +943,15 @@ def enrich_linkedin_descriptions(
                     logger.warning(
                         f"[enrichment] Rate limited (429), consecutive={consecutive_rate_limits}"
                     )
-                    if consecutive_rate_limits >= 2:
-                        logger.info("[enrichment] Encountered 429 rate limit twice, halting enrichment pass.")
+                    if consecutive_rate_limits >= 2 * len(available_routes):
+                        logger.info(
+                            f"[enrichment] Encountered 429 rate limit repeatedly ({consecutive_rate_limits} times), halting enrichment pass."
+                        )
                         halt_event.set()
                         for pending_future in future_to_job:
                             pending_future.cancel()
                         break
-                    time.sleep(10)
+                    time.sleep(15)
                     continue
 
                 consecutive_rate_limits = 0
@@ -1177,6 +1189,16 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                     }
                 )
 
+            for completed_future in as_completed(board_futures):
+                completed_future.result()
+
+            if target_platform is None or target_platform == Site.LINKEDIN.value:
+                try:
+                    logger.info("[orchestrator] Board searches finished. Triggering LinkedIn description enrichment pass...")
+                    enrich_linkedin_descriptions(cooldown_seconds=5, max_jobs=None, since_minutes=1440, max_workers=None)
+                except Exception as enrichment_err:
+                    logger.error(f"[enrichment] Enrichment pass failed: {enrichment_err}")
+
             for completed_future in as_completed(direct_career_futures):
                 execution_result = completed_future.result()
                 run_manifest.append(
@@ -1187,9 +1209,6 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                         "status": execution_result["status"],
                     }
                 )
-
-            for completed_future in as_completed(board_futures):
-                completed_future.result()
 
             if discovery_future is not None:
                 try:
@@ -1205,16 +1224,6 @@ def run_orchestration(target_platform: str | None = None) -> dict:
         logger.info(f"[orchestrator] Saved {len(STREAM_AGGREGATED_JOBS)} raw scraped jobs to raw_jobs.json")
         logger.info(f"[orchestrator] Recorded telemetry across {len(source_statistics)} source search combinations.")
         logger.info(f"[orchestrator] Streaming ingestion complete. Total new jobs added to DB: {TOTAL_STREAM_JOBS_ADDED}")
-
-        if target_platform is None or target_platform == Site.LINKEDIN.value:
-            current_run_linkedin_count = sum(
-                1 for job_record in STREAM_AGGREGATED_JOBS
-                if job_record.get("source") == Site.LINKEDIN.value or job_record.get("source") == "linkedin"
-            )
-            try:
-                enrich_linkedin_descriptions(cooldown_seconds=15, max_jobs=300)
-            except Exception as enrichment_err:
-                logger.error(f"[enrichment] Enrichment pass failed: {enrichment_err}")
 
         logger.info(f"[orchestrator] Run complete: {len(STREAM_AGGREGATED_JOBS)} unique jobs scraped, {TOTAL_STREAM_JOBS_ADDED} new jobs ingested to DB")
         
@@ -1243,6 +1252,11 @@ if __name__ == "__main__":
     if "--test" in sys.argv:
         KEYWORDS[:] = ["golang developer", "backend engineer"]
         logger.info(f"[orchestrator] Running in TEST mode. Keywords reduced to: {KEYWORDS}")
+
+    if "--enrich-only" in sys.argv:
+        logger.info("[orchestrator] Running LinkedIn description enrichment backfill...")
+        enrich_linkedin_descriptions(cooldown_seconds=0, batch_size=50, max_jobs=None, since_minutes=2880, max_workers=None)
+        sys.exit(0)
 
     selected_platform = None
     for arg_index, arg_value in enumerate(sys.argv):

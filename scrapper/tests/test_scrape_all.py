@@ -598,6 +598,92 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         self.assertEqual(total_enriched, 0)
         mock_requests_post.assert_not_called()
 
+    @patch("scrape_all.time.sleep")
+    def test_fetch_single_linkedin_description_routes_via_proxy(self, mock_sleep):
+        """
+        Verify fetch_single_linkedin_description passes proxy dictionary to requests.
+        """
+        mock_session = Mock()
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.url = "https://www.linkedin.com/jobs/view/7788990011"
+        mock_response.text = "<html><body><div class='description__text'>Proxy routed job</div></body></html>"
+        mock_session.get.return_value = mock_response
+
+        job_input = {
+            "id": "job-proxy-1",
+            "url": "https://www.linkedin.com/jobs/view/7788990011",
+        }
+        update_result, status_code = fetch_single_linkedin_description(
+            job_input, mock_session, proxy_url="http://34.120.50.10:8888"
+        )
+
+        self.assertEqual(status_code, 200)
+        self.assertIsNotNone(update_result)
+        mock_session.get.assert_called_once()
+        call_kwargs = mock_session.get.call_args[1]
+        self.assertEqual(
+            call_kwargs.get("proxies"),
+            {
+                "http": "http://34.120.50.10:8888",
+                "https": "http://34.120.50.10:8888",
+            },
+        )
+
+    @patch("scrape_all.time.sleep")
+    @patch("requests.post")
+    @patch("requests.Session")
+    @patch("requests.get")
+    def test_enrich_linkedin_descriptions_dynamic_proxy_scaling(
+        self,
+        mock_requests_get,
+        mock_session_class,
+        mock_requests_post,
+        mock_sleep,
+    ):
+        """
+        Verify enrichment dynamically distributes jobs across available routes when proxies are configured.
+        """
+        mock_pending_response = Mock()
+        mock_pending_response.status_code = 200
+        mock_pending_response.json.return_value = {
+            "data": [
+                {
+                    "id": f"job-proxy-batch-{index}",
+                    "url": f"https://www.linkedin.com/jobs/view/{5000 + index}",
+                    "title": f"Proxy Role {index}",
+                }
+                for index in range(4)
+            ]
+        }
+        mock_empty_response = Mock()
+        mock_empty_response.status_code = 200
+        mock_empty_response.json.return_value = {"data": []}
+        mock_requests_get.side_effect = [mock_pending_response, mock_empty_response]
+
+        mock_session_instance = Mock()
+        mock_detail_response = Mock()
+        mock_detail_response.status_code = 200
+        mock_detail_response.url = "https://www.linkedin.com/jobs/view/5000"
+        mock_detail_response.text = "<html><body><div class='description__text'>Role description</div></body></html>"
+        mock_session_instance.get.return_value = mock_detail_response
+        mock_session_class.return_value = mock_session_instance
+
+        mock_update_response = Mock()
+        mock_update_response.status_code = 200
+        mock_requests_post.return_value = mock_update_response
+
+        configured_proxies = [
+            "http://proxy1:8888",
+            "http://proxy2:8888",
+        ]
+        with patch("scrape_all.PROXIES", configured_proxies):
+            total_enriched = enrich_linkedin_descriptions(cooldown_seconds=0, max_workers=None)
+
+        self.assertEqual(total_enriched, 4)
+        mock_requests_post.assert_called_once()
+        self.assertEqual(mock_session_instance.get.call_count, 4)
+
 
 if __name__ == "__main__":
     unittest.main()
