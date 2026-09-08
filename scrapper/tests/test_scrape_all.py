@@ -901,11 +901,24 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
             ]
         }
         empty_batch = {"data": []}
-        mock_requests_get.side_effect = [
+        batch_sequence = [
             Mock(status_code=200, json=lambda: first_batch),
             Mock(status_code=200, json=lambda: second_batch),
             Mock(status_code=200, json=lambda: empty_batch),
         ]
+        batch_iterator = iter(batch_sequence)
+        virtual_clock_time = 100.0
+
+        def get_virtual_time():
+            return virtual_clock_time
+
+        def mock_requests_get_handler(*args, **kwargs):
+            nonlocal virtual_clock_time
+            if mock_requests_get.call_count > 1:
+                virtual_clock_time = 500.0
+            return next(batch_iterator)
+
+        mock_requests_get.side_effect = mock_requests_get_handler
 
         def simulate_fetch(job_record, session, halt_event, proxy_url):
             if "fail" in job_record["id"]:
@@ -915,8 +928,7 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         mock_fetch.side_effect = simulate_fetch
         mock_requests_post.return_value = Mock(status_code=200)
 
-        clock_ticks = [100.0, 100.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0]
-        with patch("scrape_all.time.time", side_effect=clock_ticks):
+        with patch("scrape_all.time.time", side_effect=get_virtual_time):
             with patch("scrape_all.PROXIES", ["http://recovering-proxy:8888"]):
                 total_enriched = enrich_linkedin_descriptions(cooldown_seconds=0, max_workers=2)
 
