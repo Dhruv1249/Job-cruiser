@@ -341,7 +341,11 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 		matchThresholdPercentage = 80
 	}
 
-	customLinksJSON, marshalLinksError := json.Marshal(req.CustomLinks)
+	customLinks := req.CustomLinks
+	if customLinks == nil {
+		customLinks = []CustomLinkItem{}
+	}
+	customLinksJSON, marshalLinksError := json.Marshal(customLinks)
 	if marshalLinksError != nil {
 		customLinksJSON = []byte("[]")
 	}
@@ -411,6 +415,25 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 		workModelsJSON = []byte("[]")
 	}
 
+	if experiences == nil {
+		experiences = []ParsedExperienceItem{}
+	}
+	if projects == nil {
+		projects = []ParsedProjectItem{}
+	}
+	if education == nil {
+		education = []ParsedEducationItem{}
+	}
+	if skills == nil {
+		skills = []string{}
+	}
+	if achievements == nil {
+		achievements = []ParsedAchievementItem{}
+	}
+	if certifications == nil {
+		certifications = []ParsedCertificationItem{}
+	}
+
 	experiencesJSON, _ := json.Marshal(experiences)
 	projectsJSON, _ := json.Marshal(projects)
 	educationJSON, _ := json.Marshal(education)
@@ -436,7 +459,7 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 			linkedin_url = CASE WHEN EXCLUDED.linkedin_url <> '' THEN EXCLUDED.linkedin_url ELSE user_preferences.linkedin_url END,
 			github_url = CASE WHEN EXCLUDED.github_url <> '' THEN EXCLUDED.github_url ELSE user_preferences.github_url END,
 			portfolio_url = CASE WHEN EXCLUDED.portfolio_url <> '' THEN EXCLUDED.portfolio_url ELSE user_preferences.portfolio_url END,
-			custom_links = CASE WHEN jsonb_array_length(EXCLUDED.custom_links) > 0 THEN EXCLUDED.custom_links ELSE user_preferences.custom_links END,
+			custom_links = CASE WHEN jsonb_typeof(EXCLUDED.custom_links) = 'array' AND jsonb_array_length(EXCLUDED.custom_links) > 0 THEN EXCLUDED.custom_links ELSE user_preferences.custom_links END,
 			target_roles = EXCLUDED.target_roles,
 			target_industries = EXCLUDED.target_industries,
 			target_locations = EXCLUDED.target_locations,
@@ -449,12 +472,12 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 			target_cover_letter_pages = EXCLUDED.target_cover_letter_pages,
 			match_threshold_notification_enabled = EXCLUDED.match_threshold_notification_enabled,
 			match_threshold_percentage = EXCLUDED.match_threshold_percentage,
-			experiences = CASE WHEN jsonb_array_length(EXCLUDED.experiences) > 0 THEN EXCLUDED.experiences ELSE user_preferences.experiences END,
-			projects = CASE WHEN jsonb_array_length(EXCLUDED.projects) > 0 THEN EXCLUDED.projects ELSE user_preferences.projects END,
-			education = CASE WHEN jsonb_array_length(EXCLUDED.education) > 0 THEN EXCLUDED.education ELSE user_preferences.education END,
-			skills = CASE WHEN jsonb_array_length(EXCLUDED.skills) > 0 THEN EXCLUDED.skills ELSE user_preferences.skills END,
-			achievements = CASE WHEN jsonb_array_length(EXCLUDED.achievements) > 0 THEN EXCLUDED.achievements ELSE user_preferences.achievements END,
-			certifications = CASE WHEN jsonb_array_length(EXCLUDED.certifications) > 0 THEN EXCLUDED.certifications ELSE user_preferences.certifications END,
+			experiences = CASE WHEN jsonb_typeof(EXCLUDED.experiences) = 'array' AND jsonb_array_length(EXCLUDED.experiences) > 0 THEN EXCLUDED.experiences ELSE user_preferences.experiences END,
+			projects = CASE WHEN jsonb_typeof(EXCLUDED.projects) = 'array' AND jsonb_array_length(EXCLUDED.projects) > 0 THEN EXCLUDED.projects ELSE user_preferences.projects END,
+			education = CASE WHEN jsonb_typeof(EXCLUDED.education) = 'array' AND jsonb_array_length(EXCLUDED.education) > 0 THEN EXCLUDED.education ELSE user_preferences.education END,
+			skills = CASE WHEN jsonb_typeof(EXCLUDED.skills) = 'array' AND jsonb_array_length(EXCLUDED.skills) > 0 THEN EXCLUDED.skills ELSE user_preferences.skills END,
+			achievements = CASE WHEN jsonb_typeof(EXCLUDED.achievements) = 'array' AND jsonb_array_length(EXCLUDED.achievements) > 0 THEN EXCLUDED.achievements ELSE user_preferences.achievements END,
+			certifications = CASE WHEN jsonb_typeof(EXCLUDED.certifications) = 'array' AND jsonb_array_length(EXCLUDED.certifications) > 0 THEN EXCLUDED.certifications ELSE user_preferences.certifications END,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 

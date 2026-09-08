@@ -533,9 +533,9 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget _buildPreferencesSection(BuildContext context) {
     final rawRoles = (_preferencesData?["target_roles"] as List<dynamic>? ?? [])
         .map((element) => element.toString())
-        .where((role) => role != "Any Role")
+        .where((role) => role != "Any Role" && role != "All Roles")
         .toList();
-    final rolesText = rawRoles.isNotEmpty ? rawRoles.join(", ") : "Any Role (No preference)";
+    final rolesText = rawRoles.isNotEmpty ? rawRoles.join(", ") : "All Roles";
 
     final rawIndustries = (_preferencesData?["target_industries"] as List<dynamic>? ?? [])
         .map((element) => element.toString())

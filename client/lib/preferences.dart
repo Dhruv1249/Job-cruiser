@@ -189,7 +189,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
         }
         final loadedRoles = (apiPref["target_roles"] as List? ?? [])
             .map((item) => item.toString())
-            .where((role) => role != "Any Role")
+            .where((role) => role != "Any Role" && role != "All Roles")
             .toList();
         _anyRole = loadedRoles.isEmpty;
         _currentTargets
@@ -1472,7 +1472,10 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
         onPressed: () async {
           final apiService = ApiService();
           final profile = await apiService.fetchProfile();
-          final fullName = profile?["full_name"]?.toString() ?? "";
+          final String fetchedName = profile?["full_name"]?.toString() ?? "";
+          final String fullName = fetchedName.trim().isNotEmpty && fetchedName != "User"
+              ? fetchedName
+              : "Dhruv";
 
           final int rawSalary = (_anySalary || _baseSalary <= 0)
               ? 0
@@ -1480,7 +1483,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
                   ? _baseSalary.toInt() * 100000
                   : _baseSalary.toInt() * 1000);
 
-          final targetRolesPayload = (_anyRole || _currentTargets.isEmpty) ? <String>[] : _currentTargets.toList();
+          final targetRolesPayload = (_anyRole || _currentTargets.isEmpty) ? <String>["All Roles"] : _currentTargets.toList();
           final targetIndustriesPayload = (_anyIndustry || _selectedIndustries.isEmpty) ? <String>[] : _selectedIndustries.toList();
           final targetLocationsPayload = _anyLocation || _selectedLocations.isEmpty
               ? ["Any Location"]
@@ -1489,7 +1492,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
               ? ["any"]
               : _selectedWorkModels.toList();
 
-          await apiService.savePreferences({
+          final saveSuccess = await apiService.savePreferences({
             "full_name": fullName,
             "target_roles": targetRolesPayload,
             "target_industries": targetIndustriesPayload,
@@ -1504,7 +1507,16 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
           });
 
           if (!mounted) return;
-          Navigator.pop(context, true);
+          if (saveSuccess) {
+            Navigator.pop(context, true);
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Failed to save preferences. Please check server connection."),
+                backgroundColor: AppColors.error,
+              ),
+            );
+          }
         },
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.successGreen,
