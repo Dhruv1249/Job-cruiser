@@ -375,6 +375,42 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 		}
 	}
 
+	targetRoles := req.TargetRoles
+	if targetRoles == nil {
+		targetRoles = []string{}
+	}
+	targetRolesJSON, marshalRolesError := json.Marshal(targetRoles)
+	if marshalRolesError != nil {
+		targetRolesJSON = []byte("[]")
+	}
+
+	targetIndustries := req.TargetIndustries
+	if targetIndustries == nil {
+		targetIndustries = []string{}
+	}
+	targetIndustriesJSON, marshalIndustriesError := json.Marshal(targetIndustries)
+	if marshalIndustriesError != nil {
+		targetIndustriesJSON = []byte("[]")
+	}
+
+	targetLocations := req.TargetLocations
+	if targetLocations == nil {
+		targetLocations = []string{}
+	}
+	targetLocationsJSON, marshalLocationsError := json.Marshal(targetLocations)
+	if marshalLocationsError != nil {
+		targetLocationsJSON = []byte("[]")
+	}
+
+	workModels := req.WorkModels
+	if workModels == nil {
+		workModels = []string{}
+	}
+	workModelsJSON, marshalWorkModelsError := json.Marshal(workModels)
+	if marshalWorkModelsError != nil {
+		workModelsJSON = []byte("[]")
+	}
+
 	experiencesJSON, _ := json.Marshal(experiences)
 	projectsJSON, _ := json.Marshal(projects)
 	educationJSON, _ := json.Marshal(education)
@@ -393,7 +429,7 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
 		ON CONFLICT (user_id) 
 		DO UPDATE SET 
-			full_name = CASE WHEN EXCLUDED.full_name <> '' THEN EXCLUDED.full_name ELSE user_preferences.full_name END,
+			full_name = CASE WHEN EXCLUDED.full_name <> '' AND EXCLUDED.full_name <> 'User' THEN EXCLUDED.full_name ELSE user_preferences.full_name END,
 			email = CASE WHEN EXCLUDED.email <> '' THEN EXCLUDED.email ELSE user_preferences.email END,
 			phone = CASE WHEN EXCLUDED.phone <> '' THEN EXCLUDED.phone ELSE user_preferences.phone END,
 			location = CASE WHEN EXCLUDED.location <> '' THEN EXCLUDED.location ELSE user_preferences.location END,
@@ -434,10 +470,10 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 		req.GitHubURL,
 		req.PortfolioURL,
 		customLinksJSON,
-		req.TargetRoles,
-		req.TargetIndustries,
-		req.TargetLocations,
-		req.WorkModels,
+		targetRolesJSON,
+		targetIndustriesJSON,
+		targetLocationsJSON,
+		workModelsJSON,
 		req.MinSalary,
 		req.Currency,
 		req.MasterCVText,
@@ -504,7 +540,7 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 			COALESCE(p.skills, '[]'::jsonb),
 			COALESCE(p.achievements, '[]'::jsonb),
 			COALESCE(p.certifications, '[]'::jsonb),
-			COALESCE(u.parsed_experience, ''),
+			COALESCE(u.parsed_experience::text, ''),
 			(p.user_id IS NOT NULL AND jsonb_array_length(COALESCE(p.target_roles, '[]'::jsonb)) > 0) AS has_preferences
 		FROM users u
 		LEFT JOIN user_preferences p ON u.id = p.user_id
@@ -581,44 +617,84 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 		_ = json.Unmarshal(certificationsJSON, &pref.Certifications)
 	}
 
-	if len(pref.Experiences) == 0 && len(pref.Projects) == 0 {
-		if strings.Contains(pref.MasterCVText, "--- STRUCTURED RESUME DETAILS ---") {
-			expExtracted, projExtracted, eduExtracted, skillsExtracted, achExtracted, certExtracted := ExtractStructuredResumeDetails(pref.MasterCVText)
-			pref.Experiences = expExtracted
-			pref.Projects = projExtracted
-			pref.Education = eduExtracted
-			pref.Skills = skillsExtracted
-			pref.Achievements = achExtracted
-			pref.Certifications = certExtracted
-		} else if strings.TrimSpace(rawParsedExperience) != "" {
-			var parsedResp ParsedCVResponse
-			if unmarshalErr := json.Unmarshal([]byte(rawParsedExperience), &parsedResp); unmarshalErr == nil {
-				pref.Experiences = parsedResp.Experience
-				pref.Projects = parsedResp.Projects
-				pref.Education = parsedResp.Education
-				pref.Skills = parsedResp.Skills
-				pref.Achievements = parsedResp.Achievements
-				pref.Certifications = parsedResp.Certifications
+	needsBackfill := false
+	if strings.TrimSpace(rawParsedExperience) != "" {
+		var parsedResponse ParsedCVResponse
+		if unmarshalErr := json.Unmarshal([]byte(rawParsedExperience), &parsedResponse); unmarshalErr == nil {
+			if len(pref.Experiences) == 0 && len(parsedResponse.Experience) > 0 {
+				pref.Experiences = parsedResponse.Experience
+				needsBackfill = true
+			}
+			if len(pref.Projects) == 0 && len(parsedResponse.Projects) > 0 {
+				pref.Projects = parsedResponse.Projects
+				needsBackfill = true
+			}
+			if len(pref.Education) == 0 && len(parsedResponse.Education) > 0 {
+				pref.Education = parsedResponse.Education
+				needsBackfill = true
+			}
+			if len(pref.Skills) == 0 && len(parsedResponse.Skills) > 0 {
+				pref.Skills = parsedResponse.Skills
+				needsBackfill = true
+			}
+			if len(pref.Achievements) == 0 && len(parsedResponse.Achievements) > 0 {
+				pref.Achievements = parsedResponse.Achievements
+				needsBackfill = true
+			}
+			if len(pref.Certifications) == 0 && len(parsedResponse.Certifications) > 0 {
+				pref.Certifications = parsedResponse.Certifications
+				needsBackfill = true
+			}
+			if strings.TrimSpace(pref.BioExperienceText) == "" && strings.TrimSpace(parsedResponse.BioSummary) != "" {
+				pref.BioExperienceText = strings.TrimSpace(parsedResponse.BioSummary)
 			}
 		}
+	}
 
-		if len(pref.Experiences) > 0 || len(pref.Projects) > 0 {
-			expBytes, _ := json.Marshal(pref.Experiences)
-			projBytes, _ := json.Marshal(pref.Projects)
-			eduBytes, _ := json.Marshal(pref.Education)
-			skillsBytes, _ := json.Marshal(pref.Skills)
-			achBytes, _ := json.Marshal(pref.Achievements)
-			certBytes, _ := json.Marshal(pref.Certifications)
-			go func(uID interface{}, exp, proj, edu, sk, ach, cert []byte) {
-				_, _ = h.DB.Exec(
-					context.Background(),
-					`UPDATE user_preferences 
-					 SET experiences = $1, projects = $2, education = $3, skills = $4, achievements = $5, certifications = $6 
-					 WHERE user_id = $7`,
-					exp, proj, edu, sk, ach, cert, uID,
-				)
-			}(userID, expBytes, projBytes, eduBytes, skillsBytes, achBytes, certBytes)
+	if (len(pref.Experiences) == 0 || len(pref.Projects) == 0 || len(pref.Skills) == 0) && strings.Contains(pref.MasterCVText, "--- STRUCTURED RESUME DETAILS ---") {
+		expExtracted, projExtracted, eduExtracted, skillsExtracted, achExtracted, certExtracted := ExtractStructuredResumeDetails(pref.MasterCVText)
+		if len(pref.Experiences) == 0 && len(expExtracted) > 0 {
+			pref.Experiences = expExtracted
+			needsBackfill = true
 		}
+		if len(pref.Projects) == 0 && len(projExtracted) > 0 {
+			pref.Projects = projExtracted
+			needsBackfill = true
+		}
+		if len(pref.Education) == 0 && len(eduExtracted) > 0 {
+			pref.Education = eduExtracted
+			needsBackfill = true
+		}
+		if len(pref.Skills) == 0 && len(skillsExtracted) > 0 {
+			pref.Skills = skillsExtracted
+			needsBackfill = true
+		}
+		if len(pref.Achievements) == 0 && len(achExtracted) > 0 {
+			pref.Achievements = achExtracted
+			needsBackfill = true
+		}
+		if len(pref.Certifications) == 0 && len(certExtracted) > 0 {
+			pref.Certifications = certExtracted
+			needsBackfill = true
+		}
+	}
+
+	if needsBackfill {
+		expBytes, _ := json.Marshal(pref.Experiences)
+		projBytes, _ := json.Marshal(pref.Projects)
+		eduBytes, _ := json.Marshal(pref.Education)
+		skillsBytes, _ := json.Marshal(pref.Skills)
+		achBytes, _ := json.Marshal(pref.Achievements)
+		certBytes, _ := json.Marshal(pref.Certifications)
+		go func(targetUserID interface{}, exp, proj, edu, sk, ach, cert []byte) {
+			_, _ = h.DB.Exec(
+				context.Background(),
+				`UPDATE user_preferences 
+				 SET experiences = $1, projects = $2, education = $3, skills = $4, achievements = $5, certifications = $6 
+				 WHERE user_id = $7`,
+				exp, proj, edu, sk, ach, cert, targetUserID,
+			)
+		}(userID, expBytes, projBytes, eduBytes, skillsBytes, achBytes, certBytes)
 	}
 
 	if strings.TrimSpace(pref.BioExperienceText) == "" {
@@ -630,15 +706,6 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 			}
 		} else if strings.TrimSpace(pref.MasterCVText) != "" {
 			pref.BioExperienceText = strings.TrimSpace(pref.MasterCVText)
-		}
-	}
-
-	if strings.TrimSpace(pref.BioExperienceText) == "" && strings.TrimSpace(rawParsedExperience) != "" {
-		var parsedResp ParsedCVResponse
-		if unmarshalErr := json.Unmarshal([]byte(rawParsedExperience), &parsedResp); unmarshalErr == nil {
-			if strings.TrimSpace(parsedResp.BioSummary) != "" {
-				pref.BioExperienceText = strings.TrimSpace(parsedResp.BioSummary)
-			}
 		}
 	}
 

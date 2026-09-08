@@ -59,17 +59,21 @@ type NvidiaNimService struct {
 
 // UserProfileData contains parsed candidate background data for job matching prompts.
 type UserProfileData struct {
-	UserID             string   `json:"user_id"`
-	Email              string   `json:"email"`
-	ParsedBio          string   `json:"parsed_bio"`
-	MasterCVText       string   `json:"master_cv_text"`
-	PreferredRoles     []string `json:"preferred_roles"`
-	PreferredLocations []string `json:"preferred_locations"`
-	WorkModel          string   `json:"work_model"`
+	UserID                            string   `json:"user_id"`
+	Email                             string   `json:"email"`
+	ParsedBio                         string   `json:"parsed_bio"`
+	MasterCVText                      string   `json:"master_cv_text"`
+	PreferredRoles                    []string `json:"preferred_roles"`
+	PreferredLocations                []string `json:"preferred_locations"`
+	WorkModel                         string   `json:"work_model"`
 	ExperienceYears                   int      `json:"experience_years"`
 	CurrentLocation                   string   `json:"current_location"`
 	MatchThresholdNotificationEnabled bool     `json:"match_threshold_notification_enabled"`
 	MatchThresholdPercentage          int      `json:"match_threshold_percentage"`
+	SkillsSummary                     string   `json:"skills_summary"`
+	ProjectsSummary                   string   `json:"projects_summary"`
+	WorkHistory                       string   `json:"work_history"`
+	EducationSummary                  string   `json:"education_summary"`
 }
 
 // JobSnippetData contains minimal job details sent for AI batch evaluation.
@@ -1283,10 +1287,27 @@ func buildBatchMatchUserContent(userProfiles []UserProfileData, jobsBatch []JobS
 
 	builder.WriteString("### CANDIDATE PROFILES\n")
 	for _, profile := range userProfiles {
-		combinedProfileText := profile.ParsedBio
-		if profile.MasterCVText != "" {
-			combinedProfileText += "\n\nMaster CV / Full Experience Context:\n" + profile.MasterCVText
+		var profileSections []string
+		if profile.ParsedBio != "" {
+			profileSections = append(profileSections, "Summary:\n"+profile.ParsedBio)
 		}
+		if profile.SkillsSummary != "" {
+			profileSections = append(profileSections, "Key Technical Skills:\n"+profile.SkillsSummary)
+		}
+		if profile.ProjectsSummary != "" {
+			profileSections = append(profileSections, "Featured Projects:\n"+profile.ProjectsSummary)
+		}
+		if profile.WorkHistory != "" {
+			profileSections = append(profileSections, "Work Experience:\n"+profile.WorkHistory)
+		}
+		if profile.EducationSummary != "" {
+			profileSections = append(profileSections, "Education:\n"+profile.EducationSummary)
+		}
+		if profile.MasterCVText != "" && !strings.Contains(profile.ParsedBio, profile.MasterCVText) {
+			profileSections = append(profileSections, "Additional Context:\n"+profile.MasterCVText)
+		}
+		combinedProfileText := strings.Join(profileSections, "\n\n")
+
 		candidateCurrentLocation := profile.CurrentLocation
 		if candidateCurrentLocation == "" {
 			candidateCurrentLocation = "Not specified"
@@ -1330,16 +1351,125 @@ func (s *NvidiaNimService) FetchJobsUnmatchedForUser(ctx context.Context, target
 	return fetchUnmatchedJobsForSingleUser(ctx, s.DB, targetUserID)
 }
 
+func scanCandidateProfileRecord(rowScanner interface{ Scan(dest ...any) error }) (*UserProfileData, error) {
+	var (
+		item                              UserProfileData
+		workModelsJSON                    []byte
+		skillsJSON                        []byte
+		projectsJSON                      []byte
+		experiencesJSON                   []byte
+		educationJSON                     []byte
+	)
+
+	scanErr := rowScanner.Scan(
+		&item.UserID,
+		&item.Email,
+		&item.ParsedBio,
+		&item.MasterCVText,
+		&item.PreferredRoles,
+		&item.PreferredLocations,
+		&workModelsJSON,
+		&item.ExperienceYears,
+		&item.CurrentLocation,
+		&item.MatchThresholdNotificationEnabled,
+		&item.MatchThresholdPercentage,
+		&skillsJSON,
+		&projectsJSON,
+		&experiencesJSON,
+		&educationJSON,
+	)
+	if scanErr != nil {
+		return nil, scanErr
+	}
+
+	var workModels []string
+	if len(workModelsJSON) > 0 {
+		_ = json.Unmarshal(workModelsJSON, &workModels)
+	}
+	if len(workModels) > 0 {
+		if len(workModels) == 1 && strings.EqualFold(workModels[0], "any") {
+			item.WorkModel = "Any (Remote, Hybrid, On-site)"
+		} else {
+			item.WorkModel = strings.Join(workModels, ", ")
+		}
+	} else {
+		item.WorkModel = "Any"
+	}
+
+	var rawSkills []string
+	if len(skillsJSON) > 0 {
+		_ = json.Unmarshal(skillsJSON, &rawSkills)
+	}
+	if len(rawSkills) > 0 {
+		item.SkillsSummary = strings.Join(rawSkills, ", ")
+	}
+
+	var rawProjects []candidateProjectItem
+	if len(projectsJSON) > 0 {
+		_ = json.Unmarshal(projectsJSON, &rawProjects)
+	}
+	if len(rawProjects) > 0 {
+		var projectDescriptions []string
+		for _, proj := range rawProjects {
+			projectDescriptions = append(projectDescriptions, fmt.Sprintf("- %s (%s): %s", proj.Title, strings.Join(proj.TechStack, ", "), proj.Description))
+		}
+		item.ProjectsSummary = strings.Join(projectDescriptions, "\n")
+	}
+
+	var rawExperiences []candidateExperienceItem
+	if len(experiencesJSON) > 0 {
+		_ = json.Unmarshal(experiencesJSON, &rawExperiences)
+	}
+	if len(rawExperiences) > 0 {
+		var experienceDescriptions []string
+		for _, exp := range rawExperiences {
+			experienceDescriptions = append(experienceDescriptions, fmt.Sprintf("- %s at %s (%s): %s", exp.Role, exp.Company, exp.Duration, exp.Highlights))
+		}
+		item.WorkHistory = strings.Join(experienceDescriptions, "\n")
+	}
+
+	var rawEducation []candidateEducationItem
+	if len(educationJSON) > 0 {
+		_ = json.Unmarshal(educationJSON, &rawEducation)
+	}
+	if len(rawEducation) > 0 {
+		var educationDescriptions []string
+		for _, edu := range rawEducation {
+			educationDescriptions = append(educationDescriptions, fmt.Sprintf("- %s, %s (%s, %s)", edu.Degree, edu.Institution, edu.Year, edu.Grade))
+		}
+		item.EducationSummary = strings.Join(educationDescriptions, "\n")
+	}
+
+	calculatedYoE := calculateTotalExperienceYears(item.MasterCVText)
+	if calculatedYoE == 0 && len(rawExperiences) > 0 {
+		calculatedYoE = calculateTotalExperienceYearsFromItems(rawExperiences)
+	}
+	item.ExperienceYears = calculatedYoE
+
+	return &item, nil
+}
+
 func fetchAllActiveUserProfiles(ctx context.Context, databasePool *pgxpool.Pool) ([]UserProfileData, error) {
 	if databasePool == nil {
 		return nil, fmt.Errorf("database pool is not initialized")
 	}
 	sqlQuery := `
-		SELECT u.id, u.primary_email, COALESCE(up.bio_experience_text, ''), COALESCE(up.master_cv_text, ''), COALESCE(up.target_roles, '[]'),
-		       COALESCE(up.target_locations, '[]'), COALESCE(up.work_models->>0, ''), 0,
-		       COALESCE(NULLIF(up.location, ''), NULLIF(u.location, ''), ''),
-		       COALESCE(up.match_threshold_notification_enabled, false),
-		       COALESCE(up.match_threshold_percentage, 80)
+		SELECT 
+			u.id, 
+			u.primary_email, 
+			COALESCE(NULLIF(up.bio_experience_text, ''), NULLIF(u.parsed_experience->>'bio_summary', ''), NULLIF(up.master_cv_text, ''), ''),
+			COALESCE(up.master_cv_text, ''), 
+			COALESCE(up.target_roles, '[]'::jsonb),
+			COALESCE(up.target_locations, '[]'::jsonb), 
+			COALESCE(up.work_models, '[]'::jsonb), 
+			0,
+			COALESCE(NULLIF(up.location, ''), NULLIF(u.location, ''), ''),
+			COALESCE(up.match_threshold_notification_enabled, false),
+			COALESCE(up.match_threshold_percentage, 80),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.skills, '[]'::jsonb)) > 0 THEN up.skills ELSE u.parsed_experience->'skills' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.projects, '[]'::jsonb)) > 0 THEN up.projects ELSE u.parsed_experience->'projects' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.experiences, '[]'::jsonb)) > 0 THEN up.experiences ELSE u.parsed_experience->'experience' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.education, '[]'::jsonb)) > 0 THEN up.education ELSE u.parsed_experience->'education' END, '[]'::jsonb)
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id
 		WHERE u.ai_matching_enabled = true;
@@ -1352,11 +1482,9 @@ func fetchAllActiveUserProfiles(ctx context.Context, databasePool *pgxpool.Pool)
 
 	var profiles []UserProfileData
 	for rows.Next() {
-		var item UserProfileData
-		scanErr := rows.Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.MasterCVText, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears, &item.CurrentLocation, &item.MatchThresholdNotificationEnabled, &item.MatchThresholdPercentage)
-		if scanErr == nil {
-			item.ExperienceYears = calculateTotalExperienceYears(item.MasterCVText)
-			profiles = append(profiles, item)
+		profile, scanErr := scanCandidateProfileRecord(rows)
+		if scanErr == nil && profile != nil {
+			profiles = append(profiles, *profile)
 		}
 	}
 	return profiles, nil
@@ -1367,22 +1495,28 @@ func fetchSingleUserProfileByID(ctx context.Context, databasePool *pgxpool.Pool,
 		return nil, fmt.Errorf("database pool is not initialized")
 	}
 	sqlQuery := `
-		SELECT u.id, u.primary_email, COALESCE(up.bio_experience_text, ''), COALESCE(up.master_cv_text, ''), COALESCE(up.target_roles, '[]'),
-		       COALESCE(up.target_locations, '[]'), COALESCE(up.work_models->>0, ''), 0,
-		       COALESCE(NULLIF(up.location, ''), NULLIF(u.location, ''), ''),
-		       COALESCE(up.match_threshold_notification_enabled, false),
-		       COALESCE(up.match_threshold_percentage, 80)
+		SELECT 
+			u.id, 
+			u.primary_email, 
+			COALESCE(NULLIF(up.bio_experience_text, ''), NULLIF(u.parsed_experience->>'bio_summary', ''), NULLIF(up.master_cv_text, ''), ''),
+			COALESCE(up.master_cv_text, ''), 
+			COALESCE(up.target_roles, '[]'::jsonb),
+			COALESCE(up.target_locations, '[]'::jsonb), 
+			COALESCE(up.work_models, '[]'::jsonb), 
+			0,
+			COALESCE(NULLIF(up.location, ''), NULLIF(u.location, ''), ''),
+			COALESCE(up.match_threshold_notification_enabled, false),
+			COALESCE(up.match_threshold_percentage, 80),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.skills, '[]'::jsonb)) > 0 THEN up.skills ELSE u.parsed_experience->'skills' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.projects, '[]'::jsonb)) > 0 THEN up.projects ELSE u.parsed_experience->'projects' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.experiences, '[]'::jsonb)) > 0 THEN up.experiences ELSE u.parsed_experience->'experience' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.education, '[]'::jsonb)) > 0 THEN up.education ELSE u.parsed_experience->'education' END, '[]'::jsonb)
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id
 		WHERE u.id = $1;
 	`
-	var item UserProfileData
-	scanErr := databasePool.QueryRow(ctx, sqlQuery, targetUserID).Scan(&item.UserID, &item.Email, &item.ParsedBio, &item.MasterCVText, &item.PreferredRoles, &item.PreferredLocations, &item.WorkModel, &item.ExperienceYears, &item.CurrentLocation, &item.MatchThresholdNotificationEnabled, &item.MatchThresholdPercentage)
-	if scanErr != nil {
-		return nil, scanErr
-	}
-	item.ExperienceYears = calculateTotalExperienceYears(item.MasterCVText)
-	return &item, nil
+	row := databasePool.QueryRow(ctx, sqlQuery, targetUserID)
+	return scanCandidateProfileRecord(row)
 }
 
 // IsScraperRunActive checks whether a scraper run is currently in progress within the last two hours.
@@ -1636,6 +1770,63 @@ func IsValidUUIDStringForTest(u string) bool {
 
 func SanitizeJSONResponseForTest(s string) string {
 	return sanitizeJSONResponse(s)
+}
+
+type candidateProjectItem struct {
+	Title       string   `json:"title"`
+	TechStack   []string `json:"tech_stack"`
+	Description string   `json:"description"`
+}
+
+type candidateExperienceItem struct {
+	Role       string `json:"role"`
+	Company    string `json:"company"`
+	Duration   string `json:"duration"`
+	Highlights string `json:"highlights"`
+}
+
+type candidateEducationItem struct {
+	Institution string `json:"institution"`
+	Degree      string `json:"degree"`
+	Year        string `json:"year"`
+	Grade       string `json:"grade"`
+}
+
+func calculateTotalExperienceYearsFromItems(experiencesList []candidateExperienceItem) int {
+	if len(experiencesList) == 0 {
+		return 0
+	}
+	var earliestStart time.Time
+	var latestEnd time.Time
+	hasExperience := false
+
+	for _, exp := range experiencesList {
+		start, end, parsed := parseDurationSpan(exp.Duration)
+		if !parsed {
+			continue
+		}
+		if !hasExperience {
+			earliestStart = start
+			latestEnd = end
+			hasExperience = true
+			continue
+		}
+		if start.Before(earliestStart) {
+			earliestStart = start
+		}
+		if end.After(latestEnd) {
+			latestEnd = end
+		}
+	}
+	if !hasExperience {
+		return 0
+	}
+	durationSpan := latestEnd.Sub(earliestStart)
+	years := int(durationSpan.Hours() / 24 / 365)
+	if years < 0 {
+		return 0
+	}
+	return years
 }
 
 type cvExperience struct {

@@ -352,6 +352,7 @@ var schemaQueries = []string{
 	`ALTER TABLE user_job_matches ADD COLUMN IF NOT EXISTS is_notified BOOLEAN DEFAULT false;`,
 	`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS job_id UUID REFERENCES jobs(id) ON DELETE SET NULL;`,
 	`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS reasoning TEXT;`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;`,
 }
 
 // InitSchema executes the queries in sequence.

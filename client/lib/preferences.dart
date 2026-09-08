@@ -219,9 +219,15 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             ..addAll(List<String>.from(apiPref["target_industries"] as List));
         }
         if (apiPref["target_locations"] != null && (apiPref["target_locations"] as List).isNotEmpty) {
-          _selectedLocations
-            ..clear()
-            ..addAll(List<String>.from(apiPref["target_locations"] as List));
+          final loadedLocations = List<String>.from(apiPref["target_locations"] as List);
+          if (loadedLocations.contains("Any Location")) {
+            _anyLocation = true;
+          } else {
+            _anyLocation = false;
+            _selectedLocations
+              ..clear()
+              ..addAll(loadedLocations);
+          }
         }
         if (apiPref["min_salary"] != null && (apiPref["min_salary"] as num) > 0) {
           final num val = apiPref["min_salary"] as num;
@@ -234,9 +240,15 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
           _baseSalary = 0.0;
         }
         if (apiPref["work_models"] != null && (apiPref["work_models"] as List).isNotEmpty) {
-          _selectedWorkModels
-            ..clear()
-            ..addAll(List<String>.from(apiPref["work_models"] as List));
+          final loadedWorkModels = List<String>.from(apiPref["work_models"] as List);
+          if (loadedWorkModels.contains("any")) {
+            _anyWorkModel = true;
+          } else {
+            _anyWorkModel = false;
+            _selectedWorkModels
+              ..clear()
+              ..addAll(loadedWorkModels);
+          }
         }
         if (apiPref["target_resume_pages"] != null) {
           _targetResumePages = (apiPref["target_resume_pages"] as num).toInt().clamp(1, 4);
@@ -1395,7 +1407,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
 
           final apiService = ApiService();
           final profile = await apiService.fetchProfile();
-          final fullName = profile?["full_name"] ?? "User";
+          final fullName = profile?["full_name"]?.toString() ?? "";
 
           final int rawSalary = _currency == "INR"
               ? _baseSalary.toInt() * 100000

@@ -543,3 +543,53 @@ func TestProfileUpdateBioBinding(testingContext *testing.T) {
 	}
 }
 
+// TestPreferencesBindingAndBackfill verifies JSON binding for multi-criteria preferences.
+func TestPreferencesBindingAndBackfill(testingContext *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	testBody := map[string]interface{}{
+		"full_name":         "Dhruv Dev",
+		"target_roles":      []string{"Backend Engineer", "Fullstack SDE"},
+		"target_industries": []string{"AI / ML", "Fintech"},
+		"target_locations":  []string{"India (Remote)", "Global Remote"},
+		"work_models":       []string{"remote", "hybrid"},
+		"min_salary":        120000,
+		"currency":          "USD",
+	}
+
+	jsonBytes, marshalError := json.Marshal(testBody)
+	if marshalError != nil {
+		testingContext.Fatalf("failed to marshal JSON: %v", marshalError)
+	}
+
+	router := gin.New()
+	router.POST("/preferences", func(ginContext *gin.Context) {
+		var requestPayload handlers.PreferencesRequest
+		if bindError := ginContext.ShouldBindJSON(&requestPayload); bindError != nil {
+			ginContext.JSON(http.StatusBadRequest, gin.H{"error": bindError.Error()})
+			return
+		}
+
+		if len(requestPayload.TargetRoles) != 2 || requestPayload.TargetRoles[0] != "Backend Engineer" {
+			testingContext.Errorf("unexpected target roles: %v", requestPayload.TargetRoles)
+		}
+		if len(requestPayload.WorkModels) != 2 || requestPayload.WorkModels[0] != "remote" {
+			testingContext.Errorf("unexpected work models: %v", requestPayload.WorkModels)
+		}
+		if requestPayload.MinSalary != 120000 {
+			testingContext.Errorf("unexpected min salary: %d", requestPayload.MinSalary)
+		}
+
+		ginContext.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	recorder := httptest.NewRecorder()
+	request, _ := http.NewRequest(http.MethodPost, "/preferences", bytes.NewBuffer(jsonBytes))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		testingContext.Errorf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+}
+
