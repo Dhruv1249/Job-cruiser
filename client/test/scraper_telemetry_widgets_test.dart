@@ -270,7 +270,7 @@ void main() {
           startedAt: '2026-09-08T12:00:00Z',
           finishedAt: '2026-09-08T12:05:00Z',
           status: 'completed',
-          jobsAdded: 250,
+          jobsAdded: 150,
           sourcesRaw: '{"greenhouse": 150, "lever": 100}',
           errorMessage: '',
           durationSeconds: 300,
@@ -290,11 +290,11 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('+250 jobs'));
+      await tester.tap(find.text('+150 jobs'));
       await tester.pumpAndSettle();
 
       expect(find.text('Distribution of Sources (2 sources)'), findsOneWidget);
-      expect(find.text('250 jobs discovered'), findsOneWidget);
+      expect(find.text('250 discovered • 150 left after deduplication (100 duplicates filtered)'), findsOneWidget);
       expect(find.text('GREENHOUSE'), findsOneWidget);
       expect(find.text('150 jobs'), findsOneWidget);
       expect(find.text('(60.0%)'), findsOneWidget);

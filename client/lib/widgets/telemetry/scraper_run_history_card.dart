@@ -177,18 +177,21 @@ class _ScraperRunHistoryCardState extends State<ScraperRunHistoryCard> {
                           ),
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceContainerHigh,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          '+${run.jobsAdded} jobs',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.primary,
+                      Tooltip(
+                        message: '${run.jobsAdded} jobs retained after deduplication',
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceContainerHigh,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            '+${run.jobsAdded} jobs',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.primary,
+                            ),
                           ),
                         ),
                       ),
@@ -347,14 +350,18 @@ class _ScraperRunHistoryCardState extends State<ScraperRunHistoryCard> {
 
     final totalJobsFound = distribution.fold<int>(0, (sum, stat) => sum + stat.jobsFound);
     final hasCounts = totalJobsFound > 0;
+    final duplicatesFiltered = totalJobsFound > run.jobsAdded ? totalJobsFound - run.jobsAdded : 0;
 
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
             children: [
               Text(
                 'Distribution of Sources (${distribution.length} sources)',
@@ -365,12 +372,24 @@ class _ScraperRunHistoryCardState extends State<ScraperRunHistoryCard> {
                 ),
               ),
               if (hasCounts)
-                Text(
-                  '$totalJobsFound jobs discovered',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.secondary,
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: AppColors.outlineVariant.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: Text(
+                    duplicatesFiltered > 0
+                        ? '$totalJobsFound discovered • ${run.jobsAdded} left after deduplication ($duplicatesFiltered duplicates filtered)'
+                        : '$totalJobsFound discovered • ${run.jobsAdded} left after deduplication',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primary,
+                    ),
                   ),
                 ),
             ],
