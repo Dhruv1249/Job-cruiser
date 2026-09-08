@@ -43,14 +43,14 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
   bool _anyRole = true;
   bool _anyIndustry = true;
   bool _anySalary = true;
-  bool _anyLocation = false;
-  bool _anyWorkModel = false;
+  bool _anyLocation = true;
+  bool _anyWorkModel = true;
   bool _matchThresholdNotificationEnabled = false;
   int _matchThresholdPercentage = 80;
   bool _isParsingCV = false;
   String _rawCvText = '';
 
-  final Set<String> _selectedLocations = {'India (On-site & Hybrid)', 'India (Remote)', 'Global Remote'};
+  final Set<String> _selectedLocations = {};
   final List<String> _availableLocations = [
     'India (On-site & Hybrid)',
     'India (Remote)',
@@ -66,10 +66,10 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
   final List<Map<String, String>> _achievements = [];
   final List<Map<String, String>> _certifications = [];
 
-  double _minSalary = 120.0;
-  final Set<String> _selectedRoles = {'Backend Engineer', 'Fullstack SDE'};
-  final Set<String> _selectedIndustries = {'Fintech', 'AI / ML', 'Enterprise SaaS'};
-  final Set<String> _selectedWorkModels = {'remote', 'hybrid'};
+  double _minSalary = 0.0;
+  final Set<String> _selectedRoles = {};
+  final Set<String> _selectedIndustries = {};
+  final Set<String> _selectedWorkModels = {};
   final List<String> _availableWorkModels = ['remote', 'hybrid', 'onsite'];
 
   final List<String> _availableRoles = [
@@ -309,10 +309,10 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
       _isSaving = true;
     });
 
-    final targetRoles = _anyRole ? ['Any Role'] : _selectedRoles.toList();
-    final targetIndustries = _anyIndustry ? ['Any Industry'] : _selectedIndustries.toList();
-    final targetLocations = _anyLocation ? ['Any Location'] : _selectedLocations.toList();
-    final workModels = _anyWorkModel ? ['any'] : _selectedWorkModels.toList();
+    final targetRoles = (_anyRole || _selectedRoles.isEmpty) ? <String>[] : _selectedRoles.toList();
+    final targetIndustries = (_anyIndustry || _selectedIndustries.isEmpty) ? <String>[] : _selectedIndustries.toList();
+    final targetLocations = (_anyLocation || _selectedLocations.isEmpty) ? <String>['Any Location'] : _selectedLocations.toList();
+    final workModels = (_anyWorkModel || _selectedWorkModels.isEmpty) ? <String>['any'] : _selectedWorkModels.toList();
     final minSalaryVal = _anySalary ? 0 : (_minSalary.toInt() * 1000);
 
     Map<String, dynamic> fullCvPayload = {

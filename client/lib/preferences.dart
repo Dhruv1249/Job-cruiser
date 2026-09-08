@@ -1,7 +1,5 @@
-import "dart:convert";
 import "package:flutter/foundation.dart" show kIsWeb;
 import "package:flutter/material.dart";
-import "package:shared_preferences/shared_preferences.dart";
 import "package:url_launcher/url_launcher.dart";
 import "auth.dart";
 import "main.dart" show AppColors;
@@ -45,23 +43,6 @@ class PreferenceSummary {
       baseSalary: (json["baseSalary"] as num?)?.toDouble() ?? 0,
       equityExpectation: json["equityExpectation"] as String? ?? "",
     );
-  }
-
-  static const String storageKey = "job_cruiser.preference_summary";
-
-  static Future<PreferenceSummary?> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(storageKey);
-    if (raw == null || raw.isEmpty) {
-      return null;
-    }
-
-    return PreferenceSummary.fromJson(jsonDecode(raw) as Map<String, dynamic>);
-  }
-
-  Future<void> save() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(storageKey, jsonEncode(toJson()));
   }
 }
 
@@ -111,11 +92,14 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
 
   late double _baseSalary;
   late String _equityExpectation;
-  final Set<String> _selectedWorkModels = {"remote", "hybrid"};
+  final Set<String> _selectedWorkModels = {};
   AppVersionDetails? _appVersionDetails;
 
-  bool _anyWorkModel = false;
-  bool _anyLocation = false;
+  bool _anyRole = true;
+  bool _anyIndustry = true;
+  bool _anyLocation = true;
+  bool _anyWorkModel = true;
+  bool _anySalary = true;
   bool _hasConfiguredSecret = false;
   bool _obscureSecret = true;
 
@@ -171,22 +155,17 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   @override
   void initState() {
     super.initState();
-    _selectedLocations = {"India (On-site & Hybrid)", "India (Remote)", "Global Remote"};
-    _selectedIndustries = widget.initialPreferences == null
-        ? {"Fintech", "Enterprise SaaS", "AI / ML"}
-        : widget.initialPreferences!.industries.toSet();
-    _currentTargets = widget.initialPreferences == null
-        ? ["Backend Engineer", "Fullstack SDE"]
-        : List<String>.from(widget.initialPreferences!.targetRoles);
+    _selectedLocations = {};
+    _selectedIndustries = {};
+    _currentTargets = [];
     _roleController = TextEditingController();
     _overleafUrlController = TextEditingController();
     _overleafSecretController = TextEditingController();
     _overleafProjectController = TextEditingController(text: "job_applications");
     _resumeTemplateController = TextEditingController(text: "templates/resume.tex");
     _coverLetterTemplateController = TextEditingController(text: "templates/cover_letter.tex");
-    _baseSalary = widget.initialPreferences?.baseSalary ?? 120.0;
-    _equityExpectation =
-        widget.initialPreferences?.equityExpectation ?? "Meaningful";
+    _baseSalary = 0.0;
+    _equityExpectation = "";
 
     _loadSavedPreferences();
     _loadAppVersionDetails();
@@ -208,48 +187,63 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
         if (apiPref["currency"] != null && (apiPref["currency"] as String).isNotEmpty) {
           _currency = apiPref["currency"] as String;
         }
-        if (apiPref["target_roles"] != null && (apiPref["target_roles"] as List).isNotEmpty) {
-          _currentTargets
+        final loadedRoles = (apiPref["target_roles"] as List? ?? [])
+            .map((item) => item.toString())
+            .where((role) => role != "Any Role")
+            .toList();
+        _anyRole = loadedRoles.isEmpty;
+        _currentTargets
+          ..clear()
+          ..addAll(loadedRoles);
+
+        final loadedIndustries = (apiPref["target_industries"] as List? ?? [])
+            .map((item) => item.toString())
+            .where((industry) => industry != "Any Industry")
+            .toList();
+        _anyIndustry = loadedIndustries.isEmpty;
+        _selectedIndustries
+          ..clear()
+          ..addAll(loadedIndustries);
+
+        final loadedLocations = (apiPref["target_locations"] as List? ?? [])
+            .map((item) => item.toString())
+            .toList();
+        if (loadedLocations.isEmpty || loadedLocations.contains("Any Location")) {
+          _anyLocation = true;
+          _selectedLocations.clear();
+        } else {
+          _anyLocation = false;
+          _selectedLocations
             ..clear()
-            ..addAll(List<String>.from(apiPref["target_roles"] as List));
+            ..addAll(loadedLocations);
         }
-        if (apiPref["target_industries"] != null && (apiPref["target_industries"] as List).isNotEmpty) {
-          _selectedIndustries
-            ..clear()
-            ..addAll(List<String>.from(apiPref["target_industries"] as List));
-        }
-        if (apiPref["target_locations"] != null && (apiPref["target_locations"] as List).isNotEmpty) {
-          final loadedLocations = List<String>.from(apiPref["target_locations"] as List);
-          if (loadedLocations.contains("Any Location")) {
-            _anyLocation = true;
-          } else {
-            _anyLocation = false;
-            _selectedLocations
-              ..clear()
-              ..addAll(loadedLocations);
-          }
-        }
-        if (apiPref["min_salary"] != null && (apiPref["min_salary"] as num) > 0) {
-          final num val = apiPref["min_salary"] as num;
+
+        final num? val = apiPref["min_salary"] as num?;
+        if (val != null && val > 0) {
+          _anySalary = false;
           if (_currency == "INR") {
             _baseSalary = (val.toDouble() / 100000).clamp(0.0, 100.0);
           } else {
             _baseSalary = (val.toDouble() / 1000).clamp(0.0, 400.0);
           }
         } else {
+          _anySalary = true;
           _baseSalary = 0.0;
         }
-        if (apiPref["work_models"] != null && (apiPref["work_models"] as List).isNotEmpty) {
-          final loadedWorkModels = List<String>.from(apiPref["work_models"] as List);
-          if (loadedWorkModels.contains("any")) {
-            _anyWorkModel = true;
-          } else {
-            _anyWorkModel = false;
-            _selectedWorkModels
-              ..clear()
-              ..addAll(loadedWorkModels);
-          }
+
+        final loadedWorkModels = (apiPref["work_models"] as List? ?? [])
+            .map((item) => item.toString())
+            .toList();
+        if (loadedWorkModels.isEmpty || loadedWorkModels.contains("any")) {
+          _anyWorkModel = true;
+          _selectedWorkModels.clear();
+        } else {
+          _anyWorkModel = false;
+          _selectedWorkModels
+            ..clear()
+            ..addAll(loadedWorkModels);
         }
+
         if (apiPref["target_resume_pages"] != null) {
           _targetResumePages = (apiPref["target_resume_pages"] as num).toInt().clamp(1, 4);
         }
@@ -915,53 +909,78 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            "Select up to 5 priority sectors.",
-            style: TextStyle(
-              fontSize: 14,
-              color: AppColors.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _allIndustries.map((industry) {
-              final isSelected = _selectedIndustries.contains(industry);
-              return GestureDetector(
-                onTap: () {
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "ANY INDUSTRY / ALL INDUSTRIES",
+                style: TextStyle(
+                  fontFamily: "Geist",
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.onSurfaceVariant,
+                ),
+              ),
+              Switch(
+                value: _anyIndustry,
+                onChanged: (val) {
                   setState(() {
-                    if (isSelected) {
-                      _selectedIndustries.remove(industry);
-                    } else {
-                      if (_selectedIndustries.length < 5) {
-                        _selectedIndustries.add(industry);
-                      }
-                    }
+                    _anyIndustry = val;
                   });
                 },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: isSelected ? AppColors.slate900 : AppColors.surface,
-                    border: Border.all(
-                      color: isSelected ? AppColors.slate900 : AppColors.outlineVariant,
-                    ),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    industry,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: isSelected ? Colors.white : AppColors.secondary,
-                      fontWeight: FontWeight.w400,
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
+              ),
+            ],
           ),
+          if (!_anyIndustry) ...[
+            const SizedBox(height: 12),
+            const Text(
+              "Select priority sectors (leave unchecked for all).",
+              style: TextStyle(
+                fontSize: 14,
+                color: AppColors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _allIndustries.map((industry) {
+                final isSelected = _selectedIndustries.contains(industry);
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      if (isSelected) {
+                        _selectedIndustries.remove(industry);
+                      } else {
+                        if (_selectedIndustries.length < 5) {
+                          _selectedIndustries.add(industry);
+                        }
+                      }
+                    });
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isSelected ? AppColors.slate900 : AppColors.surface,
+                      border: Border.all(
+                        color: isSelected ? AppColors.slate900 : AppColors.outlineVariant,
+                      ),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      industry,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isSelected ? Colors.white : AppColors.secondary,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
         ],
       ),
     );
@@ -974,110 +993,135 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            "QUICK ADD POPULAR ROLES",
-            style: TextStyle(
-              fontFamily: "Geist",
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              letterSpacing: 0.5,
-              color: AppColors.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: _popularRoleSuggestions.map((role) {
-              final isSelected = _currentTargets.contains(role);
-              return FilterChip(
-                label: Text(role, style: const TextStyle(fontSize: 12)),
-                selected: isSelected,
-                onSelected: (val) {
-                  setState(() {
-                    if (val) {
-                      if (!_currentTargets.contains(role)) {
-                        _currentTargets.add(role);
-                      }
-                    } else {
-                      _currentTargets.remove(role);
-                    }
-                  });
-                },
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            "ADD CUSTOM ROLE",
-            style: TextStyle(
-              fontFamily: "Geist",
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              letterSpacing: 0.5,
-              color: AppColors.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.outlineVariant.withValues(alpha: 0.5)),
-            ),
-            child: TextField(
-              controller: _roleController,
-              decoration: InputDecoration(
-                hintText: "e.g. Distributed Systems Engineer",
-                hintStyle: const TextStyle(
-                  color: AppColors.outline,
-                  fontSize: 14,
-                ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                border: InputBorder.none,
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.add_circle, color: AppColors.primary),
-                  onPressed: () {
-                    final text = _roleController.text.trim();
-                    if (text.isNotEmpty && !_currentTargets.contains(text)) {
-                      setState(() {
-                        _currentTargets.add(text);
-                        _roleController.clear();
-                      });
-                    }
-                  },
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "ANY ROLE / ALL ROLES",
+                style: TextStyle(
+                  fontFamily: "Geist",
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.onSurfaceVariant,
                 ),
               ),
-              onSubmitted: (value) {
-                final text = value.trim();
-                if (text.isNotEmpty && !_currentTargets.contains(text)) {
+              Switch(
+                value: _anyRole,
+                onChanged: (val) {
                   setState(() {
-                    _currentTargets.add(text);
-                    _roleController.clear();
+                    _anyRole = val;
                   });
-                }
-              },
-            ),
+                },
+              ),
+            ],
           ),
-          if (_currentTargets.isNotEmpty) ...[
-            const SizedBox(height: 16),
+          if (!_anyRole) ...[
+            const SizedBox(height: 12),
+            const Text(
+              "QUICK ADD POPULAR ROLES",
+              style: TextStyle(
+                fontFamily: "Geist",
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                letterSpacing: 0.5,
+                color: AppColors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 8,
-              runSpacing: 8,
-              children: _currentTargets.map((role) {
-                return Chip(
-                  label: Text(role),
-                  deleteIcon: const Icon(Icons.close, size: 16),
-                  onDeleted: () {
+              runSpacing: 6,
+              children: _popularRoleSuggestions.map((role) {
+                final isSelected = _currentTargets.contains(role);
+                return FilterChip(
+                  label: Text(role, style: const TextStyle(fontSize: 12)),
+                  selected: isSelected,
+                  onSelected: (val) {
                     setState(() {
-                      _currentTargets.remove(role);
+                      if (val) {
+                        if (!_currentTargets.contains(role)) {
+                          _currentTargets.add(role);
+                        }
+                      } else {
+                        _currentTargets.remove(role);
+                      }
                     });
                   },
-                  backgroundColor: AppColors.surfaceContainer,
-                  side: const BorderSide(color: AppColors.outlineVariant),
                 );
               }).toList(),
             ),
+            const SizedBox(height: 16),
+            const Text(
+              "ADD CUSTOM ROLE",
+              style: TextStyle(
+                fontFamily: "Geist",
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                letterSpacing: 0.5,
+                color: AppColors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.outlineVariant.withValues(alpha: 0.5)),
+              ),
+              child: TextField(
+                controller: _roleController,
+                decoration: InputDecoration(
+                  hintText: "e.g. Distributed Systems Engineer",
+                  hintStyle: const TextStyle(
+                    color: AppColors.outline,
+                    fontSize: 14,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  border: InputBorder.none,
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.add_circle, color: AppColors.primary),
+                    onPressed: () {
+                      final text = _roleController.text.trim();
+                      if (text.isNotEmpty && !_currentTargets.contains(text)) {
+                        setState(() {
+                          _currentTargets.add(text);
+                          _roleController.clear();
+                        });
+                      }
+                    },
+                  ),
+                ),
+                onSubmitted: (value) {
+                  final text = value.trim();
+                  if (text.isNotEmpty && !_currentTargets.contains(text)) {
+                    setState(() {
+                      _currentTargets.add(text);
+                      _roleController.clear();
+                    });
+                  }
+                },
+              ),
+            ),
+            if (_currentTargets.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _currentTargets.map((role) {
+                  return Chip(
+                    label: Text(role),
+                    deleteIcon: const Icon(Icons.close, size: 16),
+                    onDeleted: () {
+                      setState(() {
+                        _currentTargets.remove(role);
+                      });
+                    },
+                    backgroundColor: AppColors.surfaceContainer,
+                    side: const BorderSide(color: AppColors.outlineVariant),
+                  );
+                }).toList(),
+              ),
+            ],
           ],
         ],
       ),
@@ -1100,95 +1144,125 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                "CURRENCY",
+                "ANY SALARY / NO MINIMUM",
                 style: TextStyle(
                   fontFamily: "Geist",
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
-                  letterSpacing: 0.5,
                   color: AppColors.onSurfaceVariant,
                 ),
               ),
-              Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.outlineVariant),
-                ),
-                child: SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: "USD", label: Text("USD (\$)")),
-                    ButtonSegment(value: "INR", label: Text("INR (₹)")),
-                  ],
-                  selected: {_currency},
-                  onSelectionChanged: (newSelection) {
-                    setState(() {
-                      _currency = newSelection.first;
-                      if (_currency == "INR" && _baseSalary > 100) {
-                        _baseSalary = 20.0;
-                      } else if (_currency == "USD" && _baseSalary < 10) {
-                        _baseSalary = 100.0;
-                      }
-                    });
-                  },
-                ),
+              Switch(
+                value: _anySalary,
+                onChanged: (val) {
+                  setState(() {
+                    _anySalary = val;
+                    if (val) {
+                      _baseSalary = 0.0;
+                    }
+                  });
+                },
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                isINR ? "BASE SALARY (INR)" : "BASE SALARY (USD)",
-                style: const TextStyle(
-                  fontFamily: "Geist",
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 0.5,
-                  color: AppColors.onSurfaceVariant,
+          if (!_anySalary) ...[
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "CURRENCY",
+                  style: TextStyle(
+                    fontFamily: "Geist",
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.5,
+                    color: AppColors.onSurfaceVariant,
+                  ),
                 ),
-              ),
-              Text(
-                isINR ? "₹${currentVal.toInt()} LPA+" : "\$${currentVal.toInt()}k+",
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.primary,
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.outlineVariant),
+                  ),
+                  child: SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(value: "USD", label: Text("USD (\$)")),
+                      ButtonSegment(value: "INR", label: Text("INR (₹)")),
+                    ],
+                    selected: {_currency},
+                    onSelectionChanged: (newSelection) {
+                      setState(() {
+                        _currency = newSelection.first;
+                        if (_currency == "INR" && _baseSalary > 100) {
+                          _baseSalary = 0.0;
+                        } else if (_currency == "USD" && _baseSalary > 400) {
+                          _baseSalary = 0.0;
+                        }
+                      });
+                    },
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          SliderTheme(
-            data: SliderThemeData(
-              activeTrackColor: AppColors.successGreen,
-              inactiveTrackColor: AppColors.sliderInactive,
-              thumbColor: AppColors.successGreen,
-              overlayColor: AppColors.successGreen.withValues(alpha: 0.2),
-              trackHeight: 4,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+              ],
             ),
-            child: Slider(
-              value: currentVal,
-              min: minVal,
-              max: maxVal,
-              divisions: isINR ? 100 : 80,
-              onChanged: (value) {
-                setState(() {
-                  _baseSalary = value;
-                });
-              },
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  isINR ? "BASE SALARY (INR)" : "BASE SALARY (USD)",
+                  style: const TextStyle(
+                    fontFamily: "Geist",
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.5,
+                    color: AppColors.onSurfaceVariant,
+                  ),
+                ),
+                Text(
+                  currentVal == 0.0
+                      ? "Any / No Minimum"
+                      : (isINR ? "₹${currentVal.toInt()} LPA+" : "\$${currentVal.toInt()}k+"),
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ],
             ),
-          ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(isINR ? "₹0 LPA" : "\$0k", style: const TextStyle(fontSize: 11, color: AppColors.outline)),
-              Text(isINR ? "₹100 LPA+" : "\$400k+", style: const TextStyle(fontSize: 11, color: AppColors.outline)),
-            ],
-          ),
+            const SizedBox(height: 8),
+            SliderTheme(
+              data: SliderThemeData(
+                activeTrackColor: AppColors.successGreen,
+                inactiveTrackColor: AppColors.sliderInactive,
+                thumbColor: AppColors.successGreen,
+                overlayColor: AppColors.successGreen.withValues(alpha: 0.2),
+                trackHeight: 4,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+              ),
+              child: Slider(
+                value: currentVal,
+                min: minVal,
+                max: maxVal,
+                divisions: isINR ? 100 : 80,
+                onChanged: (value) {
+                  setState(() {
+                    _baseSalary = value;
+                  });
+                },
+              ),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(isINR ? "₹0 LPA" : "\$0k", style: const TextStyle(fontSize: 11, color: AppColors.outline)),
+                Text(isINR ? "₹100 LPA+" : "\$400k+", style: const TextStyle(fontSize: 11, color: AppColors.outline)),
+              ],
+            ),
+          ],
           const SizedBox(height: 24),
           const Text(
             "EQUITY EXPECTATION",
@@ -1396,35 +1470,29 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
       width: double.infinity,
       child: ElevatedButton(
         onPressed: () async {
-          final summary = PreferenceSummary(
-            industries: _selectedIndustries.toList()..sort(),
-            targetRoles: List<String>.from(_currentTargets),
-            baseSalary: _baseSalary,
-            equityExpectation: _equityExpectation,
-          );
-
-          await summary.save();
-
           final apiService = ApiService();
           final profile = await apiService.fetchProfile();
           final fullName = profile?["full_name"]?.toString() ?? "";
 
-          final int rawSalary = _currency == "INR"
-              ? _baseSalary.toInt() * 100000
-              : _baseSalary.toInt() * 1000;
+          final int rawSalary = (_anySalary || _baseSalary <= 0)
+              ? 0
+              : (_currency == "INR"
+                  ? _baseSalary.toInt() * 100000
+                  : _baseSalary.toInt() * 1000);
 
-          final targetRolesPayload = _currentTargets.isEmpty ? ["Any Role"] : _currentTargets;
-          final targetLocationsPayload = _anyLocation
+          final targetRolesPayload = (_anyRole || _currentTargets.isEmpty) ? <String>[] : _currentTargets.toList();
+          final targetIndustriesPayload = (_anyIndustry || _selectedIndustries.isEmpty) ? <String>[] : _selectedIndustries.toList();
+          final targetLocationsPayload = _anyLocation || _selectedLocations.isEmpty
               ? ["Any Location"]
               : _selectedLocations.toList();
-          final workModelsPayload = _anyWorkModel
+          final workModelsPayload = _anyWorkModel || _selectedWorkModels.isEmpty
               ? ["any"]
               : _selectedWorkModels.toList();
 
           await apiService.savePreferences({
             "full_name": fullName,
             "target_roles": targetRolesPayload,
-            "target_industries": _selectedIndustries.toList(),
+            "target_industries": targetIndustriesPayload,
             "target_locations": targetLocationsPayload,
             "work_models": workModelsPayload,
             "min_salary": rawSalary,
@@ -1436,7 +1504,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
           });
 
           if (!mounted) return;
-          Navigator.pop(context, summary);
+          Navigator.pop(context, true);
         },
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.successGreen,

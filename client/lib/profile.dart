@@ -57,7 +57,6 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  preferences_page.PreferenceSummary? _preferenceSummary;
   Map<String, dynamic>? _preferencesData;
 
   final ApiService _apiService = ApiService();
@@ -81,7 +80,6 @@ class _ProfilePageState extends State<ProfilePage> {
     }
     if (widget.initialPreferencesData != null) {
       _preferencesData = widget.initialPreferencesData;
-      _applyPreferencesData(widget.initialPreferencesData!);
     } else {
       _loadSavedPreferences();
     }
@@ -259,41 +257,13 @@ class _ProfilePageState extends State<ProfilePage> {
     });
   }
 
-  void _applyPreferencesData(Map<String, dynamic> apiPref) {
-    if ((apiPref["target_roles"] as List? ?? []).isNotEmpty) {
-      final industries = List<String>.from(apiPref["target_industries"] as List? ?? ["Tech"]);
-      final targetRoles = List<String>.from(apiPref["target_roles"] as List? ?? []);
-      final double minSalary = ((apiPref["min_salary"] as num? ?? 0).toDouble() / 1000);
-      final bool aiMatchingEnabled = apiPref["ai_matching_enabled"] as bool? ?? false;
-
-      _preferenceSummary = preferences_page.PreferenceSummary(
-        industries: industries,
-        targetRoles: targetRoles,
-        baseSalary: minSalary,
-        equityExpectation: aiMatchingEnabled ? "AI Matching: Enabled (Managed by Admin)" : "AI Matching: Disabled (Managed by Admin)",
-      );
-    }
-  }
-
   Future<void> _loadSavedPreferences() async {
     final apiPref = await _apiService.fetchPreferences();
     if (!mounted) return;
 
     setState(() {
       _preferencesData = apiPref;
-      if (apiPref != null) {
-        _applyPreferencesData(apiPref);
-      }
     });
-
-    if (apiPref == null || (apiPref["target_roles"] as List? ?? []).isEmpty) {
-      final savedPreferences = await preferences_page.PreferenceSummary.load();
-      if (mounted && savedPreferences != null) {
-        setState(() {
-          _preferenceSummary = savedPreferences;
-        });
-      }
-    }
   }
 
   Future<void> _openEditProfile(BuildContext context) async {
@@ -314,9 +284,7 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _openPreferences(BuildContext context) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => preferences_page.SetPreferencesScreen(
-          initialPreferences: _preferenceSummary,
-        ),
+        builder: (_) => const preferences_page.SetPreferencesScreen(),
       ),
     );
 
@@ -563,22 +531,37 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildPreferencesSection(BuildContext context) {
-    final summary = _preferenceSummary;
-    final String rolesText = summary != null && summary.targetRoles.isNotEmpty
-        ? summary.targetRoles.join(", ")
-        : "Any Role";
-    final String industriesText = summary != null && summary.industries.isNotEmpty
-        ? summary.industries.join(", ")
-        : "Any Industry";
-    final String salaryText = summary != null && summary.baseSalary > 0
-        ? (summary.baseSalary <= 100 ? "₹${summary.baseSalary.toInt()} LPA+" : "\$${summary.baseSalary.toInt()}k+")
+    final rawRoles = (_preferencesData?["target_roles"] as List<dynamic>? ?? [])
+        .map((element) => element.toString())
+        .where((role) => role != "Any Role")
+        .toList();
+    final rolesText = rawRoles.isNotEmpty ? rawRoles.join(", ") : "Any Role (No preference)";
+
+    final rawIndustries = (_preferencesData?["target_industries"] as List<dynamic>? ?? [])
+        .map((element) => element.toString())
+        .where((industry) => industry != "Any Industry")
+        .toList();
+    final industriesText = rawIndustries.isNotEmpty ? rawIndustries.join(", ") : "Any Industry (No preference)";
+
+    final rawLocations = (_preferencesData?["target_locations"] as List<dynamic>? ?? [])
+        .map((element) => element.toString())
+        .toList();
+    final locationsText = (rawLocations.isNotEmpty && !rawLocations.contains("Any Location"))
+        ? rawLocations.join(", ")
+        : "Any Location";
+
+    final rawWorkModels = (_preferencesData?["work_models"] as List<dynamic>? ?? [])
+        .map((element) => element.toString())
+        .toList();
+    final workModelsText = (rawWorkModels.isNotEmpty && !rawWorkModels.contains("any"))
+        ? rawWorkModels.join(", ")
+        : "Any Work Model";
+
+    final num minSalary = _preferencesData?["min_salary"] as num? ?? 0;
+    final String currency = _preferencesData?["currency"] as String? ?? "USD";
+    final salaryText = minSalary > 0
+        ? (currency == "INR" ? "₹${(minSalary / 100000).toInt()} LPA+" : "\$${(minSalary / 1000).toInt()}k+")
         : "Any Salary Target";
-
-    final rawLocations = _preferencesData?["target_locations"] as List<dynamic>? ?? [];
-    final locationsText = rawLocations.isNotEmpty ? rawLocations.join(", ") : "Any Location";
-
-    final rawWorkModels = _preferencesData?["work_models"] as List<dynamic>? ?? [];
-    final workModelsText = rawWorkModels.isNotEmpty ? rawWorkModels.join(", ") : "Any Work Model";
 
     return Container(
       padding: const EdgeInsets.all(20),
