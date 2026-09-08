@@ -755,95 +755,169 @@ def process_direct_career_company(
     }
 
 
+def validate_proxy(proxy_url: str, probe_timeout_seconds: float = 3.0) -> bool:
+    """
+    Validates proxy reachability using a lightweight HTTP probe to verify network connectivity.
+    """
+    if not proxy_url:
+        return True
+    try:
+        probe_response = requests.head(
+            "https://www.linkedin.com/robots.txt",
+            proxies={"http": proxy_url, "https": proxy_url},
+            timeout=probe_timeout_seconds,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            },
+        )
+        return probe_response.status_code in [200, 301, 302, 404]
+    except Exception as probe_error:
+        logger.warning(
+            f"[proxy_health] Proxy {proxy_url} failed connectivity probe: {type(probe_error).__name__}: {probe_error}"
+        )
+        return False
+
+
+def filter_healthy_proxies(proxy_urls: list[str], probe_timeout_seconds: float = 3.0) -> list[str]:
+    """
+    Probes configured proxy URLs concurrently and filters out unreachable or failing instances.
+    """
+    if not proxy_urls:
+        return []
+    healthy_proxies = []
+    with ThreadPoolExecutor(max_workers=len(proxy_urls)) as probe_executor:
+        probe_futures = {
+            probe_executor.submit(validate_proxy, proxy_url, probe_timeout_seconds): proxy_url
+            for proxy_url in proxy_urls
+        }
+        for probe_future in probe_futures:
+            candidate_proxy = probe_futures[probe_future]
+            try:
+                if probe_future.result():
+                    healthy_proxies.append(candidate_proxy)
+                else:
+                    logger.warning(f"[enrichment] Discarding unhealthy proxy from route pool: {candidate_proxy}")
+            except Exception as probe_execution_error:
+                logger.warning(f"[enrichment] Probe failed for {candidate_proxy}: {probe_execution_error}")
+    return healthy_proxies
+
+
+def parse_linkedin_detail_response(
+    detail_response: requests.Response,
+    job_identifier: str,
+) -> tuple[dict | None, int]:
+    """
+    Parses LinkedIn job detail response into structured description payload or error status.
+    """
+    if detail_response.status_code == 429:
+        logger.warning(f"[enrichment] Rate limited (429) on job {job_identifier}")
+        return None, 429
+
+    if detail_response.status_code != 200:
+        return None, detail_response.status_code
+
+    blocked_redirect_markers = [
+        "linkedin.com/signup",
+        "linkedin.com/authwall",
+        "linkedin.com/checkpoint",
+        "expired_jd_redirect",
+    ]
+    if any(marker in detail_response.url for marker in blocked_redirect_markers):
+        logger.info(f"[enrichment] Job {job_identifier} redirected to auth wall, skipping")
+        return None, 200
+
+    detail_soup = BeautifulSoup(detail_response.text, "html.parser")
+    description_element = detail_soup.find(
+        "div",
+        class_=lambda class_name: class_name and "show-more-less-html__markup" in class_name,
+    )
+    if description_element is None:
+        description_element = detail_soup.select_one(
+            ".description__text"
+        ) or detail_soup.select_one(".show-more-less-html")
+
+    if description_element is not None:
+        for button_element in description_element.find_all(
+            ["button", "span"],
+            class_=lambda class_name: class_name and "show-more-less" in class_name,
+        ):
+            button_element.decompose()
+
+        description_text = description_element.get_text("\n", strip=True)
+        if description_text:
+            logger.debug(f"[enrichment] Got description for job {job_identifier} ({len(description_text)} chars)")
+            return {
+                "id": job_identifier,
+                "description_text": description_text,
+            }, 200
+
+    logger.debug(f"[enrichment] No description element found for job {job_identifier}")
+    return None, 200
+
+
 def fetch_single_linkedin_description(
     job_record: dict,
     enrichment_session: requests.Session,
     halt_event: threading.Event | None = None,
     proxy_url: str | None = None,
-) -> tuple[dict | None, int]:
+) -> tuple[dict | None, int, bool]:
     """
-    Fetches and parses a single LinkedIn job description with random jitter delay and optional proxy routing.
+    Fetches and parses a single LinkedIn job description with random jitter delay and in-flight direct fallback.
+    Returns a tuple of description payload, HTTP status code, and proxy failure boolean flag.
     """
     if halt_event is not None and halt_event.is_set():
-        return None, 429
+        return None, 429, False
 
     job_identifier = job_record.get("id")
     job_url = job_record.get("url", "")
     if not job_identifier or not job_url:
-        return None, 200
+        return None, 200, False
 
     linkedin_id_match = re.search(r"/view/(?:[a-zA-Z0-9-]+-)?(\d+)", job_url)
     if not linkedin_id_match:
-        return None, 200
+        return None, 200, False
     linkedin_job_identifier = linkedin_id_match.group(1)
 
     logger.debug(f"[enrichment] Fetching description for job {job_identifier} ({job_url}) via proxy={proxy_url or 'direct'}")
     time.sleep(random.uniform(1.0, 1.6))
 
     if halt_event is not None and halt_event.is_set():
-        return None, 429
+        return None, 429, False
 
-    request_proxies = None
-    if proxy_url:
-        request_proxies = {"http": proxy_url, "https": proxy_url}
+    target_detail_url = f"https://www.linkedin.com/jobs/view/{linkedin_job_identifier}"
+    request_proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
 
     try:
         detail_response = enrichment_session.get(
-            f"https://www.linkedin.com/jobs/view/{linkedin_job_identifier}",
+            target_detail_url,
             timeout=12,
             proxies=request_proxies,
         )
-        if detail_response.status_code == 429:
-            logger.warning(f"[enrichment] Rate limited (429) on job {job_identifier}")
-            return None, 429
-
-        if detail_response.status_code != 200:
-            return None, detail_response.status_code
-
-        blocked_redirect_markers = [
-            "linkedin.com/signup",
-            "linkedin.com/authwall",
-            "linkedin.com/checkpoint",
-            "expired_jd_redirect",
-        ]
-        if any(marker in detail_response.url for marker in blocked_redirect_markers):
-            logger.info(f"[enrichment] Job {job_identifier} redirected to auth wall, skipping")
-            return None, 200
-
-        detail_soup = BeautifulSoup(detail_response.text, "html.parser")
-        description_element = detail_soup.find(
-            "div",
-            class_=lambda class_name: class_name and "show-more-less-html__markup" in class_name,
-        )
-        if description_element is None:
-            description_element = detail_soup.select_one(
-                ".description__text"
-            ) or detail_soup.select_one(".show-more-less-html")
-
-        if description_element is not None:
-            for button_element in description_element.find_all(
-                ["button", "span"],
-                class_=lambda class_name: class_name and "show-more-less" in class_name,
-            ):
-                button_element.decompose()
-
-            description_text = description_element.get_text("\n", strip=True)
-            if description_text:
-                logger.debug(f"[enrichment] Got description for job {job_identifier} ({len(description_text)} chars)")
-                return {
-                    "id": job_identifier,
-                    "description_text": description_text,
-                }, 200
-            else:
-                logger.debug(f"[enrichment] No description element found for job {job_identifier}")
-                return None, 200
-        else:
-            logger.debug(f"[enrichment] No description element found for job {job_identifier}")
-            return None, 200
-
-    except Exception as fetch_error:
-        logger.error(f"[enrichment] Exception on job {job_identifier}: {type(fetch_error).__name__}: {fetch_error}")
-        return None, 0
+        parsed_payload, status_code = parse_linkedin_detail_response(detail_response, job_identifier)
+        return parsed_payload, status_code, False
+    except (requests.exceptions.ProxyError, requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError) as proxy_error:
+        if proxy_url:
+            logger.warning(
+                f"[enrichment] Proxy {proxy_url} failed on job {job_identifier} ({type(proxy_error).__name__}). Retrying via direct connection."
+            )
+            try:
+                direct_fallback_response = enrichment_session.get(
+                    target_detail_url,
+                    timeout=12,
+                    proxies=None,
+                )
+                parsed_payload, status_code = parse_linkedin_detail_response(direct_fallback_response, job_identifier)
+                return parsed_payload, status_code, True
+            except Exception as fallback_error:
+                logger.error(
+                    f"[enrichment] Direct fallback also failed on job {job_identifier}: {type(fallback_error).__name__}: {fallback_error}"
+                )
+                return None, 0, True
+        logger.error(f"[enrichment] Connection failure on job {job_identifier}: {type(proxy_error).__name__}: {proxy_error}")
+        return None, 0, False
+    except Exception as general_error:
+        logger.error(f"[enrichment] Exception on job {job_identifier}: {type(general_error).__name__}: {general_error}")
+        return None, 0, False
 
 
 def enrich_linkedin_descriptions(
@@ -859,8 +933,15 @@ def enrich_linkedin_descriptions(
     if max_jobs is not None and max_jobs <= 0:
         return 0
 
-    available_routes = [None] + PROXIES
-    effective_max_workers = max_workers if max_workers is not None else len(available_routes)
+    healthy_proxies = filter_healthy_proxies(PROXIES)
+    if PROXIES and not healthy_proxies:
+        logger.warning("[enrichment] All configured proxies failed health checks. Falling back entirely to direct connection.")
+    elif healthy_proxies:
+        logger.info(f"[enrichment] Active healthy routes: {len(healthy_proxies)} proxies + 1 direct connection")
+
+    active_routes = [None] + healthy_proxies
+    consecutive_proxy_failures = {proxy: 0 for proxy in healthy_proxies}
+    proxy_cooldown_expiry: dict[str, float] = {}
 
     request_headers = {
         "X-Ingest-Key": INGEST_API_KEY,
@@ -887,6 +968,18 @@ def enrich_linkedin_descriptions(
     while not halt_event.is_set():
         if max_jobs is not None and total_enriched_count >= max_jobs:
             break
+
+        current_timestamp = time.time()
+        for cooled_proxy, expiry_time in list(proxy_cooldown_expiry.items()):
+            if current_timestamp >= expiry_time:
+                if validate_proxy(cooled_proxy, probe_timeout_seconds=2.0):
+                    logger.info(f"[enrichment] Cooled proxy {cooled_proxy} passed health check; restored to active routes.")
+                    if cooled_proxy not in active_routes:
+                        active_routes.append(cooled_proxy)
+                    consecutive_proxy_failures[cooled_proxy] = 0
+                    del proxy_cooldown_expiry[cooled_proxy]
+                else:
+                    proxy_cooldown_expiry[cooled_proxy] = current_timestamp + 180
 
         current_batch_limit = batch_size
         if max_jobs is not None:
@@ -924,31 +1017,48 @@ def enrich_linkedin_descriptions(
                 attempted_job_identifiers.add(job_identifier)
 
         batch_enriched_updates = []
-        actual_workers = max(1, min(effective_max_workers, len(jobs_to_process)))
+        effective_workers = len(active_routes) if max_workers is None else min(max_workers, len(active_routes))
+        actual_workers = max(1, min(effective_workers, len(jobs_to_process)))
         with ThreadPoolExecutor(max_workers=actual_workers) as pool_executor:
-            future_to_job = [
+            future_to_route = {
                 pool_executor.submit(
                     fetch_single_linkedin_description,
                     job_record,
                     enrichment_session,
                     halt_event,
-                    available_routes[job_index % len(available_routes)],
-                )
+                    active_routes[job_index % len(active_routes)],
+                ): active_routes[job_index % len(active_routes)]
                 for job_index, job_record in enumerate(jobs_to_process)
-            ]
-            for future in future_to_job:
-                update_payload, status_code = future.result()
+            }
+            for future in future_to_route:
+                route_used = future_to_route[future]
+                update_payload, status_code, proxy_failed = future.result()
+                if route_used is not None:
+                    if proxy_failed:
+                        consecutive_proxy_failures[route_used] = (
+                            consecutive_proxy_failures.get(route_used, 0) + 1
+                        )
+                        if consecutive_proxy_failures[route_used] >= 2 and route_used in active_routes:
+                            active_routes.remove(route_used)
+                            proxy_cooldown_expiry[route_used] = time.time() + 180
+                            logger.warning(
+                                f"[enrichment] Evicted failing proxy {route_used} to cooldown (2 consecutive errors). "
+                                f"Remaining active routes: {len(active_routes)}"
+                            )
+                    else:
+                        consecutive_proxy_failures[route_used] = 0
+
                 if status_code == 429:
                     consecutive_rate_limits += 1
                     logger.warning(
                         f"[enrichment] Rate limited (429), consecutive={consecutive_rate_limits}"
                     )
-                    if consecutive_rate_limits >= 2 * len(available_routes):
+                    if consecutive_rate_limits >= 2 * len(active_routes):
                         logger.info(
                             f"[enrichment] Encountered 429 rate limit repeatedly ({consecutive_rate_limits} times), halting enrichment pass."
                         )
                         halt_event.set()
-                        for pending_future in future_to_job:
+                        for pending_future in future_to_route:
                             pending_future.cancel()
                         break
                     time.sleep(15)
@@ -975,7 +1085,7 @@ def enrich_linkedin_descriptions(
             except Exception as enrich_post_error:
                 logger.error(f"[enrichment] Failed to POST description batch to backend: {type(enrich_post_error).__name__}: {enrich_post_error}")
 
-        if consecutive_rate_limits >= 2 or halt_event.is_set():
+        if halt_event.is_set():
             break
 
     logger.info(f"[enrichment] Pass complete: {total_enriched_count} descriptions updated")

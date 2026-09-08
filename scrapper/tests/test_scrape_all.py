@@ -15,6 +15,8 @@ from scrape_all import (
     enrich_linkedin_descriptions,
     fetch_single_linkedin_description,
     process_direct_career_company,
+    validate_proxy,
+    filter_healthy_proxies,
 )
 
 
@@ -459,9 +461,10 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
             "id": "job-success-1",
             "url": "https://www.linkedin.com/jobs/view/9876543210",
         }
-        update_result, status_code = fetch_single_linkedin_description(job_input, mock_session)
+        update_result, status_code, proxy_failed = fetch_single_linkedin_description(job_input, mock_session)
 
         self.assertEqual(status_code, 200)
+        self.assertFalse(proxy_failed)
         self.assertIsNotNone(update_result)
         self.assertEqual(update_result["id"], "job-success-1")
         self.assertIn("distributed systems", update_result["description_text"])
@@ -483,9 +486,10 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
             "id": "job-authwall-1",
             "url": "https://www.linkedin.com/jobs/view/1234567890",
         }
-        update_result, status_code = fetch_single_linkedin_description(job_input, mock_session)
+        update_result, status_code, proxy_failed = fetch_single_linkedin_description(job_input, mock_session)
 
         self.assertEqual(status_code, 200)
+        self.assertFalse(proxy_failed)
         self.assertIsNone(update_result)
 
     @patch("scrape_all.time.sleep")
@@ -503,9 +507,10 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
             "id": "job-rate-limited-1",
             "url": "https://www.linkedin.com/jobs/view/1122334455",
         }
-        update_result, status_code = fetch_single_linkedin_description(job_input, mock_session)
+        update_result, status_code, proxy_failed = fetch_single_linkedin_description(job_input, mock_session)
 
         self.assertEqual(status_code, 429)
+        self.assertFalse(proxy_failed)
         self.assertIsNone(update_result)
 
     @patch("scrape_all.time.sleep")
@@ -614,11 +619,12 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
             "id": "job-proxy-1",
             "url": "https://www.linkedin.com/jobs/view/7788990011",
         }
-        update_result, status_code = fetch_single_linkedin_description(
+        update_result, status_code, proxy_failed = fetch_single_linkedin_description(
             job_input, mock_session, proxy_url="http://34.120.50.10:8888"
         )
 
         self.assertEqual(status_code, 200)
+        self.assertFalse(proxy_failed)
         self.assertIsNotNone(update_result)
         mock_session.get.assert_called_once()
         call_kwargs = mock_session.get.call_args[1]
@@ -684,6 +690,241 @@ class TestScrapeAllOrchestrator(unittest.TestCase):
         mock_requests_post.assert_called_once()
         self.assertEqual(mock_session_instance.get.call_count, 4)
 
+    @patch("scrape_all.requests.head")
+    def test_validate_proxy_healthy(self, mock_requests_head):
+        """
+        Verify validate_proxy returns true when proxy responds with valid HTTP status.
+        """
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_requests_head.return_value = mock_response
+
+        self.assertTrue(validate_proxy("http://valid-proxy:8888"))
+        mock_requests_head.assert_called_once()
+        kwargs = mock_requests_head.call_args[1]
+        self.assertEqual(
+            kwargs.get("proxies"),
+            {
+                "http": "http://valid-proxy:8888",
+                "https": "http://valid-proxy:8888",
+            },
+        )
+
+    @patch("scrape_all.requests.head")
+    def test_validate_proxy_unhealthy_on_exception(self, mock_requests_head):
+        """
+        Verify validate_proxy returns false when proxy request raises an exception.
+        """
+        import requests
+        mock_requests_head.side_effect = requests.exceptions.ProxyError("Connection refused")
+
+        self.assertFalse(validate_proxy("http://broken-proxy:8888"))
+
+    @patch("scrape_all.validate_proxy")
+    def test_filter_healthy_proxies(self, mock_validate_proxy):
+        """
+        Verify filter_healthy_proxies returns only responsive proxies from candidate list.
+        """
+        mock_validate_proxy.side_effect = lambda proxy, timeout=3.0: "good" in proxy
+
+        candidate_proxies = [
+            "http://good-proxy-1:8888",
+            "http://bad-proxy-1:8888",
+            "http://good-proxy-2:8888",
+        ]
+        healthy = filter_healthy_proxies(candidate_proxies)
+        self.assertEqual(healthy, ["http://good-proxy-1:8888", "http://good-proxy-2:8888"])
+
+    @patch("scrape_all.time.sleep")
+    def test_fetch_single_linkedin_description_proxy_error_in_flight_fallback(self, mock_sleep):
+        """
+        Verify fetch_single_linkedin_description falls back to direct connection when proxy fails in-flight.
+        """
+        import requests
+        mock_session = Mock()
+        proxy_error = requests.exceptions.ProxyError("Proxy tunnel failed")
+        direct_success_response = Mock()
+        direct_success_response.status_code = 200
+        direct_success_response.url = "https://www.linkedin.com/jobs/view/9988776655"
+        direct_success_response.text = (
+            "<html><body><div class='description__text'>Direct fallback succeeded</div></body></html>"
+        )
+        mock_session.get.side_effect = [proxy_error, direct_success_response]
+
+        job_input = {
+            "id": "job-fallback-1",
+            "url": "https://www.linkedin.com/jobs/view/9988776655",
+        }
+        update_result, status_code, proxy_failed = fetch_single_linkedin_description(
+            job_input, mock_session, proxy_url="http://failing-proxy:8888"
+        )
+
+        self.assertEqual(status_code, 200)
+        self.assertTrue(proxy_failed)
+        self.assertIsNotNone(update_result)
+        self.assertIn("Direct fallback succeeded", update_result["description_text"])
+        self.assertEqual(mock_session.get.call_count, 2)
+        second_call_kwargs = mock_session.get.call_args_list[1][1]
+        self.assertIsNone(second_call_kwargs.get("proxies"))
+
+    @patch("scrape_all.filter_healthy_proxies")
+    @patch("scrape_all.time.sleep")
+    @patch("requests.post")
+    @patch("requests.Session")
+    @patch("requests.get")
+    def test_enrich_linkedin_descriptions_filters_dead_proxies_at_startup(
+        self,
+        mock_requests_get,
+        mock_session_class,
+        mock_requests_post,
+        mock_sleep,
+        mock_filter_healthy_proxies,
+    ):
+        """
+        Verify enrichment filters dead proxies and proceeds with remaining healthy routes.
+        """
+        mock_filter_healthy_proxies.return_value = []
+
+        mock_pending_response = Mock()
+        mock_pending_response.status_code = 200
+        mock_pending_response.json.return_value = {
+            "data": [
+                {
+                    "id": "job-dead-proxy-1",
+                    "url": "https://www.linkedin.com/jobs/view/12345",
+                    "title": "Role 1",
+                }
+            ]
+        }
+        mock_empty_response = Mock()
+        mock_empty_response.status_code = 200
+        mock_empty_response.json.return_value = {"data": []}
+        mock_requests_get.side_effect = [mock_pending_response, mock_empty_response]
+
+        mock_session_instance = Mock()
+        mock_detail_response = Mock()
+        mock_detail_response.status_code = 200
+        mock_detail_response.url = "https://www.linkedin.com/jobs/view/12345"
+        mock_detail_response.text = "<html><body><div class='description__text'>Direct content</div></body></html>"
+        mock_session_instance.get.return_value = mock_detail_response
+        mock_session_class.return_value = mock_session_instance
+
+        mock_update_response = Mock()
+        mock_update_response.status_code = 200
+        mock_requests_post.return_value = mock_update_response
+
+        with patch("scrape_all.PROXIES", ["http://dead-proxy:8888"]):
+            total_enriched = enrich_linkedin_descriptions(cooldown_seconds=0, max_workers=None)
+
+        self.assertEqual(total_enriched, 1)
+        mock_filter_healthy_proxies.assert_called_once_with(["http://dead-proxy:8888"])
+
+    @patch("scrape_all.filter_healthy_proxies")
+    @patch("scrape_all.fetch_single_linkedin_description")
+    @patch("scrape_all.time.sleep")
+    @patch("requests.post")
+    @patch("requests.Session")
+    @patch("requests.get")
+    def test_enrich_linkedin_descriptions_evicts_failing_proxies_mid_run(
+        self,
+        mock_requests_get,
+        mock_session_class,
+        mock_requests_post,
+        mock_sleep,
+        mock_fetch,
+        mock_filter_healthy_proxies,
+    ):
+        """
+        Verify that a proxy failing repeatedly mid-run is evicted from active routes, allowing surviving routes to finish.
+        """
+        mock_filter_healthy_proxies.return_value = ["http://dying-proxy:8888", "http://healthy-proxy:8888"]
+
+        first_batch = {
+            "data": [
+                {"id": f"job-circuit-{index}", "url": f"https://www.linkedin.com/jobs/view/{7000 + index}"}
+                for index in range(4)
+            ]
+        }
+        empty_batch = {"data": []}
+        mock_requests_get.side_effect = [
+            Mock(status_code=200, json=lambda: first_batch),
+            Mock(status_code=200, json=lambda: empty_batch),
+        ]
+
+        def simulate_fetch(job_record, session, halt_event, proxy_url):
+            if proxy_url == "http://dying-proxy:8888":
+                return {"id": job_record["id"], "description_text": "fallback text"}, 200, True
+            return {"id": job_record["id"], "description_text": "healthy text"}, 200, False
+
+        mock_fetch.side_effect = simulate_fetch
+        mock_requests_post.return_value = Mock(status_code=200)
+
+        with patch("scrape_all.PROXIES", ["http://dying-proxy:8888", "http://healthy-proxy:8888"]):
+            total_enriched = enrich_linkedin_descriptions(cooldown_seconds=0, max_workers=3)
+
+        self.assertEqual(total_enriched, 4)
+        mock_requests_post.assert_called_once()
+
+    @patch("scrape_all.validate_proxy")
+    @patch("scrape_all.filter_healthy_proxies")
+    @patch("scrape_all.fetch_single_linkedin_description")
+    @patch("scrape_all.time.sleep")
+    @patch("requests.post")
+    @patch("requests.Session")
+    @patch("requests.get")
+    def test_enrich_linkedin_descriptions_restores_proxy_after_cooldown(
+        self,
+        mock_requests_get,
+        mock_session_class,
+        mock_requests_post,
+        mock_sleep,
+        mock_fetch,
+        mock_filter_healthy_proxies,
+        mock_validate_proxy,
+    ):
+        """
+        Verify that a proxy placed in cooldown is probed and restored to active routes upon recovery.
+        """
+        mock_filter_healthy_proxies.return_value = ["http://recovering-proxy:8888"]
+        mock_validate_proxy.return_value = True
+
+        first_batch = {
+            "data": [
+                {"id": f"job-recover-fail-{index}", "url": f"https://www.linkedin.com/jobs/view/{8000 + index}"}
+                for index in range(4)
+            ]
+        }
+        second_batch = {
+            "data": [
+                {"id": f"job-recover-pass-{index}", "url": f"https://www.linkedin.com/jobs/view/{8010 + index}"}
+                for index in range(2)
+            ]
+        }
+        empty_batch = {"data": []}
+        mock_requests_get.side_effect = [
+            Mock(status_code=200, json=lambda: first_batch),
+            Mock(status_code=200, json=lambda: second_batch),
+            Mock(status_code=200, json=lambda: empty_batch),
+        ]
+
+        def simulate_fetch(job_record, session, halt_event, proxy_url):
+            if "fail" in job_record["id"]:
+                return {"id": job_record["id"], "description_text": "text"}, 200, True
+            return {"id": job_record["id"], "description_text": "text"}, 200, False
+
+        mock_fetch.side_effect = simulate_fetch
+        mock_requests_post.return_value = Mock(status_code=200)
+
+        clock_ticks = [100.0, 100.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0]
+        with patch("scrape_all.time.time", side_effect=clock_ticks):
+            with patch("scrape_all.PROXIES", ["http://recovering-proxy:8888"]):
+                total_enriched = enrich_linkedin_descriptions(cooldown_seconds=0, max_workers=2)
+
+        self.assertEqual(total_enriched, 6)
+        mock_validate_proxy.assert_called()
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
