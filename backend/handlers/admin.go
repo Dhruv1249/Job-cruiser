@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Dhruv1249/Job-cruiser/backend/services"
+	"github.com/Dhruv1249/Job-cruiser/backend/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -760,6 +761,11 @@ func (h *AdminHandler) GetScraperStats(c *gin.Context) {
 			var startedAt, finishedAt time.Time
 			var jobsAdded, durationSeconds int
 			if scanErr := runsRows.Scan(&runID, &startedAt, &finishedAt, &status, &jobsAdded, &sourcesRaw, &errorMessage, &durationSeconds); scanErr == nil {
+				if len(sourcesRaw) > 0 && strings.Contains(sourcesRaw, ":") {
+					if aggregatedBytes, aggregationError := utils.AggregateSourceStatistics([]byte(sourcesRaw)); aggregationError == nil && len(aggregatedBytes) > 2 {
+						sourcesRaw = string(aggregatedBytes)
+					}
+				}
 				runs = append(runs, gin.H{
 					"run_id":           runID,
 					"started_at":       startedAt.Format(time.RFC3339),

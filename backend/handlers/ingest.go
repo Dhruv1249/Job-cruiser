@@ -497,6 +497,10 @@ func (h *IngestHandler) FinishRun(c *gin.Context) {
 
 	var err error
 	if len(req.SourcesHit) > 0 && string(req.SourcesHit) != "null" {
+		aggregatedSourcesPayload, aggregationError := utils.AggregateSourceStatistics(req.SourcesHit)
+		if aggregationError == nil {
+			req.SourcesHit = aggregatedSourcesPayload
+		}
 		query := `
 			UPDATE scraper_runs
 			SET status = $1,

@@ -435,6 +435,17 @@ class _ScraperRunHistoryCardState extends State<ScraperRunHistoryCard> {
                         color: AppColors.primary,
                       ),
                     ),
+                    if (stat.queryCount > 1) ...[
+                      const SizedBox(width: 4),
+                      Text(
+                        '(${stat.queryCount} queries)',
+                        style: const TextStyle(
+                          fontSize: 9,
+                          color: AppColors.outline,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
                     if (stat.jobsFound > 0) ...[
                       const SizedBox(width: 4),
                       Text(
@@ -486,8 +497,13 @@ class _ScraperRunHistoryCardState extends State<ScraperRunHistoryCard> {
     if (lower.contains('smartrecruiters')) return const Color(0xFF0D9488);
     if (lower.contains('linkedin')) return const Color(0xFF0284C7);
     if (lower.contains('indeed')) return const Color(0xFF9333EA);
+    if (lower.contains('dice')) return const Color(0xFFDC2626);
     if (lower.contains('remoteok')) return const Color(0xFFE11D48);
     if (lower.contains('hn') || lower.contains('hacker')) return const Color(0xFFEA580C);
+    if (lower.contains('muse')) return const Color(0xFF10B981);
+    if (lower.contains('yc') || lower.contains('startup')) return const Color(0xFFF97316);
+    if (lower.contains('weworkremotely')) return const Color(0xFF06B6D4);
+    if (lower.contains('himalayas')) return const Color(0xFF8B5CF6);
     return AppColors.outline;
   }
 }

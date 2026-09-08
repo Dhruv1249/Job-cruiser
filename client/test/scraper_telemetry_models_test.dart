@@ -142,6 +142,29 @@ void main() {
       expect(detailDist.last.errorMessage, equals('Rate limited'));
     });
 
+    test('aggregates composite granular query keys by platform', () {
+      const logWithCompositeKeys = ScraperRunLog(
+        runId: 'run-granular-1',
+        startedAt: '2026-09-08T10:00:00Z',
+        finishedAt: '2026-09-08T10:05:00Z',
+        status: 'completed',
+        jobsAdded: 350,
+        sourcesRaw: '{"linkedin:sde:india": {"jobs_found": 200, "duration_seconds": 15.0}, "linkedin:devops:india": {"jobs_found": 100, "duration_seconds": 10.0}, "indeed:backend:remote": {"jobs_found": 50, "duration_seconds": 4.5}}',
+        errorMessage: '',
+        durationSeconds: 300,
+      );
+
+      final distribution = logWithCompositeKeys.sourceDistribution;
+      expect(distribution.length, equals(2));
+      expect(distribution.first.source, equals('linkedin'));
+      expect(distribution.first.jobsFound, equals(300));
+      expect(distribution.first.queryCount, equals(2));
+      expect(distribution.first.durationSeconds, equals(25.0));
+      expect(distribution.last.source, equals('indeed'));
+      expect(distribution.last.jobsFound, equals(50));
+      expect(distribution.last.queryCount, equals(1));
+    });
+
     test('handles empty or malformed payload gracefully', () {
       final data = ScraperTelemetryData.fromJson({});
 

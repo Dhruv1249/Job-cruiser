@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Dhruv1249/Job-cruiser/backend/handlers"
+	"github.com/Dhruv1249/Job-cruiser/backend/utils"
 )
 
 func TestExtractTechTagsMatchesKnownKeywords(t *testing.T) {
@@ -307,6 +308,44 @@ func TestFinishRequestSourceDistributionSerialization(t *testing.T) {
 	}
 	if sourceDistributionMap["ashby"] != 45 {
 		t.Errorf("expected ashby count 45, got %d", sourceDistributionMap["ashby"])
+	}
+}
+
+func TestFinishRequestGranularSourcesAggregation(t *testing.T) {
+	rawJSON := []byte(`{
+		"run_id": "run-telemetry-456",
+		"status": "success",
+		"sources_hit": {
+			"linkedin:sde i:india": {"jobs_found": 200, "duration_seconds": 15.0},
+			"linkedin:frontend:india": {"jobs_found": 100, "duration_seconds": 10.0},
+			"indeed:backend:remote": {"jobs_found": 50, "duration_seconds": 4.5}
+		}
+	}`)
+
+	var finishRequest handlers.FinishRequest
+	unmarshalErr := json.Unmarshal(rawJSON, &finishRequest)
+	if unmarshalErr != nil {
+		t.Fatalf("unexpected unmarshal error: %v", unmarshalErr)
+	}
+
+	aggregatedPayload, aggErr := utils.AggregateSourceStatistics(finishRequest.SourcesHit)
+	if aggErr != nil {
+		t.Fatalf("unexpected aggregation error: %v", aggErr)
+	}
+
+	var parsedMetrics map[string]utils.ScraperPlatformMetric
+	if parseErr := json.Unmarshal(aggregatedPayload, &parsedMetrics); parseErr != nil {
+		t.Fatalf("unexpected metric parse error: %v", parseErr)
+	}
+
+	if parsedMetrics["linkedin"].JobsFound != 300 {
+		t.Errorf("expected 300 jobs for linkedin, got %d", parsedMetrics["linkedin"].JobsFound)
+	}
+	if parsedMetrics["linkedin"].QueryCount != 2 {
+		t.Errorf("expected query count 2 for linkedin, got %d", parsedMetrics["linkedin"].QueryCount)
+	}
+	if parsedMetrics["indeed"].JobsFound != 50 {
+		t.Errorf("expected 50 jobs for indeed, got %d", parsedMetrics["indeed"].JobsFound)
 	}
 }
 

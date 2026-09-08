@@ -211,12 +211,14 @@ class ScraperSourceStat {
   const ScraperSourceStat({
     required this.source,
     required this.jobsFound,
+    this.queryCount = 1,
     this.durationSeconds = 0.0,
     this.errorMessage,
   });
 
   final String source;
   final int jobsFound;
+  final int queryCount;
   final double durationSeconds;
   final String? errorMessage;
 }
@@ -248,37 +250,68 @@ class ScraperRunLog {
     try {
       final decoded = jsonDecode(sourcesRaw);
       if (decoded is Map) {
-        final statList = <ScraperSourceStat>[];
+        final aggregatedMap = <String, _ScraperSourceAccumulator>{};
         decoded.forEach((key, value) {
-          final sourceName = key.toString();
+          final rawKey = key.toString().trim();
+          if (rawKey.isEmpty) return;
+
+          final platformIdentifier = rawKey.contains(':')
+              ? rawKey.split(':').first.trim().toLowerCase()
+              : rawKey.toLowerCase();
+          if (platformIdentifier.isEmpty) return;
+
+          final accumulator = aggregatedMap.putIfAbsent(
+            platformIdentifier,
+            () => _ScraperSourceAccumulator(source: platformIdentifier),
+          );
+
           if (value is num) {
-            statList.add(
-              ScraperSourceStat(
-                source: sourceName,
-                jobsFound: value.toInt(),
-              ),
-            );
+            accumulator.jobsFound += value.toInt();
+            accumulator.queryCount++;
           } else if (value is Map) {
             final jobsCount = (value['jobs_found'] as num?)?.toInt() ??
                 (value['count'] as num?)?.toInt() ??
                 0;
             final duration = (value['duration_seconds'] as num?)?.toDouble() ?? 0.0;
+            final queries = (value['query_count'] as num?)?.toInt() ?? 1;
             final errorText = value['error'] as String?;
-            statList.add(
-              ScraperSourceStat(
-                source: sourceName,
-                jobsFound: jobsCount,
-                durationSeconds: duration,
-                errorMessage: errorText,
-              ),
-            );
+
+            accumulator.jobsFound += jobsCount;
+            accumulator.durationSeconds += duration;
+            accumulator.queryCount += queries;
+            if (errorText != null && errorText.isNotEmpty) {
+              accumulator.errorMessage = errorText;
+            }
           }
         });
+
+        final statList = aggregatedMap.values
+            .map((item) => ScraperSourceStat(
+                  source: item.source,
+                  jobsFound: item.jobsFound,
+                  queryCount: item.queryCount > 0 ? item.queryCount : 1,
+                  durationSeconds: double.parse(item.durationSeconds.toStringAsFixed(2)),
+                  errorMessage: item.errorMessage,
+                ))
+            .toList();
         statList.sort((first, second) => second.jobsFound.compareTo(first.jobsFound));
         return statList;
       } else if (decoded is List) {
-        return decoded
-            .map((item) => ScraperSourceStat(source: item.toString(), jobsFound: 0))
+        final aggregatedMap = <String, int>{};
+        for (final item in decoded) {
+          final rawKey = item.toString().trim();
+          if (rawKey.isEmpty) continue;
+          final platform = rawKey.contains(':') ? rawKey.split(':').first.trim().toLowerCase() : rawKey.toLowerCase();
+          if (platform.isNotEmpty) {
+            aggregatedMap[platform] = (aggregatedMap[platform] ?? 0) + 1;
+          }
+        }
+        return aggregatedMap.entries
+            .map((entry) => ScraperSourceStat(
+                  source: entry.key,
+                  jobsFound: 0,
+                  queryCount: entry.value,
+                ))
             .toList();
       }
     } catch (_) {}
@@ -360,4 +393,16 @@ class ScraperTelemetryData {
           .toList(),
     );
   }
+}
+
+class _ScraperSourceAccumulator {
+  _ScraperSourceAccumulator({
+    required this.source,
+  });
+
+  final String source;
+  int jobsFound = 0;
+  int queryCount = 0;
+  double durationSeconds = 0.0;
+  String? errorMessage;
 }
