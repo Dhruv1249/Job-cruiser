@@ -541,7 +541,7 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 			COALESCE(p.achievements, '[]'::jsonb),
 			COALESCE(p.certifications, '[]'::jsonb),
 			COALESCE(u.parsed_experience::text, ''),
-			(p.user_id IS NOT NULL AND jsonb_array_length(COALESCE(p.target_roles, '[]'::jsonb)) > 0) AS has_preferences
+			(p.user_id IS NOT NULL) AS has_preferences
 		FROM users u
 		LEFT JOIN user_preferences p ON u.id = p.user_id
 		WHERE u.id = $1;

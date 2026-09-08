@@ -135,7 +135,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	checkPrefQuery := `
 		SELECT
 			COALESCE(u.ai_matching_enabled, false),
-			(up.user_id IS NOT NULL AND jsonb_array_length(COALESCE(up.target_roles, '[]'::jsonb)) > 0)
+			(up.user_id IS NOT NULL)
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id
 		WHERE u.id = $1;
@@ -254,7 +254,7 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 	checkPrefQuery := `
 		SELECT 
 			COALESCE(u.ai_matching_enabled, false),
-			(up.user_id IS NOT NULL AND jsonb_array_length(COALESCE(up.target_roles, '[]'::jsonb)) > 0)
+			(up.user_id IS NOT NULL)
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id
 		WHERE u.id = $1;
@@ -288,7 +288,7 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 		SELECT u.id, u.primary_email, COALESCE(up.full_name, ''), COALESCE(u.avatar_url, ''),
 		       COALESCE(u.ai_matching_enabled, false),
 		       COALESCE(u.is_master_admin, false),
-		       (up.user_id IS NOT NULL AND jsonb_array_length(COALESCE(up.target_roles, '[]'::jsonb)) > 0) AS has_preferences
+		       (up.user_id IS NOT NULL) AS has_preferences
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id
 		WHERE u.id = $1;

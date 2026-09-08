@@ -593,3 +593,58 @@ func TestPreferencesBindingAndBackfill(testingContext *testing.T) {
 	}
 }
 
+func TestPreferencesBindingWithAllOptions(testingContext *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	testBody := map[string]interface{}{
+		"full_name":         "Dhruv All Options",
+		"target_roles":      []string{},
+		"target_industries": []string{},
+		"target_locations":  []string{"Any Location"},
+		"work_models":       []string{"any"},
+		"min_salary":        0,
+		"currency":          "USD",
+	}
+
+	jsonBytes, marshalError := json.Marshal(testBody)
+	if marshalError != nil {
+		testingContext.Fatalf("failed to marshal JSON: %v", marshalError)
+	}
+
+	router := gin.New()
+	router.POST("/preferences", func(ginContext *gin.Context) {
+		var requestPayload handlers.PreferencesRequest
+		if bindError := ginContext.ShouldBindJSON(&requestPayload); bindError != nil {
+			ginContext.JSON(http.StatusBadRequest, gin.H{"error": bindError.Error()})
+			return
+		}
+
+		if len(requestPayload.TargetRoles) != 0 {
+			testingContext.Errorf("expected empty target roles, got: %v", requestPayload.TargetRoles)
+		}
+		if len(requestPayload.TargetIndustries) != 0 {
+			testingContext.Errorf("expected empty target industries, got: %v", requestPayload.TargetIndustries)
+		}
+		if len(requestPayload.TargetLocations) != 1 || requestPayload.TargetLocations[0] != "Any Location" {
+			testingContext.Errorf("expected Any Location, got: %v", requestPayload.TargetLocations)
+		}
+		if len(requestPayload.WorkModels) != 1 || requestPayload.WorkModels[0] != "any" {
+			testingContext.Errorf("expected work models [any], got: %v", requestPayload.WorkModels)
+		}
+		if requestPayload.MinSalary != 0 {
+			testingContext.Errorf("expected min salary 0, got: %d", requestPayload.MinSalary)
+		}
+
+		ginContext.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	recorder := httptest.NewRecorder()
+	request, _ := http.NewRequest(http.MethodPost, "/preferences", bytes.NewBuffer(jsonBytes))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		testingContext.Errorf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+}
+
