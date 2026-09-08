@@ -20,7 +20,33 @@ class CompanyLogoAvatar extends StatefulWidget {
 }
 
 class _CompanyLogoAvatarState extends State<CompanyLogoAvatar> {
-  int _logoStage = 0; // 0: Clearbit, 1: Google Favicon, 2: Letter Fallback
+  static const int _maximumLogoProviderStages = 4;
+  int _logoStage = 0;
+
+  @override
+  void didUpdateWidget(covariant CompanyLogoAvatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.companyName != widget.companyName || oldWidget.jobUrl != widget.jobUrl) {
+      setState(() {
+        _logoStage = 0;
+      });
+    }
+  }
+
+  String _resolveLogoUrl(String domain, int stage) {
+    switch (stage) {
+      case 0:
+        return 'https://unavatar.io/$domain?fallback=false';
+      case 1:
+        return 'https://api.companyenrich.com/logo/$domain';
+      case 2:
+        return 'https://icon.horse/icon/$domain';
+      case 3:
+        return 'https://www.google.com/s2/favicons?domain=$domain&sz=128';
+      default:
+        return '';
+    }
+  }
 
   String? _extractDomain() {
     final cleanUrl = widget.jobUrl.trim();
@@ -57,13 +83,11 @@ class _CompanyLogoAvatarState extends State<CompanyLogoAvatar> {
   Widget build(BuildContext context) {
     final domain = _extractDomain();
 
-    if (domain == null || _logoStage >= 2) {
+    if (domain == null || _logoStage >= _maximumLogoProviderStages) {
       return _buildLetterAvatar();
     }
 
-    final String logoUrl = _logoStage == 0
-        ? 'https://logo.clearbit.com/$domain'
-        : 'https://www.google.com/s2/favicons?domain=$domain&sz=128';
+    final String logoUrl = _resolveLogoUrl(domain, _logoStage);
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(widget.size * 0.25),
@@ -73,6 +97,7 @@ class _CompanyLogoAvatarState extends State<CompanyLogoAvatar> {
         color: AppColors.surfaceContainerLowest,
         child: Image.network(
           logoUrl,
+          key: ValueKey<String>(logoUrl),
           width: widget.size,
           height: widget.size,
           fit: BoxFit.contain,
