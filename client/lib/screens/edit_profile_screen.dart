@@ -60,7 +60,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     if (widget.initialProfileData != null) {
       _populateFromData(widget.initialProfileData!);
-    } else {
+    }
+    if (_bioTextController.text.trim().isEmpty || widget.initialProfileData == null) {
       _loadProfileData();
     }
   }
@@ -91,7 +92,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _linkedinController.text = data["linkedin_url"] as String? ?? "";
     _githubController.text = data["github_url"] as String? ?? "";
     _portfolioController.text = data["portfolio_url"] as String? ?? "";
-    _bioTextController.text = data["bio_experience_text"] as String? ?? data["bio_summary"] as String? ?? "";
+    String bioText = data["bio_experience_text"] as String? ?? data["bio_summary"] as String? ?? "";
+    if (bioText.trim().isEmpty && data["master_cv_text"] != null) {
+      final masterCv = data["master_cv_text"].toString();
+      final delimiterIndex = masterCv.indexOf("--- STRUCTURED RESUME DETAILS ---");
+      if (delimiterIndex != -1) {
+        bioText = masterCv.substring(0, delimiterIndex).trim();
+      } else {
+        bioText = masterCv.trim();
+      }
+    }
+    _bioTextController.text = bioText;
 
     final customLinksList = data["custom_links"] as List<dynamic>? ?? [];
     _customLinkControllers.clear();
@@ -611,6 +622,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       "portfolio_url": _portfolioController.text.trim(),
       "custom_links": customLinksPayload,
       "bio_summary": _bioTextController.text.trim(),
+      "bio_experience_text": _bioTextController.text.trim(),
       "skills": _skills,
       "projects": _projects,
       "experiences": _experiences,

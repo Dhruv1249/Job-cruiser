@@ -48,6 +48,7 @@ type PreferencesRequest struct {
 	Currency                          string                    `json:"currency"`
 	MasterCVText                      string                    `json:"master_cv_text"`
 	BioExperienceText                 string                    `json:"bio_experience_text"`
+	BioSummary                        string                    `json:"bio_summary"`
 	AIMatchingEnabled                 bool                      `json:"ai_matching_enabled"`
 	TargetResumePages                 int                       `json:"target_resume_pages"`
 	TargetCoverLetterPages            int                       `json:"target_cover_letter_pages"`
@@ -65,21 +66,22 @@ type PreferencesRequest struct {
 ProfileUpdateRequest encapsulates personal background, contact information, social links, and structured resume items.
 */
 type ProfileUpdateRequest struct {
-	FullName       string                    `json:"full_name" binding:"required"`
-	Email          string                    `json:"email"`
-	Phone          string                    `json:"phone"`
-	Location       string                    `json:"location"`
-	LinkedInURL    string                    `json:"linkedin_url"`
-	GitHubURL      string                    `json:"github_url"`
-	PortfolioURL   string                    `json:"portfolio_url"`
-	CustomLinks    []CustomLinkItem          `json:"custom_links"`
-	BioSummary     string                    `json:"bio_summary"`
-	Experiences    []ParsedExperienceItem    `json:"experiences"`
-	Projects       []ParsedProjectItem       `json:"projects"`
-	Education      []ParsedEducationItem     `json:"education"`
-	Skills         []string                  `json:"skills"`
-	Achievements   []ParsedAchievementItem   `json:"achievements"`
-	Certifications []ParsedCertificationItem `json:"certifications"`
+	FullName          string                    `json:"full_name" binding:"required"`
+	Email             string                    `json:"email"`
+	Phone             string                    `json:"phone"`
+	Location          string                    `json:"location"`
+	LinkedInURL       string                    `json:"linkedin_url"`
+	GitHubURL         string                    `json:"github_url"`
+	PortfolioURL      string                    `json:"portfolio_url"`
+	CustomLinks       []CustomLinkItem          `json:"custom_links"`
+	BioSummary        string                    `json:"bio_summary"`
+	BioExperienceText string                    `json:"bio_experience_text"`
+	Experiences       []ParsedExperienceItem    `json:"experiences"`
+	Projects          []ParsedProjectItem       `json:"projects"`
+	Education         []ParsedEducationItem     `json:"education"`
+	Skills            []string                  `json:"skills"`
+	Achievements      []ParsedAchievementItem   `json:"achievements"`
+	Certifications    []ParsedCertificationItem `json:"certifications"`
 }
 
 /*
@@ -236,6 +238,11 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 		certificationsJSON = []byte("[]")
 	}
 
+	effectiveBio := strings.TrimSpace(req.BioSummary)
+	if effectiveBio == "" {
+		effectiveBio = strings.TrimSpace(req.BioExperienceText)
+	}
+
 	linksMap := map[string]string{
 		"linkedin":  req.LinkedInURL,
 		"github":    req.GitHubURL,
@@ -253,10 +260,10 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 	upsertQuery := `
 		INSERT INTO user_preferences (
 			user_id, full_name, email, phone, location, linkedin_url, github_url, portfolio_url,
-			custom_links, bio_experience_text, experiences, projects, education, skills, achievements, certifications,
+			custom_links, bio_experience_text, master_cv_text, experiences, projects, education, skills, achievements, certifications,
 			target_roles, work_models
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, '[]'::jsonb, '[]'::jsonb)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12, $13, $14, $15, $16, '[]'::jsonb, '[]'::jsonb)
 		ON CONFLICT (user_id)
 		DO UPDATE SET
 			full_name = EXCLUDED.full_name,
@@ -267,7 +274,8 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 			github_url = EXCLUDED.github_url,
 			portfolio_url = EXCLUDED.portfolio_url,
 			custom_links = EXCLUDED.custom_links,
-			bio_experience_text = EXCLUDED.bio_experience_text,
+			bio_experience_text = CASE WHEN EXCLUDED.bio_experience_text <> '' THEN EXCLUDED.bio_experience_text ELSE user_preferences.bio_experience_text END,
+			master_cv_text = CASE WHEN EXCLUDED.bio_experience_text <> '' THEN EXCLUDED.bio_experience_text ELSE user_preferences.master_cv_text END,
 			experiences = EXCLUDED.experiences,
 			projects = EXCLUDED.projects,
 			education = EXCLUDED.education,
@@ -288,7 +296,7 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 		req.GitHubURL,
 		req.PortfolioURL,
 		customLinksJSON,
-		req.BioSummary,
+		effectiveBio,
 		experiencesJSON,
 		projectsJSON,
 		educationJSON,
@@ -611,6 +619,41 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 				)
 			}(userID, expBytes, projBytes, eduBytes, skillsBytes, achBytes, certBytes)
 		}
+	}
+
+	if strings.TrimSpace(pref.BioExperienceText) == "" {
+		if strings.Contains(pref.MasterCVText, "--- STRUCTURED RESUME DETAILS ---") {
+			delimiterIndex := strings.Index(pref.MasterCVText, "--- STRUCTURED RESUME DETAILS ---")
+			bioPart := strings.TrimSpace(pref.MasterCVText[:delimiterIndex])
+			if bioPart != "" {
+				pref.BioExperienceText = bioPart
+			}
+		} else if strings.TrimSpace(pref.MasterCVText) != "" {
+			pref.BioExperienceText = strings.TrimSpace(pref.MasterCVText)
+		}
+	}
+
+	if strings.TrimSpace(pref.BioExperienceText) == "" && strings.TrimSpace(rawParsedExperience) != "" {
+		var parsedResp ParsedCVResponse
+		if unmarshalErr := json.Unmarshal([]byte(rawParsedExperience), &parsedResp); unmarshalErr == nil {
+			if strings.TrimSpace(parsedResp.BioSummary) != "" {
+				pref.BioExperienceText = strings.TrimSpace(parsedResp.BioSummary)
+			}
+		}
+	}
+
+	pref.BioSummary = pref.BioExperienceText
+
+	if strings.TrimSpace(pref.BioExperienceText) != "" {
+		go func(targetUserID interface{}, bioText string) {
+			_, _ = h.DB.Exec(
+				context.Background(),
+				`UPDATE user_preferences 
+				 SET bio_experience_text = $1 
+				 WHERE user_id = $2 AND (bio_experience_text IS NULL OR bio_experience_text = '')`,
+				bioText, targetUserID,
+			)
+		}(userID, pref.BioExperienceText)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

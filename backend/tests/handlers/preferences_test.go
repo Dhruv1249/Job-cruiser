@@ -500,3 +500,46 @@ func TestExtractStructuredResumeDetails(t *testing.T) {
 	}
 }
 
+func TestProfileUpdateBioBinding(testingContext *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	testBody := map[string]interface{}{
+		"full_name":           "Dhruv Dev",
+		"bio_experience_text": "Experienced software engineer",
+	}
+
+	jsonBytes, marshalError := json.Marshal(testBody)
+	if marshalError != nil {
+		testingContext.Fatalf("failed to marshal JSON: %v", marshalError)
+	}
+
+	router := gin.New()
+	router.POST("/user/profile", func(ginContext *gin.Context) {
+		var requestPayload handlers.ProfileUpdateRequest
+		if bindError := ginContext.ShouldBindJSON(&requestPayload); bindError != nil {
+			ginContext.JSON(http.StatusBadRequest, gin.H{"error": bindError.Error()})
+			return
+		}
+
+		effectiveBio := requestPayload.BioSummary
+		if effectiveBio == "" {
+			effectiveBio = requestPayload.BioExperienceText
+		}
+
+		if effectiveBio != "Experienced software engineer" {
+			testingContext.Errorf("expected effective bio, got %s", effectiveBio)
+		}
+
+		ginContext.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	recorder := httptest.NewRecorder()
+	request, _ := http.NewRequest(http.MethodPost, "/user/profile", bytes.NewBuffer(jsonBytes))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		testingContext.Errorf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+}
+

@@ -149,9 +149,31 @@ void main() {
       await tester.pump();
       await tester.tap(find.widgetWithText(ElevatedButton, "Save"));
       await tester.pumpAndSettle();
-
       expect(find.text("Distributed Cache"), findsOneWidget);
       expect(find.text("In-memory cache cluster"), findsOneWidget);
+    });
+
+    testWidgets("extracts bio from master_cv_text when bio_experience_text is omitted", (tester) async {
+      tester.view.physicalSize = const Size(1200, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      final fallbackData = {
+        "full_name": "Dhruv Dev",
+        "master_cv_text": "Experienced systems software engineer\n\n--- STRUCTURED RESUME DETAILS ---\n{\"skills\":[\"Go\"]}",
+      };
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: EditProfileScreen(
+            initialProfileData: fallbackData,
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(TextField, "Experienced systems software engineer"), findsOneWidget);
     });
   });
 }

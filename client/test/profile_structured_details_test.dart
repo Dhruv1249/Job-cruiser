@@ -58,7 +58,7 @@ void main() {
       "min_salary": 120000,
     };
 
-    testWidgets("ProfilePage renders distinct structured background sections", (tester) async {
+    testWidgets("ProfilePage remains unbloated, showing header, preferences, documents and actions", (tester) async {
       tester.view.physicalSize = const Size(1200, 3200);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
@@ -77,18 +77,15 @@ void main() {
 
       expect(find.text("Dhruv Dev"), findsWidgets);
       expect(find.text("dhruv@example.com"), findsWidgets);
-      expect(find.text("CONTACT & SOCIAL LINKS"), findsOneWidget);
-      expect(find.text("PROFESSIONAL SUMMARY"), findsOneWidget);
-      expect(find.text("TECHNICAL SKILLS"), findsOneWidget);
-      expect(find.text("FEATURED PROJECTS"), findsOneWidget);
-      expect(find.text("WORK EXPERIENCE"), findsOneWidget);
-      expect(find.text("EDUCATION & CREDENTIALS"), findsOneWidget);
       expect(find.text("JOB PREFERENCES & TARGETS"), findsOneWidget);
       expect(find.text("DOCUMENTS & TAILORING"), findsOneWidget);
 
-      expect(find.text("Job Cruiser Platform"), findsOneWidget);
-      expect(find.text("Lead Architect"), findsOneWidget);
-      expect(find.text("B.Tech Computer Science"), findsOneWidget);
+      expect(find.text("CONTACT & SOCIAL LINKS"), findsNothing);
+      expect(find.text("PROFESSIONAL SUMMARY"), findsNothing);
+      expect(find.text("TECHNICAL SKILLS"), findsNothing);
+      expect(find.text("FEATURED PROJECTS"), findsNothing);
+      expect(find.text("WORK EXPERIENCE"), findsNothing);
+      expect(find.text("EDUCATION & CREDENTIALS"), findsNothing);
 
       expect(find.widgetWithText(ElevatedButton, "Edit Profile & Bio"), findsOneWidget);
       expect(find.widgetWithText(OutlinedButton, "Job Preferences"), findsOneWidget);
