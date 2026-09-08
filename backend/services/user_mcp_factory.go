@@ -80,15 +80,17 @@ func LoadUserOverleafCredentials(
 
 	customSecret := ""
 	if encryptedToken != nil && *encryptedToken != "" {
-		if tokenEncrypted && len(aesKey) == 32 {
-			decrypted, decryptError := utils.DecryptToken(*encryptedToken, aesKey)
-			if decryptError == nil {
-				customSecret = decrypted
-			} else {
-				customSecret = *encryptedToken
+		if tokenEncrypted {
+			if len(aesKey) != 32 {
+				return nil, errors.New("invalid AES encryption key length")
 			}
+			decrypted, decryptError := utils.DecryptToken(*encryptedToken, aesKey)
+			if decryptError != nil {
+				return nil, fmt.Errorf("failed decrypting overleaf token: %w", decryptError)
+			}
+			customSecret = decrypted
 		} else {
-			customSecret = *encryptedToken
+			return nil, errors.New("unencrypted access token stored in configuration")
 		}
 	}
 

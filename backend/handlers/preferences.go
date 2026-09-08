@@ -813,17 +813,17 @@ func (h *PreferencesHandler) UpdateOverleafConfig(c *gin.Context) {
 	}
 
 	if cleanSecret != "" {
-		if len(h.AESKey) == 32 {
-			encrypted, encryptError := utils.EncryptToken(cleanSecret, h.AESKey)
-			if encryptError == nil {
-				encryptedToken = &encrypted
-				tokenEncrypted = true
-			} else {
-				encryptedToken = &cleanSecret
-			}
-		} else {
-			encryptedToken = &cleanSecret
+		if len(h.AESKey) != 32 {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Server encryption key is not properly configured"})
+			return
 		}
+		encrypted, encryptError := utils.EncryptToken(cleanSecret, h.AESKey)
+		if encryptError != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encrypt access token"})
+			return
+		}
+		encryptedToken = &encrypted
+		tokenEncrypted = true
 	}
 
 	query := `

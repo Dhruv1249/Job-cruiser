@@ -28,12 +28,15 @@ type SignupRequest struct {
 	Password string `json:"password" binding:"required,min=6"`
 }
 
-func isMasterAdminEmail(email string) bool {
-	configuredAdminEmail := os.Getenv("MASTER_ADMIN_EMAIL")
+/*
+IsMasterAdminEmail checks whether the provided email matches the configured MASTER_ADMIN_EMAIL environment variable.
+*/
+func IsMasterAdminEmail(candidateEmail string) bool {
+	configuredAdminEmail := strings.TrimSpace(os.Getenv("MASTER_ADMIN_EMAIL"))
 	if configuredAdminEmail == "" {
-		configuredAdminEmail = "dhr1249.lm@gmail.com"
+		return false
 	}
-	return strings.EqualFold(email, configuredAdminEmail)
+	return strings.EqualFold(strings.TrimSpace(candidateEmail), configuredAdminEmail)
 }
 
 func (h *AuthHandler) isEmailWhitelisted(email string) bool {
@@ -61,7 +64,7 @@ func (h *AuthHandler) Signup(c *gin.Context) {
 		return
 	}
 
-	isMasterAdmin := isMasterAdminEmail(req.Email)
+	isMasterAdmin := IsMasterAdminEmail(req.Email)
 	var newUserID string
 	query := `
 		INSERT INTO users (primary_email, password_hash, is_master_admin) 
@@ -224,7 +227,7 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 		}
 
 		isNewUser = true
-		isMasterAdmin = isMasterAdminEmail(email)
+		isMasterAdmin = IsMasterAdminEmail(email)
 		insertQuery := `
 			INSERT INTO users (primary_email, avatar_url, google_id, auth_provider, is_master_admin, ai_matching_enabled)
 			VALUES ($1, $2, $3, 'google', $4, false)

@@ -163,19 +163,29 @@ func TestMCPClientGetProjectPDFSuccess(t *testing.T) {
 	}
 }
 
-func TestGenerateMCPToken(t *testing.T) {
+func TestGenerateMCPToken(testingContext *testing.T) {
 	token1 := services.GenerateMCPToken("my_secret", "hash123", "my_repo")
 	token2 := services.GenerateMCPToken("my_secret", "hash123", "my_repo")
 	if token1 == "" || len(token1) != 64 {
-		t.Fatalf("expected 64-char hex token, got %s", token1)
+		testingContext.Fatalf("expected 64-char hex token, got %s", token1)
 	}
 	if token1 != token2 {
-		t.Fatalf("expected deterministic token derivation, got %s vs %s", token1, token2)
+		testingContext.Fatalf("expected deterministic token derivation, got %s vs %s", token1, token2)
 	}
 
 	diffToken := services.GenerateMCPToken("other_secret", "hash123", "my_repo")
 	if token1 == diffToken {
-		t.Fatalf("different secret should yield different token")
+		testingContext.Fatalf("different secret should yield different token")
+	}
+
+	if services.GenerateMCPToken("", "hash123", "my_repo") != "" {
+		testingContext.Fatal("expected empty string when secret is empty")
+	}
+	if services.GenerateMCPToken("my_secret", "", "my_repo") != "" {
+		testingContext.Fatal("expected empty string when ghTokenHash is empty")
+	}
+	if services.GenerateMCPToken("my_secret", "hash123", "") != "" {
+		testingContext.Fatal("expected empty string when repoName is empty")
 	}
 }
 

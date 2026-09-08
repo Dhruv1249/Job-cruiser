@@ -12,17 +12,13 @@ import (
 	"time"
 )
 
-// GenerateMCPToken derives SHA-256 authorization token from secret, github token hash, and repository name.
+/*
+GenerateMCPToken derives SHA-256 authorization token from secret, github token hash, and repository name.
+Returns an empty string if any required credential component is missing.
+*/
 func GenerateMCPToken(secret string, ghTokenHash string, repoName string) string {
-	if secret == "" {
-		secret = "open_overleaf_mcp_secret"
-	}
-	if ghTokenHash == "" {
-		sum := sha256.Sum256([]byte("default_gh_token"))
-		ghTokenHash = hex.EncodeToString(sum[:])
-	}
-	if repoName == "" {
-		repoName = "overleaf-projects"
+	if secret == "" || ghTokenHash == "" || repoName == "" {
+		return ""
 	}
 	rawCombined := fmt.Sprintf("%s:%s:%s", secret, ghTokenHash, repoName)
 	hashBytes := sha256.Sum256([]byte(rawCombined))

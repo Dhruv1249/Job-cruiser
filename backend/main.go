@@ -99,7 +99,7 @@ func main() {
 			salt = os.Getenv("DATABASE_URL")
 		}
 		if salt == "" {
-			salt = "job_cruiser_aes_default_key_2026"
+			log.Fatalf("CRITICAL ERROR: Neither OVERLEAF_AES_KEY, JWT_SECRET, nor DATABASE_URL is configured.")
 		}
 		hash := sha256.Sum256([]byte("job_cruiser_overleaf_aes_key:" + salt))
 		overleafAESKey = hash[:]
