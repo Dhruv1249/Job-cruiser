@@ -457,6 +457,35 @@ class _ProfilePageState extends State<ProfilePage> {
                         color: AppColors.onSurfaceVariant,
                       ),
                     ),
+                    Builder(
+                      builder: (context) {
+                        final locationText = [
+                          _preferencesData?["location"]?.toString() ?? _userProfile?["location"]?.toString() ?? "",
+                          _preferencesData?["country"]?.toString() ?? ""
+                        ].where((element) => element.trim().isNotEmpty).join(", ");
+                        if (locationText.isEmpty) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.location_on_outlined,
+                                size: 14,
+                                color: AppColors.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                locationText,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
                     const SizedBox(height: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(

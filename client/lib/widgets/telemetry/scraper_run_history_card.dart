@@ -484,10 +484,16 @@ class _ScraperRunHistoryCardState extends State<ScraperRunHistoryCard> {
                         ),
                       ),
                     ],
-                    if (stat.jobsFound > 0) ...[
+                    if (stat.jobsFound > 0 || stat.jobsAdded > 0) ...[
                       const SizedBox(width: 4),
                       Text(
-                        '${stat.jobsFound} jobs',
+                        stat.jobsAdded > 0 && stat.jobsFound > stat.jobsAdded
+                            ? '${stat.jobsFound} discovered → ${stat.jobsAdded} kept (${stat.duplicatesFiltered} deduped)'
+                            : stat.jobsAdded > 0 && stat.jobsAdded == stat.jobsFound
+                                ? '${stat.jobsAdded} jobs (100% new)'
+                                : stat.jobsAdded > 0 && stat.jobsFound == 0
+                                    ? '${stat.jobsAdded} jobs added'
+                                    : '${stat.jobsFound} jobs',
                         style: const TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w800,
@@ -521,6 +527,71 @@ class _ScraperRunHistoryCardState extends State<ScraperRunHistoryCard> {
               );
             }).toList(),
           ),
+          if (run.topCompanies.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Company Deduplication Breakdown (${run.topCompanies.length} companies added in this run)',
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: run.topCompanies.take(15).map((comp) {
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: AppColors.outlineVariant.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.business,
+                        size: 12,
+                        color: AppColors.primary,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        comp.companyName,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryContainer.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          comp.jobsFound > comp.jobsAdded && comp.jobsFound > 0
+                              ? '${comp.jobsFound} discovered → ${comp.jobsAdded} kept'
+                              : '${comp.jobsAdded} jobs',
+                          style: const TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
         ],
       ),
     );

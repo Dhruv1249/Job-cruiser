@@ -165,6 +165,37 @@ void main() {
       expect(distribution.last.queryCount, equals(1));
     });
 
+    test('parses deduplication statistics and top companies correctly', () {
+      const logWithDeduplication = ScraperRunLog(
+        runId: 'run-dedup-1',
+        startedAt: '2026-09-08T10:00:00Z',
+        finishedAt: '2026-09-08T10:05:00Z',
+        status: 'success',
+        jobsAdded: 120,
+        sourcesRaw: '{"linkedin": {"jobs_found": 1000, "jobs_added": 80, "duration_seconds": 12.0}, "indeed": {"jobs_found": 500, "jobs_added": 40, "duration_seconds": 6.0}}',
+        companiesRaw: '[{"company_name": "Acme Corp", "jobs_added": 25, "jobs_found": 100}, {"company_name": "Globex", "jobs_added": 15}]',
+        errorMessage: '',
+        durationSeconds: 300,
+      );
+
+      final sourceStats = logWithDeduplication.sourceDistribution;
+      expect(sourceStats.length, equals(2));
+      expect(sourceStats.first.source, equals('linkedin'));
+      expect(sourceStats.first.jobsFound, equals(1000));
+      expect(sourceStats.first.jobsAdded, equals(80));
+      expect(sourceStats.first.duplicatesFiltered, equals(920));
+      expect(sourceStats.first.dedupPercentage, equals(92.0));
+
+      final companyStats = logWithDeduplication.topCompanies;
+      expect(companyStats.length, equals(2));
+      expect(companyStats.first.companyName, equals('Acme Corp'));
+      expect(companyStats.first.jobsAdded, equals(25));
+      expect(companyStats.first.jobsFound, equals(100));
+      expect(companyStats.first.duplicatesFiltered, equals(75));
+      expect(companyStats.last.companyName, equals('Globex'));
+      expect(companyStats.last.jobsAdded, equals(15));
+    });
+
     test('handles empty or malformed payload gracefully', () {
       final data = ScraperTelemetryData.fromJson({});
 

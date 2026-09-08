@@ -8,6 +8,7 @@ import (
 
 type ScraperPlatformMetric struct {
 	JobsFound       int     `json:"jobs_found"`
+	JobsAdded       int     `json:"jobs_added"`
 	DurationSeconds float64 `json:"duration_seconds"`
 	QueryCount      int     `json:"query_count"`
 	Error           *string `json:"error,omitempty"`
@@ -56,6 +57,12 @@ func AggregateSourceStatistics(rawSourcesJSON []byte) ([]byte, error) {
 				} else if countValue, hasCount := detailMap["count"]; hasCount && countValue != nil {
 					if numericCount, isNumber := countValue.(float64); isNumber {
 						platformMetric.JobsFound += int(numericCount)
+					}
+				}
+
+				if addedValue, hasAdded := detailMap["jobs_added"]; hasAdded && addedValue != nil {
+					if numericAdded, isNumber := addedValue.(float64); isNumber {
+						platformMetric.JobsAdded += int(numericAdded)
 					}
 				}
 

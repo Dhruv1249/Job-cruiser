@@ -14,6 +14,7 @@ void main() {
       "email": "dhruv@example.com",
       "phone": "+91 9876543210",
       "location": "Bengaluru, India",
+      "country": "India",
       "linkedin_url": "https://linkedin.com/in/dhruvdev",
       "github_url": "https://github.com/dhruvdev",
       "portfolio_url": "https://dhruvdev.com",
@@ -65,6 +66,7 @@ void main() {
       expect(find.widgetWithText(TextFormField, "dhruv@example.com"), findsOneWidget);
       expect(find.widgetWithText(TextFormField, "+91 9876543210"), findsOneWidget);
       expect(find.widgetWithText(TextFormField, "Bengaluru, India"), findsOneWidget);
+      expect(find.widgetWithText(TextFormField, "India"), findsOneWidget);
 
       expect(find.text("Go"), findsWidgets);
       expect(find.text("Flutter"), findsWidgets);

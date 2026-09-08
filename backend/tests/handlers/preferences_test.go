@@ -213,6 +213,7 @@ func TestPreferencesRequestBindingWithLinks(t *testing.T) {
 		"email":         "jane@example.com",
 		"phone":         "+1 555-0199",
 		"location":      "Bengaluru, India",
+		"country":       "India",
 		"github_url":    "https://github.com/janedoe",
 		"linkedin_url":  "https://linkedin.com/in/janedoe",
 		"portfolio_url": "https://janedoe.dev",
@@ -235,6 +236,10 @@ func TestPreferencesRequestBindingWithLinks(t *testing.T) {
 		if bindErr := c.ShouldBindJSON(&req); bindErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": bindErr.Error()})
 			return
+		}
+
+		if req.Country != "India" {
+			t.Errorf("expected country India, got %q", req.Country)
 		}
 
 		if req.Email != "jane@example.com" {
@@ -430,6 +435,7 @@ func TestProfileUpdateRequestBinding(t *testing.T) {
 		"email":          "dhruv@example.com",
 		"phone":          "+91 9876543210",
 		"location":       "Bangalore, India",
+		"country":        "India",
 		"bio_summary":    "Passionate backend developer with expertise in Go and cloud systems.",
 		"linkedin_url":   "https://linkedin.com/in/dhruv",
 		"github_url":     "https://github.com/dhruv",
@@ -458,7 +464,7 @@ func TestProfileUpdateRequestBinding(t *testing.T) {
 			return
 		}
 
-		if req.FullName != "Dhruv Dev" || req.Email != "dhruv@example.com" {
+		if req.FullName != "Dhruv Dev" || req.Email != "dhruv@example.com" || req.Country != "India" {
 			t.Errorf("unexpected profile binding: %+v", req)
 		}
 		if len(req.Projects) != 1 || req.Projects[0].Title != "Open Overleaf" {

@@ -26,6 +26,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late final TextEditingController _emailController;
   late final TextEditingController _phoneController;
   late final TextEditingController _locationController;
+  late final TextEditingController _countryController;
   late final TextEditingController _linkedinController;
   late final TextEditingController _githubController;
   late final TextEditingController _portfolioController;
@@ -52,6 +53,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _emailController = TextEditingController();
     _phoneController = TextEditingController();
     _locationController = TextEditingController();
+    _countryController = TextEditingController();
     _linkedinController = TextEditingController();
     _githubController = TextEditingController();
     _portfolioController = TextEditingController();
@@ -72,6 +74,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _emailController.dispose();
     _phoneController.dispose();
     _locationController.dispose();
+    _countryController.dispose();
     _linkedinController.dispose();
     _githubController.dispose();
     _portfolioController.dispose();
@@ -89,6 +92,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _emailController.text = data["email"] as String? ?? "";
     _phoneController.text = data["phone"] as String? ?? "";
     _locationController.text = data["location"] as String? ?? "";
+    _countryController.text = data["country"] as String? ?? "";
     _linkedinController.text = data["linkedin_url"] as String? ?? "";
     _githubController.text = data["github_url"] as String? ?? "";
     _portfolioController.text = data["portfolio_url"] as String? ?? "";
@@ -617,6 +621,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       "email": _emailController.text.trim(),
       "phone": _phoneController.text.trim(),
       "location": _locationController.text.trim(),
+      "country": _countryController.text.trim(),
       "linkedin_url": _linkedinController.text.trim(),
       "github_url": _githubController.text.trim(),
       "portfolio_url": _portfolioController.text.trim(),
@@ -910,11 +915,21 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   controller: _locationController,
                   decoration: const InputDecoration(
                     labelText: "Location / City",
-                    prefixIcon: Icon(Icons.location_on_outlined, size: 20),
+                    hintText: "e.g. San Francisco, CA",
+                    prefixIcon: Icon(Icons.location_city_outlined, size: 20),
                   ),
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _countryController,
+            decoration: const InputDecoration(
+              labelText: "Country",
+              hintText: "e.g. India, United States, United Kingdom",
+              prefixIcon: Icon(Icons.public_outlined, size: 20),
+            ),
           ),
         ],
       ),

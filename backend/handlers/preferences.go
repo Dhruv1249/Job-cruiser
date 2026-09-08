@@ -36,6 +36,7 @@ type PreferencesRequest struct {
 	Email                             string                    `json:"email"`
 	Phone                             string                    `json:"phone"`
 	Location                          string                    `json:"location"`
+	Country                           string                    `json:"country"`
 	LinkedInURL                       string                    `json:"linkedin_url"`
 	GitHubURL                         string                    `json:"github_url"`
 	PortfolioURL                      string                    `json:"portfolio_url"`
@@ -70,6 +71,7 @@ type ProfileUpdateRequest struct {
 	Email             string                    `json:"email"`
 	Phone             string                    `json:"phone"`
 	Location          string                    `json:"location"`
+	Country           string                    `json:"country"`
 	LinkedInURL       string                    `json:"linkedin_url"`
 	GitHubURL         string                    `json:"github_url"`
 	PortfolioURL      string                    `json:"portfolio_url"`
@@ -259,17 +261,18 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 
 	upsertQuery := `
 		INSERT INTO user_preferences (
-			user_id, full_name, email, phone, location, linkedin_url, github_url, portfolio_url,
+			user_id, full_name, email, phone, location, country, linkedin_url, github_url, portfolio_url,
 			custom_links, bio_experience_text, master_cv_text, experiences, projects, education, skills, achievements, certifications,
 			target_roles, work_models
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12, $13, $14, $15, $16, '[]'::jsonb, '[]'::jsonb)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13, $14, $15, $16, $17, '[]'::jsonb, '[]'::jsonb)
 		ON CONFLICT (user_id)
 		DO UPDATE SET
 			full_name = EXCLUDED.full_name,
 			email = EXCLUDED.email,
 			phone = EXCLUDED.phone,
 			location = EXCLUDED.location,
+			country = EXCLUDED.country,
 			linkedin_url = EXCLUDED.linkedin_url,
 			github_url = EXCLUDED.github_url,
 			portfolio_url = EXCLUDED.portfolio_url,
@@ -292,6 +295,7 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 		req.Email,
 		req.Phone,
 		req.Location,
+		req.Country,
 		req.LinkedInURL,
 		req.GitHubURL,
 		req.PortfolioURL,
@@ -443,19 +447,20 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 
 	query := `
 		INSERT INTO user_preferences (
-			user_id, full_name, email, phone, location, linkedin_url, github_url, portfolio_url,
+			user_id, full_name, email, phone, location, country, linkedin_url, github_url, portfolio_url,
 			custom_links, target_roles, target_industries, target_locations, work_models,
 			min_salary, currency, master_cv_text, bio_experience_text, target_resume_pages,
 			target_cover_letter_pages, match_threshold_notification_enabled, match_threshold_percentage,
 			experiences, projects, education, skills, achievements, certifications
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
 		ON CONFLICT (user_id) 
 		DO UPDATE SET 
 			full_name = CASE WHEN EXCLUDED.full_name <> '' AND EXCLUDED.full_name <> 'User' THEN EXCLUDED.full_name ELSE user_preferences.full_name END,
 			email = CASE WHEN EXCLUDED.email <> '' THEN EXCLUDED.email ELSE user_preferences.email END,
 			phone = CASE WHEN EXCLUDED.phone <> '' THEN EXCLUDED.phone ELSE user_preferences.phone END,
 			location = CASE WHEN EXCLUDED.location <> '' THEN EXCLUDED.location ELSE user_preferences.location END,
+			country = CASE WHEN EXCLUDED.country <> '' THEN EXCLUDED.country ELSE user_preferences.country END,
 			linkedin_url = CASE WHEN EXCLUDED.linkedin_url <> '' THEN EXCLUDED.linkedin_url ELSE user_preferences.linkedin_url END,
 			github_url = CASE WHEN EXCLUDED.github_url <> '' THEN EXCLUDED.github_url ELSE user_preferences.github_url END,
 			portfolio_url = CASE WHEN EXCLUDED.portfolio_url <> '' THEN EXCLUDED.portfolio_url ELSE user_preferences.portfolio_url END,
@@ -489,6 +494,7 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 		req.Email,
 		req.Phone,
 		req.Location,
+		req.Country,
 		req.LinkedInURL,
 		req.GitHubURL,
 		req.PortfolioURL,
@@ -540,6 +546,7 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 			COALESCE(p.email, u.primary_email, ''),
 			COALESCE(p.phone, u.phone, ''),
 			COALESCE(p.location, u.location, ''),
+			COALESCE(p.country, ''),
 			COALESCE(p.linkedin_url, u.links->>'linkedin', ''),
 			COALESCE(p.github_url, u.links->>'github', ''),
 			COALESCE(p.portfolio_url, u.links->>'portfolio', ''),
@@ -586,6 +593,7 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 		&pref.Email,
 		&pref.Phone,
 		&pref.Location,
+		&pref.Country,
 		&pref.LinkedInURL,
 		&pref.GitHubURL,
 		&pref.PortfolioURL,

@@ -211,6 +211,7 @@ class ScraperSourceStat {
   const ScraperSourceStat({
     required this.source,
     required this.jobsFound,
+    this.jobsAdded = 0,
     this.queryCount = 1,
     this.durationSeconds = 0.0,
     this.errorMessage,
@@ -218,9 +219,36 @@ class ScraperSourceStat {
 
   final String source;
   final int jobsFound;
+  final int jobsAdded;
   final int queryCount;
   final double durationSeconds;
   final String? errorMessage;
+
+  int get duplicatesFiltered => jobsFound > jobsAdded ? jobsFound - jobsAdded : 0;
+  double get dedupPercentage => jobsFound > 0 ? (duplicatesFiltered / jobsFound) * 100 : 0.0;
+}
+
+/// Represents volume and deduplication yield for a company in a scraper run.
+class ScraperCompanyStat {
+  const ScraperCompanyStat({
+    required this.companyName,
+    required this.jobsAdded,
+    this.jobsFound = 0,
+  });
+
+  final String companyName;
+  final int jobsAdded;
+  final int jobsFound;
+
+  int get duplicatesFiltered => jobsFound > jobsAdded ? jobsFound - jobsAdded : 0;
+
+  factory ScraperCompanyStat.fromJson(Map<String, dynamic> json) {
+    return ScraperCompanyStat(
+      companyName: json['company_name'] as String? ?? json['name'] as String? ?? '',
+      jobsAdded: (json['jobs_added'] as num?)?.toInt() ?? (json['count'] as num?)?.toInt() ?? 0,
+      jobsFound: (json['jobs_found'] as num?)?.toInt() ?? 0,
+    );
+  }
 }
 
 /// Representation of an individual scraper execution run.
@@ -232,6 +260,7 @@ class ScraperRunLog {
     required this.status,
     required this.jobsAdded,
     required this.sourcesRaw,
+    this.companiesRaw = '[]',
     required this.errorMessage,
     required this.durationSeconds,
   });
@@ -242,8 +271,24 @@ class ScraperRunLog {
   final String status;
   final int jobsAdded;
   final String sourcesRaw;
+  final String companiesRaw;
   final String errorMessage;
   final int durationSeconds;
+
+  List<ScraperCompanyStat> get topCompanies {
+    if (companiesRaw.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(companiesRaw);
+      if (decoded is List) {
+        return decoded
+            .whereType<Map>()
+            .map((item) => ScraperCompanyStat.fromJson(Map<String, dynamic>.from(item)))
+            .where((stat) => stat.companyName.isNotEmpty)
+            .toList();
+      }
+    } catch (_) {}
+    return const [];
+  }
 
   List<ScraperSourceStat> get sourceDistribution {
     if (sourcesRaw.isEmpty) return const [];
@@ -272,11 +317,13 @@ class ScraperRunLog {
             final jobsCount = (value['jobs_found'] as num?)?.toInt() ??
                 (value['count'] as num?)?.toInt() ??
                 0;
+            final addedCount = (value['jobs_added'] as num?)?.toInt() ?? 0;
             final duration = (value['duration_seconds'] as num?)?.toDouble() ?? 0.0;
             final queries = (value['query_count'] as num?)?.toInt() ?? 1;
             final errorText = value['error'] as String?;
 
             accumulator.jobsFound += jobsCount;
+            accumulator.jobsAdded += addedCount;
             accumulator.durationSeconds += duration;
             accumulator.queryCount += queries;
             if (errorText != null && errorText.isNotEmpty) {
@@ -289,6 +336,7 @@ class ScraperRunLog {
             .map((item) => ScraperSourceStat(
                   source: item.source,
                   jobsFound: item.jobsFound,
+                  jobsAdded: item.jobsAdded,
                   queryCount: item.queryCount > 0 ? item.queryCount : 1,
                   durationSeconds: double.parse(item.durationSeconds.toStringAsFixed(2)),
                   errorMessage: item.errorMessage,
@@ -334,6 +382,7 @@ class ScraperRunLog {
       status: json['status'] as String? ?? 'completed',
       jobsAdded: (json['jobs_added'] as num?)?.toInt() ?? 0,
       sourcesRaw: json['sources_hit'] as String? ?? '[]',
+      companiesRaw: json['companies_hit'] as String? ?? '[]',
       errorMessage: json['error_message'] as String? ?? '',
       durationSeconds: (json['duration_seconds'] as num?)?.toInt() ?? 0,
     );
@@ -402,6 +451,7 @@ class _ScraperSourceAccumulator {
 
   final String source;
   int jobsFound = 0;
+  int jobsAdded = 0;
   int queryCount = 0;
   double durationSeconds = 0.0;
   String? errorMessage;

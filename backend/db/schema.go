@@ -53,6 +53,7 @@ var schemaQueries = []string{
 		currency VARCHAR(10) DEFAULT 'USD',
 		master_cv_text TEXT,
 		bio_experience_text TEXT,
+		country TEXT DEFAULT '',
 		custom_form_answers JSONB DEFAULT '{}'::jsonb,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`,
@@ -257,6 +258,7 @@ var schemaQueries = []string{
 		status VARCHAR(20) DEFAULT 'running',
 		jobs_added INTEGER DEFAULT 0,
 		sources_hit JSONB DEFAULT '[]'::jsonb,
+		companies_hit JSONB DEFAULT '[]'::jsonb,
 		error_message TEXT
 	);`,
 
@@ -353,6 +355,8 @@ var schemaQueries = []string{
 	`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS job_id UUID REFERENCES jobs(id) ON DELETE SET NULL;`,
 	`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS reasoning TEXT;`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS country TEXT DEFAULT '';`,
+	`ALTER TABLE scraper_runs ADD COLUMN IF NOT EXISTS companies_hit JSONB DEFAULT '[]'::jsonb;`,
 }
 
 // InitSchema executes the queries in sequence.

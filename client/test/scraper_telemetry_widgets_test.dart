@@ -302,5 +302,45 @@ void main() {
       expect(find.text('100 jobs'), findsOneWidget);
       expect(find.text('(40.0%)'), findsOneWidget);
     });
+
+    testWidgets('ScraperRunHistoryCard displays source deduplication details and company breakdown', (tester) async {
+      final runsWithDedup = [
+        const ScraperRunLog(
+          runId: 'test-run-dedup',
+          startedAt: '2026-09-08T12:00:00Z',
+          finishedAt: '2026-09-08T12:05:00Z',
+          status: 'success',
+          jobsAdded: 25,
+          sourcesRaw: '{"linkedin": {"jobs_found": 100, "jobs_added": 20}, "himalayas": {"jobs_found": 5, "jobs_added": 5}}',
+          companiesRaw: '[{"company_name": "Acme Corp", "jobs_added": 15}, {"company_name": "Globex", "jobs_added": 10}]',
+          errorMessage: '',
+          durationSeconds: 300,
+        ),
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: ScraperRunHistoryCard(
+                runHealth: mockRunHealth,
+                runs: runsWithDedup,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('+25 jobs'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('100 discovered → 20 kept (80 deduped)'), findsOneWidget);
+      expect(find.text('5 jobs (100% new)'), findsOneWidget);
+      expect(find.text('Company Deduplication Breakdown (2 companies added in this run)'), findsOneWidget);
+      expect(find.text('Acme Corp'), findsOneWidget);
+      expect(find.text('15 jobs'), findsOneWidget);
+      expect(find.text('Globex'), findsOneWidget);
+      expect(find.text('10 jobs'), findsOneWidget);
+    });
   });
 }

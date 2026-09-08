@@ -747,7 +747,8 @@ func (h *AdminHandler) GetScraperStats(c *gin.Context) {
 		SELECT id, started_at, COALESCE(finished_at, started_at), status, jobs_added,
 		       COALESCE(sources_hit::text, '[]'),
 		       COALESCE(error_message, ''),
-		       EXTRACT(EPOCH FROM (COALESCE(finished_at, started_at) - started_at))::INT AS duration_seconds
+		       EXTRACT(EPOCH FROM (COALESCE(finished_at, started_at) - started_at))::INT AS duration_seconds,
+		       COALESCE(companies_hit::text, '[]')
 		FROM scraper_runs
 		ORDER BY started_at DESC
 		LIMIT 50;
@@ -757,10 +758,10 @@ func (h *AdminHandler) GetScraperStats(c *gin.Context) {
 	if runsErr == nil {
 		defer runsRows.Close()
 		for runsRows.Next() {
-			var runID, status, sourcesRaw, errorMessage string
+			var runID, status, sourcesRaw, errorMessage, companiesRaw string
 			var startedAt, finishedAt time.Time
 			var jobsAdded, durationSeconds int
-			if scanErr := runsRows.Scan(&runID, &startedAt, &finishedAt, &status, &jobsAdded, &sourcesRaw, &errorMessage, &durationSeconds); scanErr == nil {
+			if scanErr := runsRows.Scan(&runID, &startedAt, &finishedAt, &status, &jobsAdded, &sourcesRaw, &errorMessage, &durationSeconds, &companiesRaw); scanErr == nil {
 				if len(sourcesRaw) > 0 && strings.Contains(sourcesRaw, ":") {
 					if aggregatedBytes, aggregationError := utils.AggregateSourceStatistics([]byte(sourcesRaw)); aggregationError == nil && len(aggregatedBytes) > 2 {
 						sourcesRaw = string(aggregatedBytes)
@@ -773,6 +774,7 @@ func (h *AdminHandler) GetScraperStats(c *gin.Context) {
 					"status":           status,
 					"jobs_added":       jobsAdded,
 					"sources_hit":      sourcesRaw,
+					"companies_hit":    companiesRaw,
 					"error_message":    errorMessage,
 					"duration_seconds": durationSeconds,
 				})

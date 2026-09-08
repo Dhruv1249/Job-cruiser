@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -114,11 +115,20 @@ func (h *IngestHandler) IngestRaw(c *gin.Context) {
 
 	insertedCount := 0
 	companyCache := make(map[string]string)
+	batchSourceFound := make(map[string]int)
+	batchSourceAdded := make(map[string]int)
+	batchCompanyAdded := make(map[string]int)
 
 	for jobIndex, job := range req.Jobs {
 		if job.AbsoluteURL == "" {
 			continue
 		}
+
+		normalizedSource := strings.ToLower(strings.TrimSpace(job.Source))
+		if normalizedSource == "" {
+			normalizedSource = "unknown"
+		}
+		batchSourceFound[normalizedSource]++
 
 		savepointName := fmt.Sprintf("sp_%d", jobIndex)
 		if _, spErr := tx.Exec(ctx, fmt.Sprintf("SAVEPOINT %s", savepointName)); spErr != nil {
@@ -141,44 +151,94 @@ func (h *IngestHandler) IngestRaw(c *gin.Context) {
 		}
 		if jobInserted {
 			insertedCount++
-		}
-	}
-
-	batchSourceDistribution := make(map[string]int)
-	for _, rawJobPayload := range req.Jobs {
-		normalizedSource := strings.TrimSpace(rawJobPayload.Source)
-		if normalizedSource == "" {
-			normalizedSource = "unknown"
-		}
-		batchSourceDistribution[normalizedSource]++
-	}
-
-	var existingSourcesJSON []byte
-	_ = tx.QueryRow(ctx, `SELECT COALESCE(sources_hit, '{}'::jsonb) FROM scraper_runs WHERE id = $1`, req.RunID).Scan(&existingSourcesJSON)
-
-	cumulativeSources := make(map[string]int)
-	if len(existingSourcesJSON) > 0 {
-		var decodedSources map[string]interface{}
-		if unmarshalErr := json.Unmarshal(existingSourcesJSON, &decodedSources); unmarshalErr == nil {
-			for sourceName, rawCount := range decodedSources {
-				if numericCount, isNumber := rawCount.(float64); isNumber {
-					cumulativeSources[sourceName] = int(numericCount)
-				}
+			batchSourceAdded[normalizedSource]++
+			extractedCompany := utils.ExtractCompanyName(job.Company, job.AbsoluteURL, job.Title)
+			if extractedCompany != "" {
+				batchCompanyAdded[extractedCompany]++
 			}
 		}
 	}
-	for sourceName, count := range batchSourceDistribution {
-		cumulativeSources[sourceName] += count
+
+	var existingSourcesJSON, existingCompaniesJSON []byte
+	_ = tx.QueryRow(ctx, `SELECT COALESCE(sources_hit, '{}'::jsonb), COALESCE(companies_hit, '[]'::jsonb) FROM scraper_runs WHERE id = $1`, req.RunID).Scan(&existingSourcesJSON, &existingCompaniesJSON)
+
+	cumulativeSources := make(map[string]utils.ScraperPlatformMetric)
+	if len(existingSourcesJSON) > 0 {
+		var rawMap map[string]interface{}
+		if unmarshalErr := json.Unmarshal(existingSourcesJSON, &rawMap); unmarshalErr == nil {
+			for sourceName, val := range rawMap {
+				metric := utils.ScraperPlatformMetric{}
+				if numCount, isNum := val.(float64); isNum {
+					metric.JobsFound = int(numCount)
+				} else if m, isMap := val.(map[string]interface{}); isMap {
+					if jf, ok := m["jobs_found"].(float64); ok {
+						metric.JobsFound = int(jf)
+					}
+					if ja, ok := m["jobs_added"].(float64); ok {
+						metric.JobsAdded = int(ja)
+					}
+					if ds, ok := m["duration_seconds"].(float64); ok {
+						metric.DurationSeconds = ds
+					}
+					if qc, ok := m["query_count"].(float64); ok {
+						metric.QueryCount = int(qc)
+					}
+				}
+				cumulativeSources[sourceName] = metric
+			}
+		}
+	}
+	for sourceName, foundCount := range batchSourceFound {
+		metric := cumulativeSources[sourceName]
+		metric.JobsFound += foundCount
+		metric.JobsAdded += batchSourceAdded[sourceName]
+		if metric.QueryCount == 0 {
+			metric.QueryCount = 1
+		}
+		cumulativeSources[sourceName] = metric
 	}
 	updatedSourcesJSON, _ := json.Marshal(cumulativeSources)
+
+	cumulativeCompanies := make(map[string]int)
+	if len(existingCompaniesJSON) > 0 {
+		var compList []struct {
+			CompanyName string `json:"company_name"`
+			JobsAdded   int    `json:"jobs_added"`
+		}
+		if unmarshalErr := json.Unmarshal(existingCompaniesJSON, &compList); unmarshalErr == nil {
+			for _, item := range compList {
+				cumulativeCompanies[item.CompanyName] += item.JobsAdded
+			}
+		}
+	}
+	for compName, addCount := range batchCompanyAdded {
+		cumulativeCompanies[compName] += addCount
+	}
+
+	type companyCountItem struct {
+		CompanyName string `json:"company_name"`
+		JobsAdded   int    `json:"jobs_added"`
+	}
+	var topCompanyList []companyCountItem
+	for compName, count := range cumulativeCompanies {
+		topCompanyList = append(topCompanyList, companyCountItem{CompanyName: compName, JobsAdded: count})
+	}
+	sort.Slice(topCompanyList, func(i, j int) bool {
+		return topCompanyList[i].JobsAdded > topCompanyList[j].JobsAdded
+	})
+	if len(topCompanyList) > 30 {
+		topCompanyList = topCompanyList[:30]
+	}
+	updatedCompaniesJSON, _ := json.Marshal(topCompanyList)
 
 	updateRunQuery := `
 		UPDATE scraper_runs
 		SET jobs_added = jobs_added + $1,
-		    sources_hit = $2
-		WHERE id = $3;
+		    sources_hit = $2,
+		    companies_hit = $3
+		WHERE id = $4;
 	`
-	if _, execErr := tx.Exec(ctx, updateRunQuery, insertedCount, updatedSourcesJSON, req.RunID); execErr != nil {
+	if _, execErr := tx.Exec(ctx, updateRunQuery, insertedCount, updatedSourcesJSON, updatedCompaniesJSON, req.RunID); execErr != nil {
 		log.Printf("IngestRaw: failed to update run telemetry: %v", execErr)
 	}
 
@@ -496,30 +556,108 @@ func (h *IngestHandler) FinishRun(c *gin.Context) {
 	}
 
 	var err error
+	var runSourcesMap map[string]utils.ScraperPlatformMetric
 	if len(req.SourcesHit) > 0 && string(req.SourcesHit) != "null" {
 		aggregatedSourcesPayload, aggregationError := utils.AggregateSourceStatistics(req.SourcesHit)
 		if aggregationError == nil {
-			req.SourcesHit = aggregatedSourcesPayload
+			_ = json.Unmarshal(aggregatedSourcesPayload, &runSourcesMap)
 		}
-		query := `
-			UPDATE scraper_runs
-			SET status = $1,
-			    finished_at = CURRENT_TIMESTAMP,
-			    error_message = $2,
-			    sources_hit = $3
-			WHERE id = $4;
-		`
-		_, err = h.DB.Exec(context.Background(), query, statusClean, req.ErrorMessage, req.SourcesHit, req.RunID)
-	} else {
-		query := `
-			UPDATE scraper_runs
-			SET status = $1,
-			    finished_at = CURRENT_TIMESTAMP,
-			    error_message = $2
-			WHERE id = $3;
-		`
-		_, err = h.DB.Exec(context.Background(), query, statusClean, req.ErrorMessage, req.RunID)
 	}
+	if runSourcesMap == nil {
+		runSourcesMap = make(map[string]utils.ScraperPlatformMetric)
+	}
+
+	var existingSourcesJSON, existingCompaniesJSON []byte
+	_ = h.DB.QueryRow(context.Background(), `
+		SELECT COALESCE(sources_hit, '{}'::jsonb), COALESCE(companies_hit, '[]'::jsonb)
+		FROM scraper_runs WHERE id = $1
+	`, req.RunID).Scan(&existingSourcesJSON, &existingCompaniesJSON)
+
+	if len(existingSourcesJSON) > 0 {
+		var existingMap map[string]utils.ScraperPlatformMetric
+		if unmarshalErr := json.Unmarshal(existingSourcesJSON, &existingMap); unmarshalErr == nil {
+			for src, metric := range existingMap {
+				m := runSourcesMap[src]
+				if m.JobsAdded == 0 {
+					m.JobsAdded = metric.JobsAdded
+				}
+				if m.JobsFound == 0 {
+					m.JobsFound = metric.JobsFound
+				}
+				runSourcesMap[src] = m
+			}
+		}
+	}
+
+	sourceCountsRows, srcErr := h.DB.Query(context.Background(), `
+		SELECT LOWER(TRIM(source)), count(*)
+		FROM jobs
+		WHERE scraped_at >= (SELECT started_at - INTERVAL '2 minute' FROM scraper_runs WHERE id = $1)
+		GROUP BY LOWER(TRIM(source));
+	`, req.RunID)
+	if srcErr == nil {
+		for sourceCountsRows.Next() {
+			var srcName string
+			var count int
+			if scanErr := sourceCountsRows.Scan(&srcName, &count); scanErr == nil && srcName != "" {
+				metric := runSourcesMap[srcName]
+				metric.JobsAdded = count
+				if metric.JobsFound == 0 {
+					metric.JobsFound = count
+				}
+				if metric.QueryCount == 0 {
+					metric.QueryCount = 1
+				}
+				runSourcesMap[srcName] = metric
+			}
+		}
+		sourceCountsRows.Close()
+	}
+
+	type companyCountItem struct {
+		CompanyName string `json:"company_name"`
+		JobsAdded   int    `json:"jobs_added"`
+	}
+	var topCompanyList []companyCountItem
+	compRows, compErr := h.DB.Query(context.Background(), `
+		SELECT c.name, count(*)
+		FROM jobs j
+		JOIN companies c ON j.company_id = c.id
+		WHERE j.scraped_at >= (SELECT started_at - INTERVAL '2 minute' FROM scraper_runs WHERE id = $1)
+		GROUP BY c.name
+		ORDER BY count(*) DESC
+		LIMIT 30;
+	`, req.RunID)
+	if compErr == nil {
+		for compRows.Next() {
+			var compName string
+			var count int
+			if scanErr := compRows.Scan(&compName, &count); scanErr == nil && strings.TrimSpace(compName) != "" {
+				topCompanyList = append(topCompanyList, companyCountItem{
+					CompanyName: compName,
+					JobsAdded:   count,
+				})
+			}
+		}
+		compRows.Close()
+	}
+	if len(topCompanyList) == 0 && len(existingCompaniesJSON) > 0 {
+		_ = json.Unmarshal(existingCompaniesJSON, &topCompanyList)
+	}
+
+	finalSourcesJSON, _ := json.Marshal(runSourcesMap)
+	finalCompaniesJSON, _ := json.Marshal(topCompanyList)
+
+	query := `
+		UPDATE scraper_runs
+		SET status = $1,
+		    finished_at = CURRENT_TIMESTAMP,
+		    error_message = $2,
+		    sources_hit = $3,
+		    companies_hit = $4
+		WHERE id = $5;
+	`
+	_, err = h.DB.Exec(context.Background(), query, statusClean, req.ErrorMessage, finalSourcesJSON, finalCompaniesJSON, req.RunID)
 	if err != nil {
 		log.Printf("Failed to finish scraper run: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update scraper run closure status"})
