@@ -693,6 +693,85 @@ def process_company(company_slug: str, platform_name: str, run_id: str | None = 
     }
 
 
+NON_JOB_TITLES = frozenset([
+    "careers", "jobs", "apply", "view all", "learn more",
+    "explore", "explore opportunities", "explore all jobs", "see all",
+    "see open roles", "open roles", "open positions", "search jobs",
+    "browse jobs", "browse all", "apply now", "join us", "join our team",
+    "about us", "about our company", "our culture", "culture and values",
+    "culture", "benefits", "perks", "benefits and perks", "inclusion",
+    "diversity", "dei", "diversity, equity and inclusion", "veterans",
+    "military", "indigenous", "students", "early career", "early careers",
+    "university programs", "university recruiting", "our teams", "meet our teams",
+    "teams", "life at", "working at", "areas of work", "areas of opportunity",
+    "overview", "faq", "faqs", "privacy", "privacy policy", "terms", "terms of use",
+    "start your career", "find your future", "candidate experience", "application hints",
+    "hints & tips", "corporate & operations", "trade jobs", "tech jobs",
+    "field ops jobs", "headquarters jobs", "women in operations", "retail and consumer",
+    "resources and industrials", "government and defence", "aviation services",
+    "current employees", "talent community", "general inquiry", "contact us",
+    "subscribe", "newsletter", "sign in", "login", "register", "create account",
+    "saved jobs", "job alerts",
+])
+
+NON_JOB_URL_SEGMENTS = frozenset([
+    "/teams", "/our-teams", "/about", "/culture", "/benefits", "/inclusion",
+    "/diversity", "/dei", "/students", "/internships", "/military", "/veterans",
+    "/indigenous", "/locations", "/faq", "/faqs", "/privacy", "/terms",
+    "/career-path", "/areas-work", "/find-your-future", "/candidate-experience",
+    "/application-hints", "/overview", "/life-at", "/working-at", "/values",
+    "/university", "/portal", "/home", "/blog", "/press", "/contact",
+    "/login", "/signin", "/register", "/alerts",
+])
+
+
+def is_valid_direct_career_post(normalized_post: dict) -> bool:
+    """
+    Validates whether a normalized post from direct careers represents an authentic job posting.
+
+    Rejects navigation links, culture pages, synthetic descriptions, and postings lacking
+    substantive job descriptions of at least 80 characters.
+    """
+    title = (normalized_post.get("title") or "").strip()
+    if len(title) < 4 or len(title) > 120:
+        return False
+
+    title_lower = title.lower()
+    if title_lower in NON_JOB_TITLES:
+        return False
+
+    generic_prefixes = (
+        "learn more", "explore", "view all", "see all",
+        "about ", "working at", "life at", "join us",
+    )
+    if title_lower.startswith(generic_prefixes):
+        return False
+
+    if not any(character.isalpha() for character in title):
+        return False
+
+    job_url = (normalized_post.get("absolute_url") or "").strip().lower()
+    if not job_url.startswith(("http://", "https://")):
+        return False
+
+    if any(segment in job_url for segment in NON_JOB_URL_SEGMENTS):
+        return False
+
+    description = (normalized_post.get("description_text") or "").strip()
+    if len(description) < 80:
+        return False
+
+    synthetic_prefixes = (
+        "direct career posting from ",
+        "embedded ats posting from ",
+        "direct posting from ",
+    )
+    if description.lower().startswith(synthetic_prefixes):
+        return False
+
+    return True
+
+
 def process_direct_career_company(
     company_name: str,
     career_url: str,
@@ -723,7 +802,18 @@ def process_direct_career_company(
         sub_executor.shutdown(wait=False)
         if company_jobs:
             for job in company_jobs:
+                raw_url = getattr(job, "job_url", None) or getattr(job, "url", None) or getattr(job, "absolute_url", None) or ""
+                discovered_ats = extract_ats_slug(str(raw_url))
+                if discovered_ats:
+                    register_discovered_ats_slug(discovered_ats[0], discovered_ats[1])
+
                 normalized_post = normalize_job_post(job, Site.DIRECT_CAREERS.value, company_name)
+                if not is_valid_direct_career_post(normalized_post):
+                    logger.debug(
+                        f"[direct_careers:{company_name}] Discarded non-job post '{normalized_post.get('title')}' at '{normalized_post.get('absolute_url')}'"
+                    )
+                    continue
+
                 is_remote_flag = getattr(job, "is_remote", False) or "remote" in normalized_post["location"].lower()
                 if is_location_in_scope(normalized_post["location"], is_remote_flag):
                     extracted_jobs.append(normalized_post)
