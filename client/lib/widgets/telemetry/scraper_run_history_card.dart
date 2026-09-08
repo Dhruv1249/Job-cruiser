@@ -139,6 +139,8 @@ class _ScraperRunHistoryCardState extends State<ScraperRunHistoryCard> {
                 final run = visibleRuns[index];
                 final isFailed = run.status.toLowerCase() == 'failed' || run.status.toLowerCase() == 'error';
                 final isRunning = run.status.toLowerCase() == 'running';
+                final distribution = run.sourceDistribution;
+                final totalJobsDiscovered = distribution.fold<int>(0, (sum, stat) => sum + stat.jobsFound);
 
                 return ExpansionTile(
                   tilePadding: EdgeInsets.zero,
@@ -205,6 +207,23 @@ class _ScraperRunHistoryCardState extends State<ScraperRunHistoryCard> {
                       ),
                     ],
                   ),
+                  subtitle: totalJobsDiscovered > 0
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Text(
+                            totalJobsDiscovered > run.jobsAdded
+                                ? '$totalJobsDiscovered discovered → ${run.jobsAdded} left after deduplication'
+                                : '$totalJobsDiscovered discovered • ${run.jobsAdded} unique',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.outline,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        )
+                      : null,
                   children: [
                     if (isFailed && run.errorMessage.isNotEmpty)
                       Container(

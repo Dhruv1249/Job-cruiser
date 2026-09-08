@@ -416,12 +416,16 @@ class _TailoredJobCardState extends State<TailoredJobCard> {
               children: [
                 Row(
                   children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.primary,
+                    Flexible(
+                      child: Text(
+                        title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.primary,
+                        ),
                       ),
                     ),
                     if (isDefault) ...[
@@ -468,7 +472,7 @@ class _TailoredJobCardState extends State<TailoredJobCard> {
           FilledButton.tonal(
             onPressed: isGenerating ? null : () => widget.onViewDocument(doc, type),
             style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               minimumSize: const Size(0, 32),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
             ),
