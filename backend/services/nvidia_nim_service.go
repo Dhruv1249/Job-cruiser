@@ -57,7 +57,9 @@ type NvidiaNimService struct {
 	ProbeRetryDelayDuration      time.Duration
 }
 
-// UserProfileData contains parsed candidate background data for job matching prompts.
+/*
+UserProfileData contains parsed candidate background data for job matching prompts.
+*/
 type UserProfileData struct {
 	UserID                            string   `json:"user_id"`
 	Email                             string   `json:"email"`
@@ -68,6 +70,7 @@ type UserProfileData struct {
 	WorkModel                         string   `json:"work_model"`
 	ExperienceYears                   int      `json:"experience_years"`
 	CurrentLocation                   string   `json:"current_location"`
+	Country                           string   `json:"country"`
 	MatchThresholdNotificationEnabled bool     `json:"match_threshold_notification_enabled"`
 	MatchThresholdPercentage          int      `json:"match_threshold_percentage"`
 	SkillsSummary                     string   `json:"skills_summary"`
@@ -1212,7 +1215,9 @@ func capBackoff(duration time.Duration) time.Duration {
 	return duration
 }
 
-// buildBatchMatchSystemInstruction constructs the system instructions, schema, and scoring rules.
+/*
+buildBatchMatchSystemInstruction constructs the system instructions, schema, and scoring rules.
+*/
 func buildBatchMatchSystemInstruction(expectedResultCount int) string {
 	currentTimeText := time.Now().Format("January 2006")
 	return fmt.Sprintf(`You are an expert AI job-matching evaluation API. Your entire response must be one single valid JSON object containing a "results" array — no prose, no markdown, no code fences, no explanation, no preamble, no postamble. Not a single word outside the JSON.
@@ -1251,17 +1256,18 @@ STANDARDIZED LOCATION & WORK MODEL GUIDELINES:
 
 SCORING INSTRUCTIONS & CONSTRAINTS:
 1. LOCATION COMPATIBILITY (STRICTEST FILTER):
-   - Check the candidate's Current Location, Preferred Locations, and Work Model Preference against the job's location and description.
-   - STRICT PROHIBITION ON SPECULATING RELOCATION: You MUST NEVER assume, speculate, or suggest that a candidate can, will, or wants to relocate. DO NOT write in "match_reasoning": "match if candidate can relocate", "good fit if willing to relocate", "potential match if they move to the US", or any variation. Relocation is STRICTLY FORBIDDEN as a justification for a match.
+   - Check the candidate's Country, Preferred Locations, and Work Model Preference against the job's location and description.
+   - Candidate location is evaluated strictly at the Country level. NEVER penalize a candidate or speculate about relocation if a job is located within the candidate's country or matches their preferred locations (e.g., any job in India for a candidate whose Country is India).
+   - STRICT PROHIBITION ON SPECULATING RELOCATION: You MUST NEVER assume, speculate, or suggest that a candidate can, will, or wants to relocate internationally. DO NOT write in "match_reasoning": "match if candidate can relocate", "good fit if willing to relocate", "potential match if they move to the US", or any variation. International relocation is STRICTLY FORBIDDEN as a justification for a match.
    - HARD LOCATION MISMATCH (SCORE CAP: 0-10, IS_MATCHED: FALSE):
-     * If a job requires on-site or hybrid attendance in a country or city the candidate does not reside in or did not list as preferred (e.g. US, UK, Europe for a candidate in India) -> MAXIMUM SCORE CAP: 0-10. is_matched MUST be false. Technical skills CANNOT overcome this.
+     * If a job requires on-site or hybrid attendance in a foreign country the candidate does not reside in or did not list as preferred (e.g. US, UK, Europe for a candidate in India) -> MAXIMUM SCORE CAP: 0-10. is_matched MUST be false. Technical skills CANNOT overcome this.
      * If a job requires local citizenship, residency, or work authorization the candidate lacks (e.g., "US Only", "Must reside in the US", "US Work Authorization required without sponsorship", "W2 only", "Security Clearance") -> MAXIMUM SCORE CAP: 0-10. is_matched MUST be false.
      * If a remote job is restricted to a domestic market or timezone incompatible with the candidate (e.g., "Remote (US)", "Remote - North America" for a candidate in India) -> MAXIMUM SCORE CAP: 0-10. is_matched MUST be false.
-     * For all hard location mismatches, "match_reasoning" must explicitly state the location or work authorization incompatibility. NEVER suggest relocation.
+     * For all hard location mismatches, "match_reasoning" must explicitly state the country or work authorization incompatibility. NEVER suggest relocation.
    - REGIONAL REMOTE (SCORE CAP: 60-80):
      * Only if a job is remote and explicitly open to the candidate's region/timezone (e.g., "Remote - APAC", "Remote - Asia" for an India candidate).
    - EXACT MATCH / 100%% UNRESTRICTED GLOBAL REMOTE:
-     * If the job is in the candidate's preferred location OR is 100%% unrestricted global remote ("Worldwide", "Anywhere", "Global Remote", "Work from anywhere in the world") with NO domestic country restrictions -> Full technical score allowed.
+     * If the job is located within the candidate's Country, matches the candidate's preferred locations, OR is 100%% unrestricted global remote ("Worldwide", "Anywhere", "Global Remote", "Work from anywhere in the world") with NO foreign domestic country restrictions -> Full technical score allowed.
 
 2. EXPERIENCE GAP (HARD SCORE CAPS):
    - Compare the candidate's Years of Experience (YoE) against the job's minimum required YoE stated in the JD. Current date: %s.
@@ -1281,7 +1287,43 @@ SCORING INSTRUCTIONS & CONSTRAINTS:
    - "match_reasoning" must be 2-3 clear, natural sentences explaining: (1) location verification & compatibility, (2) technical stack overlap & missing skills, and (3) experience comparison.`, expectedResultCount, currentTimeText)
 }
 
-// buildBatchMatchUserContent constructs the input payload containing candidate profiles and job snippets.
+/*
+resolveCandidateCountry extracts the candidate's country name, falling back to extracting country from location if country is empty.
+*/
+func resolveCandidateCountry(candidateCountry string, fallbackLocation string) string {
+	trimmedCountry := strings.TrimSpace(candidateCountry)
+	if trimmedCountry != "" {
+		return trimmedCountry
+	}
+	trimmedFallback := strings.TrimSpace(fallbackLocation)
+	if trimmedFallback == "" {
+		return "Not specified"
+	}
+	locationTokens := strings.Split(trimmedFallback, ",")
+	lastToken := strings.TrimSpace(locationTokens[len(locationTokens)-1])
+	if lastToken != "" {
+		return lastToken
+	}
+	return trimmedFallback
+}
+
+/*
+ResolveCandidateCountryForTest exposes country resolution logic for unit test verification.
+*/
+func ResolveCandidateCountryForTest(candidateCountry string, fallbackLocation string) string {
+	return resolveCandidateCountry(candidateCountry, fallbackLocation)
+}
+
+/*
+BuildBatchMatchSystemInstructionForTest exposes batch match system instruction construction for unit test verification.
+*/
+func BuildBatchMatchSystemInstructionForTest(expectedResultCount int) string {
+	return buildBatchMatchSystemInstruction(expectedResultCount)
+}
+
+/*
+buildBatchMatchUserContent constructs the input payload containing candidate profiles and job snippets.
+*/
 func buildBatchMatchUserContent(userProfiles []UserProfileData, jobsBatch []JobSnippetData, expectedResultCount int) string {
 	var builder strings.Builder
 
@@ -1308,12 +1350,9 @@ func buildBatchMatchUserContent(userProfiles []UserProfileData, jobsBatch []JobS
 		}
 		combinedProfileText := strings.Join(profileSections, "\n\n")
 
-		candidateCurrentLocation := profile.CurrentLocation
-		if candidateCurrentLocation == "" {
-			candidateCurrentLocation = "Not specified"
-		}
-		fmt.Fprintf(&builder, "User ID: %s\nCandidate Current Location: %s\nCandidate YoE: %d\nPreferred Locations: %s\nWork Model Preference: %s\nPreferred Roles: %s\nProfile & Resume Context:\n%s\n\n",
-			profile.UserID, candidateCurrentLocation, profile.ExperienceYears, strings.Join(profile.PreferredLocations, ", "), profile.WorkModel, strings.Join(profile.PreferredRoles, ", "), combinedProfileText)
+		candidateCountry := resolveCandidateCountry(profile.Country, profile.CurrentLocation)
+		fmt.Fprintf(&builder, "User ID: %s\nCandidate Country: %s\nCandidate YoE: %d\nPreferred Locations: %s\nWork Model Preference: %s\nPreferred Roles: %s\nProfile & Resume Context:\n%s\n\n",
+			profile.UserID, candidateCountry, profile.ExperienceYears, strings.Join(profile.PreferredLocations, ", "), profile.WorkModel, strings.Join(profile.PreferredRoles, ", "), combinedProfileText)
 	}
 
 	builder.WriteString("### JOB LISTINGS TO EVALUATE\n")
@@ -1326,7 +1365,16 @@ func buildBatchMatchUserContent(userProfiles []UserProfileData, jobsBatch []JobS
 	return builder.String()
 }
 
-// buildMultiJobPrompt constructs the evaluation prompt for a batch of jobs against a set of user profiles.
+/*
+BuildBatchMatchUserContentForTest exposes batch match user content construction for unit test verification.
+*/
+func BuildBatchMatchUserContentForTest(userProfiles []UserProfileData, jobsBatch []JobSnippetData, expectedResultCount int) string {
+	return buildBatchMatchUserContent(userProfiles, jobsBatch, expectedResultCount)
+}
+
+/*
+buildMultiJobPrompt constructs the evaluation prompt for a batch of jobs against a set of user profiles.
+*/
 func buildMultiJobPrompt(userProfiles []UserProfileData, jobsBatch []JobSnippetData, expectedResultCount int) string {
 	return buildBatchMatchUserContent(userProfiles, jobsBatch, expectedResultCount)
 }
@@ -1371,6 +1419,7 @@ func scanCandidateProfileRecord(rowScanner interface{ Scan(dest ...any) error })
 		&workModelsJSON,
 		&item.ExperienceYears,
 		&item.CurrentLocation,
+		&item.Country,
 		&item.MatchThresholdNotificationEnabled,
 		&item.MatchThresholdPercentage,
 		&skillsJSON,
@@ -1464,6 +1513,7 @@ func fetchAllActiveUserProfiles(ctx context.Context, databasePool *pgxpool.Pool)
 			COALESCE(up.work_models, '[]'::jsonb), 
 			0,
 			COALESCE(NULLIF(up.location, ''), NULLIF(u.location, ''), ''),
+			COALESCE(NULLIF(up.country, ''), ''),
 			COALESCE(up.match_threshold_notification_enabled, false),
 			COALESCE(up.match_threshold_percentage, 80),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.skills, '[]'::jsonb)) > 0 THEN up.skills ELSE u.parsed_experience->'skills' END, '[]'::jsonb),
@@ -1505,6 +1555,7 @@ func fetchSingleUserProfileByID(ctx context.Context, databasePool *pgxpool.Pool,
 			COALESCE(up.work_models, '[]'::jsonb), 
 			0,
 			COALESCE(NULLIF(up.location, ''), NULLIF(u.location, ''), ''),
+			COALESCE(NULLIF(up.country, ''), ''),
 			COALESCE(up.match_threshold_notification_enabled, false),
 			COALESCE(up.match_threshold_percentage, 80),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.skills, '[]'::jsonb)) > 0 THEN up.skills ELSE u.parsed_experience->'skills' END, '[]'::jsonb),
