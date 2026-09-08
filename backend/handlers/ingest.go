@@ -57,9 +57,10 @@ type IngestRequest struct {
 }
 
 type FinishRequest struct {
-	RunID        string `json:"run_id" binding:"required"`
-	Status       string `json:"status" binding:"required"` // 'success' or 'failed'
-	ErrorMessage string `json:"error_message"`
+	RunID        string          `json:"run_id" binding:"required"`
+	Status       string          `json:"status" binding:"required"`
+	ErrorMessage string          `json:"error_message"`
+	SourcesHit   json.RawMessage `json:"sources_hit"`
 }
 
 // StartRun registers a new scraper run in the telemetry tracking tables
@@ -143,10 +144,41 @@ func (h *IngestHandler) IngestRaw(c *gin.Context) {
 		}
 	}
 
+	batchSourceDistribution := make(map[string]int)
+	for _, rawJobPayload := range req.Jobs {
+		normalizedSource := strings.TrimSpace(rawJobPayload.Source)
+		if normalizedSource == "" {
+			normalizedSource = "unknown"
+		}
+		batchSourceDistribution[normalizedSource]++
+	}
+
+	var existingSourcesJSON []byte
+	_ = tx.QueryRow(ctx, `SELECT COALESCE(sources_hit, '{}'::jsonb) FROM scraper_runs WHERE id = $1`, req.RunID).Scan(&existingSourcesJSON)
+
+	cumulativeSources := make(map[string]int)
+	if len(existingSourcesJSON) > 0 {
+		var decodedSources map[string]interface{}
+		if unmarshalErr := json.Unmarshal(existingSourcesJSON, &decodedSources); unmarshalErr == nil {
+			for sourceName, rawCount := range decodedSources {
+				if numericCount, isNumber := rawCount.(float64); isNumber {
+					cumulativeSources[sourceName] = int(numericCount)
+				}
+			}
+		}
+	}
+	for sourceName, count := range batchSourceDistribution {
+		cumulativeSources[sourceName] += count
+	}
+	updatedSourcesJSON, _ := json.Marshal(cumulativeSources)
+
 	updateRunQuery := `
-		UPDATE scraper_runs SET jobs_added = jobs_added + $1 WHERE id = $2;
+		UPDATE scraper_runs
+		SET jobs_added = jobs_added + $1,
+		    sources_hit = $2
+		WHERE id = $3;
 	`
-	if _, execErr := tx.Exec(ctx, updateRunQuery, insertedCount, req.RunID); execErr != nil {
+	if _, execErr := tx.Exec(ctx, updateRunQuery, insertedCount, updatedSourcesJSON, req.RunID); execErr != nil {
 		log.Printf("IngestRaw: failed to update run telemetry: %v", execErr)
 	}
 
@@ -463,14 +495,27 @@ func (h *IngestHandler) FinishRun(c *gin.Context) {
 		statusClean = "finished"
 	}
 
-	query := `
-		UPDATE scraper_runs
-		SET status = $1,
-		    finished_at = CURRENT_TIMESTAMP,
-		    error_message = $2
-		WHERE id = $3;
-	`
-	_, err := h.DB.Exec(context.Background(), query, statusClean, req.ErrorMessage, req.RunID)
+	var err error
+	if len(req.SourcesHit) > 0 && string(req.SourcesHit) != "null" {
+		query := `
+			UPDATE scraper_runs
+			SET status = $1,
+			    finished_at = CURRENT_TIMESTAMP,
+			    error_message = $2,
+			    sources_hit = $3
+			WHERE id = $4;
+		`
+		_, err = h.DB.Exec(context.Background(), query, statusClean, req.ErrorMessage, req.SourcesHit, req.RunID)
+	} else {
+		query := `
+			UPDATE scraper_runs
+			SET status = $1,
+			    finished_at = CURRENT_TIMESTAMP,
+			    error_message = $2
+			WHERE id = $3;
+		`
+		_, err = h.DB.Exec(context.Background(), query, statusClean, req.ErrorMessage, req.RunID)
+	}
 	if err != nil {
 		log.Printf("Failed to finish scraper run: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update scraper run closure status"})

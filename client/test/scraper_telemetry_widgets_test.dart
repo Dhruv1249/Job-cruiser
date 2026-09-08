@@ -262,5 +262,45 @@ void main() {
 
       expect(find.text('Network connection timeout during handshake'), findsOneWidget);
     });
+
+    testWidgets('ScraperRunHistoryCard displays source distribution on run expansion', (tester) async {
+      const runsWithDistribution = [
+        ScraperRunLog(
+          runId: 'run-dist-1',
+          startedAt: '2026-09-08T12:00:00Z',
+          finishedAt: '2026-09-08T12:05:00Z',
+          status: 'completed',
+          jobsAdded: 250,
+          sourcesRaw: '{"greenhouse": 150, "lever": 100}',
+          errorMessage: '',
+          durationSeconds: 300,
+        ),
+      ];
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: ScraperRunHistoryCard(
+                runHealth: mockRunHealth,
+                runs: runsWithDistribution,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('+250 jobs'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Distribution of Sources (2 sources)'), findsOneWidget);
+      expect(find.text('250 jobs discovered'), findsOneWidget);
+      expect(find.text('GREENHOUSE'), findsOneWidget);
+      expect(find.text('150 jobs'), findsOneWidget);
+      expect(find.text('(60.0%)'), findsOneWidget);
+      expect(find.text('LEVER'), findsOneWidget);
+      expect(find.text('100 jobs'), findsOneWidget);
+      expect(find.text('(40.0%)'), findsOneWidget);
+    });
   });
 }

@@ -32,27 +32,109 @@ type CustomLinkItem struct {
 }
 
 type PreferencesRequest struct {
-	FullName               string           `json:"full_name" binding:"required"`
-	Email                  string           `json:"email"`
-	Phone                  string           `json:"phone"`
-	Location               string           `json:"location"`
-	LinkedInURL            string           `json:"linkedin_url"`
-	GitHubURL              string           `json:"github_url"`
-	PortfolioURL           string           `json:"portfolio_url"`
-	CustomLinks            []CustomLinkItem `json:"custom_links"`
-	TargetRoles            []string         `json:"target_roles" binding:"required"`
-	TargetIndustries       []string         `json:"target_industries"`
-	TargetLocations        []string         `json:"target_locations"`
-	WorkModels             []string         `json:"work_models" binding:"required"`
-	MinSalary              int              `json:"min_salary"`
-	Currency               string           `json:"currency"`
-	MasterCVText           string           `json:"master_cv_text"`
-	BioExperienceText      string           `json:"bio_experience_text"`
-	AIMatchingEnabled      bool             `json:"ai_matching_enabled"`
-	TargetResumePages      int              `json:"target_resume_pages"`
-	TargetCoverLetterPages            int              `json:"target_cover_letter_pages"`
-	MatchThresholdNotificationEnabled bool             `json:"match_threshold_notification_enabled"`
-	MatchThresholdPercentage          int              `json:"match_threshold_percentage"`
+	FullName                          string                    `json:"full_name" binding:"required"`
+	Email                             string                    `json:"email"`
+	Phone                             string                    `json:"phone"`
+	Location                          string                    `json:"location"`
+	LinkedInURL                       string                    `json:"linkedin_url"`
+	GitHubURL                         string                    `json:"github_url"`
+	PortfolioURL                      string                    `json:"portfolio_url"`
+	CustomLinks                       []CustomLinkItem          `json:"custom_links"`
+	TargetRoles                       []string                  `json:"target_roles"`
+	TargetIndustries                  []string                  `json:"target_industries"`
+	TargetLocations                   []string                  `json:"target_locations"`
+	WorkModels                        []string                  `json:"work_models"`
+	MinSalary                         int                       `json:"min_salary"`
+	Currency                          string                    `json:"currency"`
+	MasterCVText                      string                    `json:"master_cv_text"`
+	BioExperienceText                 string                    `json:"bio_experience_text"`
+	AIMatchingEnabled                 bool                      `json:"ai_matching_enabled"`
+	TargetResumePages                 int                       `json:"target_resume_pages"`
+	TargetCoverLetterPages            int                       `json:"target_cover_letter_pages"`
+	MatchThresholdNotificationEnabled bool                      `json:"match_threshold_notification_enabled"`
+	MatchThresholdPercentage          int                       `json:"match_threshold_percentage"`
+	Experiences                       []ParsedExperienceItem    `json:"experiences"`
+	Projects                          []ParsedProjectItem       `json:"projects"`
+	Education                         []ParsedEducationItem     `json:"education"`
+	Skills                            []string                  `json:"skills"`
+	Achievements                      []ParsedAchievementItem   `json:"achievements"`
+	Certifications                    []ParsedCertificationItem `json:"certifications"`
+}
+
+/*
+ProfileUpdateRequest encapsulates personal background, contact information, social links, and structured resume items.
+*/
+type ProfileUpdateRequest struct {
+	FullName       string                    `json:"full_name" binding:"required"`
+	Email          string                    `json:"email"`
+	Phone          string                    `json:"phone"`
+	Location       string                    `json:"location"`
+	LinkedInURL    string                    `json:"linkedin_url"`
+	GitHubURL      string                    `json:"github_url"`
+	PortfolioURL   string                    `json:"portfolio_url"`
+	CustomLinks    []CustomLinkItem          `json:"custom_links"`
+	BioSummary     string                    `json:"bio_summary"`
+	Experiences    []ParsedExperienceItem    `json:"experiences"`
+	Projects       []ParsedProjectItem       `json:"projects"`
+	Education      []ParsedEducationItem     `json:"education"`
+	Skills         []string                  `json:"skills"`
+	Achievements   []ParsedAchievementItem   `json:"achievements"`
+	Certifications []ParsedCertificationItem `json:"certifications"`
+}
+
+/*
+ExtractStructuredResumeDetails parses JSON embedded within structured resume text delimiters.
+*/
+func ExtractStructuredResumeDetails(masterCVText string) (
+	[]ParsedExperienceItem,
+	[]ParsedProjectItem,
+	[]ParsedEducationItem,
+	[]string,
+	[]ParsedAchievementItem,
+	[]ParsedCertificationItem,
+) {
+	var experiences []ParsedExperienceItem
+	var projects []ParsedProjectItem
+	var education []ParsedEducationItem
+	var skills []string
+	var achievements []ParsedAchievementItem
+	var certifications []ParsedCertificationItem
+
+	delimiterIndex := strings.Index(masterCVText, "--- STRUCTURED RESUME DETAILS ---")
+	if delimiterIndex == -1 {
+		return experiences, projects, education, skills, achievements, certifications
+	}
+
+	jsonPayloadText := strings.TrimSpace(masterCVText[delimiterIndex+len("--- STRUCTURED RESUME DETAILS ---"):])
+	if jsonPayloadText == "" {
+		return experiences, projects, education, skills, achievements, certifications
+	}
+
+	var payloadMap map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(jsonPayloadText), &payloadMap); err != nil {
+		return experiences, projects, education, skills, achievements, certifications
+	}
+
+	if expRaw, ok := payloadMap["experiences"]; ok {
+		_ = json.Unmarshal(expRaw, &experiences)
+	}
+	if projRaw, ok := payloadMap["projects"]; ok {
+		_ = json.Unmarshal(projRaw, &projects)
+	}
+	if eduRaw, ok := payloadMap["education"]; ok {
+		_ = json.Unmarshal(eduRaw, &education)
+	}
+	if skillsRaw, ok := payloadMap["skills"]; ok {
+		_ = json.Unmarshal(skillsRaw, &skills)
+	}
+	if achRaw, ok := payloadMap["achievements"]; ok {
+		_ = json.Unmarshal(achRaw, &achievements)
+	}
+	if certRaw, ok := payloadMap["certifications"]; ok {
+		_ = json.Unmarshal(certRaw, &certifications)
+	}
+
+	return experiences, projects, education, skills, achievements, certifications
 }
 
 type ParseCVRequest struct {
@@ -104,6 +186,125 @@ type ParsedCVResponse struct {
 }
 
 /*
+UpdateProfile persists personal contact info, bio, links, and structured experience records.
+*/
+func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var req ProfileUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	customLinksJSON, marshalLinksError := json.Marshal(req.CustomLinks)
+	if marshalLinksError != nil {
+		customLinksJSON = []byte("[]")
+	}
+
+	experiencesJSON, marshalExpError := json.Marshal(req.Experiences)
+	if marshalExpError != nil {
+		experiencesJSON = []byte("[]")
+	}
+
+	projectsJSON, marshalProjError := json.Marshal(req.Projects)
+	if marshalProjError != nil {
+		projectsJSON = []byte("[]")
+	}
+
+	educationJSON, marshalEduError := json.Marshal(req.Education)
+	if marshalEduError != nil {
+		educationJSON = []byte("[]")
+	}
+
+	skillsJSON, marshalSkillsError := json.Marshal(req.Skills)
+	if marshalSkillsError != nil {
+		skillsJSON = []byte("[]")
+	}
+
+	achievementsJSON, marshalAchError := json.Marshal(req.Achievements)
+	if marshalAchError != nil {
+		achievementsJSON = []byte("[]")
+	}
+
+	certificationsJSON, marshalCertError := json.Marshal(req.Certifications)
+	if marshalCertError != nil {
+		certificationsJSON = []byte("[]")
+	}
+
+	linksMap := map[string]string{
+		"linkedin":  req.LinkedInURL,
+		"github":    req.GitHubURL,
+		"portfolio": req.PortfolioURL,
+	}
+	linksJSON, _ := json.Marshal(linksMap)
+
+	updateUserQuery := `
+		UPDATE users 
+		SET phone = $1, location = $2, links = $3, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $4;
+	`
+	_, _ = h.DB.Exec(context.Background(), updateUserQuery, req.Phone, req.Location, linksJSON, userID)
+
+	upsertQuery := `
+		INSERT INTO user_preferences (
+			user_id, full_name, email, phone, location, linkedin_url, github_url, portfolio_url,
+			custom_links, bio_experience_text, experiences, projects, education, skills, achievements, certifications,
+			target_roles, work_models
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, '[]'::jsonb, '[]'::jsonb)
+		ON CONFLICT (user_id)
+		DO UPDATE SET
+			full_name = EXCLUDED.full_name,
+			email = EXCLUDED.email,
+			phone = EXCLUDED.phone,
+			location = EXCLUDED.location,
+			linkedin_url = EXCLUDED.linkedin_url,
+			github_url = EXCLUDED.github_url,
+			portfolio_url = EXCLUDED.portfolio_url,
+			custom_links = EXCLUDED.custom_links,
+			bio_experience_text = EXCLUDED.bio_experience_text,
+			experiences = EXCLUDED.experiences,
+			projects = EXCLUDED.projects,
+			education = EXCLUDED.education,
+			skills = EXCLUDED.skills,
+			achievements = EXCLUDED.achievements,
+			certifications = EXCLUDED.certifications,
+			updated_at = CURRENT_TIMESTAMP;
+	`
+	_, err := h.DB.Exec(
+		context.Background(),
+		upsertQuery,
+		userID,
+		req.FullName,
+		req.Email,
+		req.Phone,
+		req.Location,
+		req.LinkedInURL,
+		req.GitHubURL,
+		req.PortfolioURL,
+		customLinksJSON,
+		req.BioSummary,
+		experiencesJSON,
+		projectsJSON,
+		educationJSON,
+		skillsJSON,
+		achievementsJSON,
+		certificationsJSON,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Profile updated successfully"})
+}
+
+/*
 UpdatePreferences saves or updates a user's preferences profile.
 */
 func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
@@ -137,35 +338,113 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 		customLinksJSON = []byte("[]")
 	}
 
+	experiences := req.Experiences
+	projects := req.Projects
+	education := req.Education
+	skills := req.Skills
+	achievements := req.Achievements
+	certifications := req.Certifications
+
+	if len(experiences) == 0 && len(projects) == 0 && strings.Contains(req.MasterCVText, "--- STRUCTURED RESUME DETAILS ---") {
+		expExtracted, projExtracted, eduExtracted, skillsExtracted, achExtracted, certExtracted := ExtractStructuredResumeDetails(req.MasterCVText)
+		if len(expExtracted) > 0 {
+			experiences = expExtracted
+		}
+		if len(projExtracted) > 0 {
+			projects = projExtracted
+		}
+		if len(eduExtracted) > 0 {
+			education = eduExtracted
+		}
+		if len(skillsExtracted) > 0 {
+			skills = skillsExtracted
+		}
+		if len(achExtracted) > 0 {
+			achievements = achExtracted
+		}
+		if len(certExtracted) > 0 {
+			certifications = certExtracted
+		}
+	}
+
+	experiencesJSON, _ := json.Marshal(experiences)
+	projectsJSON, _ := json.Marshal(projects)
+	educationJSON, _ := json.Marshal(education)
+	skillsJSON, _ := json.Marshal(skills)
+	achievementsJSON, _ := json.Marshal(achievements)
+	certificationsJSON, _ := json.Marshal(certifications)
+
 	query := `
-		INSERT INTO user_preferences (user_id, full_name, email, phone, location, linkedin_url, github_url, portfolio_url, custom_links, target_roles, target_industries, target_locations, work_models, min_salary, currency, master_cv_text, bio_experience_text, target_resume_pages, target_cover_letter_pages, match_threshold_notification_enabled, match_threshold_percentage)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+		INSERT INTO user_preferences (
+			user_id, full_name, email, phone, location, linkedin_url, github_url, portfolio_url,
+			custom_links, target_roles, target_industries, target_locations, work_models,
+			min_salary, currency, master_cv_text, bio_experience_text, target_resume_pages,
+			target_cover_letter_pages, match_threshold_notification_enabled, match_threshold_percentage,
+			experiences, projects, education, skills, achievements, certifications
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
 		ON CONFLICT (user_id) 
 		DO UPDATE SET 
-			full_name = EXCLUDED.full_name,
-			email = EXCLUDED.email,
-			phone = EXCLUDED.phone,
-			location = EXCLUDED.location,
-			linkedin_url = EXCLUDED.linkedin_url,
-			github_url = EXCLUDED.github_url,
-			portfolio_url = EXCLUDED.portfolio_url,
-			custom_links = EXCLUDED.custom_links,
+			full_name = CASE WHEN EXCLUDED.full_name <> '' THEN EXCLUDED.full_name ELSE user_preferences.full_name END,
+			email = CASE WHEN EXCLUDED.email <> '' THEN EXCLUDED.email ELSE user_preferences.email END,
+			phone = CASE WHEN EXCLUDED.phone <> '' THEN EXCLUDED.phone ELSE user_preferences.phone END,
+			location = CASE WHEN EXCLUDED.location <> '' THEN EXCLUDED.location ELSE user_preferences.location END,
+			linkedin_url = CASE WHEN EXCLUDED.linkedin_url <> '' THEN EXCLUDED.linkedin_url ELSE user_preferences.linkedin_url END,
+			github_url = CASE WHEN EXCLUDED.github_url <> '' THEN EXCLUDED.github_url ELSE user_preferences.github_url END,
+			portfolio_url = CASE WHEN EXCLUDED.portfolio_url <> '' THEN EXCLUDED.portfolio_url ELSE user_preferences.portfolio_url END,
+			custom_links = CASE WHEN jsonb_array_length(EXCLUDED.custom_links) > 0 THEN EXCLUDED.custom_links ELSE user_preferences.custom_links END,
 			target_roles = EXCLUDED.target_roles,
 			target_industries = EXCLUDED.target_industries,
 			target_locations = EXCLUDED.target_locations,
 			work_models = EXCLUDED.work_models,
 			min_salary = EXCLUDED.min_salary,
 			currency = EXCLUDED.currency,
-			master_cv_text = EXCLUDED.master_cv_text,
-			bio_experience_text = EXCLUDED.bio_experience_text,
+			master_cv_text = CASE WHEN EXCLUDED.master_cv_text <> '' THEN EXCLUDED.master_cv_text ELSE user_preferences.master_cv_text END,
+			bio_experience_text = CASE WHEN EXCLUDED.bio_experience_text <> '' THEN EXCLUDED.bio_experience_text ELSE user_preferences.bio_experience_text END,
 			target_resume_pages = EXCLUDED.target_resume_pages,
 			target_cover_letter_pages = EXCLUDED.target_cover_letter_pages,
 			match_threshold_notification_enabled = EXCLUDED.match_threshold_notification_enabled,
 			match_threshold_percentage = EXCLUDED.match_threshold_percentage,
+			experiences = CASE WHEN jsonb_array_length(EXCLUDED.experiences) > 0 THEN EXCLUDED.experiences ELSE user_preferences.experiences END,
+			projects = CASE WHEN jsonb_array_length(EXCLUDED.projects) > 0 THEN EXCLUDED.projects ELSE user_preferences.projects END,
+			education = CASE WHEN jsonb_array_length(EXCLUDED.education) > 0 THEN EXCLUDED.education ELSE user_preferences.education END,
+			skills = CASE WHEN jsonb_array_length(EXCLUDED.skills) > 0 THEN EXCLUDED.skills ELSE user_preferences.skills END,
+			achievements = CASE WHEN jsonb_array_length(EXCLUDED.achievements) > 0 THEN EXCLUDED.achievements ELSE user_preferences.achievements END,
+			certifications = CASE WHEN jsonb_array_length(EXCLUDED.certifications) > 0 THEN EXCLUDED.certifications ELSE user_preferences.certifications END,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 
-	_, err := h.DB.Exec(context.Background(), query, userID, req.FullName, req.Email, req.Phone, req.Location, req.LinkedInURL, req.GitHubURL, req.PortfolioURL, customLinksJSON, req.TargetRoles, req.TargetIndustries, req.TargetLocations, req.WorkModels, req.MinSalary, req.Currency, req.MasterCVText, req.BioExperienceText, targetResumePages, targetCoverLetterPages, req.MatchThresholdNotificationEnabled, matchThresholdPercentage)
+	_, err := h.DB.Exec(
+		context.Background(),
+		query,
+		userID,
+		req.FullName,
+		req.Email,
+		req.Phone,
+		req.Location,
+		req.LinkedInURL,
+		req.GitHubURL,
+		req.PortfolioURL,
+		customLinksJSON,
+		req.TargetRoles,
+		req.TargetIndustries,
+		req.TargetLocations,
+		req.WorkModels,
+		req.MinSalary,
+		req.Currency,
+		req.MasterCVText,
+		req.BioExperienceText,
+		targetResumePages,
+		targetCoverLetterPages,
+		req.MatchThresholdNotificationEnabled,
+		matchThresholdPercentage,
+		experiencesJSON,
+		projectsJSON,
+		educationJSON,
+		skillsJSON,
+		achievementsJSON,
+		certificationsJSON,
+	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save preferences: " + err.Error()})
 		return
@@ -211,6 +490,13 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 			COALESCE(p.target_cover_letter_pages, 1),
 			COALESCE(p.match_threshold_notification_enabled, false),
 			COALESCE(p.match_threshold_percentage, 80),
+			COALESCE(p.experiences, '[]'::jsonb),
+			COALESCE(p.projects, '[]'::jsonb),
+			COALESCE(p.education, '[]'::jsonb),
+			COALESCE(p.skills, '[]'::jsonb),
+			COALESCE(p.achievements, '[]'::jsonb),
+			COALESCE(p.certifications, '[]'::jsonb),
+			COALESCE(u.parsed_experience, ''),
 			(p.user_id IS NOT NULL AND jsonb_array_length(COALESCE(p.target_roles, '[]'::jsonb)) > 0) AS has_preferences
 		FROM users u
 		LEFT JOIN user_preferences p ON u.id = p.user_id
@@ -220,8 +506,44 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 	var pref PreferencesRequest
 	var hasPreferences bool
 	var customLinksJSON []byte
+	var experiencesJSON []byte
+	var projectsJSON []byte
+	var educationJSON []byte
+	var skillsJSON []byte
+	var achievementsJSON []byte
+	var certificationsJSON []byte
+	var rawParsedExperience string
+
 	err := h.DB.QueryRow(context.Background(), query, userID).Scan(
-		&pref.FullName, &pref.Email, &pref.Phone, &pref.Location, &pref.LinkedInURL, &pref.GitHubURL, &pref.PortfolioURL, &customLinksJSON, &pref.TargetRoles, &pref.TargetIndustries, &pref.TargetLocations, &pref.WorkModels, &pref.MinSalary, &pref.Currency, &pref.MasterCVText, &pref.BioExperienceText, &pref.AIMatchingEnabled, &pref.TargetResumePages, &pref.TargetCoverLetterPages, &pref.MatchThresholdNotificationEnabled, &pref.MatchThresholdPercentage, &hasPreferences,
+		&pref.FullName,
+		&pref.Email,
+		&pref.Phone,
+		&pref.Location,
+		&pref.LinkedInURL,
+		&pref.GitHubURL,
+		&pref.PortfolioURL,
+		&customLinksJSON,
+		&pref.TargetRoles,
+		&pref.TargetIndustries,
+		&pref.TargetLocations,
+		&pref.WorkModels,
+		&pref.MinSalary,
+		&pref.Currency,
+		&pref.MasterCVText,
+		&pref.BioExperienceText,
+		&pref.AIMatchingEnabled,
+		&pref.TargetResumePages,
+		&pref.TargetCoverLetterPages,
+		&pref.MatchThresholdNotificationEnabled,
+		&pref.MatchThresholdPercentage,
+		&experiencesJSON,
+		&projectsJSON,
+		&educationJSON,
+		&skillsJSON,
+		&achievementsJSON,
+		&certificationsJSON,
+		&rawParsedExperience,
+		&hasPreferences,
 	)
 
 	if err != nil {
@@ -231,6 +553,64 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 
 	if len(customLinksJSON) > 0 {
 		_ = json.Unmarshal(customLinksJSON, &pref.CustomLinks)
+	}
+	if len(experiencesJSON) > 0 {
+		_ = json.Unmarshal(experiencesJSON, &pref.Experiences)
+	}
+	if len(projectsJSON) > 0 {
+		_ = json.Unmarshal(projectsJSON, &pref.Projects)
+	}
+	if len(educationJSON) > 0 {
+		_ = json.Unmarshal(educationJSON, &pref.Education)
+	}
+	if len(skillsJSON) > 0 {
+		_ = json.Unmarshal(skillsJSON, &pref.Skills)
+	}
+	if len(achievementsJSON) > 0 {
+		_ = json.Unmarshal(achievementsJSON, &pref.Achievements)
+	}
+	if len(certificationsJSON) > 0 {
+		_ = json.Unmarshal(certificationsJSON, &pref.Certifications)
+	}
+
+	if len(pref.Experiences) == 0 && len(pref.Projects) == 0 {
+		if strings.Contains(pref.MasterCVText, "--- STRUCTURED RESUME DETAILS ---") {
+			expExtracted, projExtracted, eduExtracted, skillsExtracted, achExtracted, certExtracted := ExtractStructuredResumeDetails(pref.MasterCVText)
+			pref.Experiences = expExtracted
+			pref.Projects = projExtracted
+			pref.Education = eduExtracted
+			pref.Skills = skillsExtracted
+			pref.Achievements = achExtracted
+			pref.Certifications = certExtracted
+		} else if strings.TrimSpace(rawParsedExperience) != "" {
+			var parsedResp ParsedCVResponse
+			if unmarshalErr := json.Unmarshal([]byte(rawParsedExperience), &parsedResp); unmarshalErr == nil {
+				pref.Experiences = parsedResp.Experience
+				pref.Projects = parsedResp.Projects
+				pref.Education = parsedResp.Education
+				pref.Skills = parsedResp.Skills
+				pref.Achievements = parsedResp.Achievements
+				pref.Certifications = parsedResp.Certifications
+			}
+		}
+
+		if len(pref.Experiences) > 0 || len(pref.Projects) > 0 {
+			expBytes, _ := json.Marshal(pref.Experiences)
+			projBytes, _ := json.Marshal(pref.Projects)
+			eduBytes, _ := json.Marshal(pref.Education)
+			skillsBytes, _ := json.Marshal(pref.Skills)
+			achBytes, _ := json.Marshal(pref.Achievements)
+			certBytes, _ := json.Marshal(pref.Certifications)
+			go func(uID interface{}, exp, proj, edu, sk, ach, cert []byte) {
+				_, _ = h.DB.Exec(
+					context.Background(),
+					`UPDATE user_preferences 
+					 SET experiences = $1, projects = $2, education = $3, skills = $4, achievements = $5, certifications = $6 
+					 WHERE user_id = $7`,
+					exp, proj, edu, sk, ach, cert, uID,
+				)
+			}(userID, expBytes, projBytes, eduBytes, skillsBytes, achBytes, certBytes)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

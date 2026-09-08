@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/Dhruv1249/Job-cruiser/backend/handlers"
@@ -263,3 +264,49 @@ func TestJobWithoutDescriptionItemSerialization(t *testing.T) {
 		t.Errorf("expected Title match, got %s", item.Title)
 	}
 }
+
+func TestFinishRequestSourceDistributionSerialization(t *testing.T) {
+	rawJSON := []byte(`{
+		"run_id": "run-xyz-789",
+		"status": "success",
+		"error_message": "",
+		"sources_hit": {
+			"greenhouse": 120,
+			"lever": 85,
+			"ashby": 45
+		}
+	}`)
+
+	var finishRequest handlers.FinishRequest
+	unmarshalErr := json.Unmarshal(rawJSON, &finishRequest)
+	if unmarshalErr != nil {
+		t.Fatalf("unexpected unmarshal error: %v", unmarshalErr)
+	}
+
+	if finishRequest.RunID != "run-xyz-789" {
+		t.Errorf("expected run_id 'run-xyz-789', got %s", finishRequest.RunID)
+	}
+	if finishRequest.Status != "success" {
+		t.Errorf("expected status 'success', got %s", finishRequest.Status)
+	}
+	if len(finishRequest.SourcesHit) == 0 {
+		t.Fatalf("expected sources_hit to not be empty")
+	}
+
+	var sourceDistributionMap map[string]int
+	distributionErr := json.Unmarshal(finishRequest.SourcesHit, &sourceDistributionMap)
+	if distributionErr != nil {
+		t.Fatalf("unexpected sources_hit map unmarshal error: %v", distributionErr)
+	}
+
+	if sourceDistributionMap["greenhouse"] != 120 {
+		t.Errorf("expected greenhouse count 120, got %d", sourceDistributionMap["greenhouse"])
+	}
+	if sourceDistributionMap["lever"] != 85 {
+		t.Errorf("expected lever count 85, got %d", sourceDistributionMap["lever"])
+	}
+	if sourceDistributionMap["ashby"] != 45 {
+		t.Errorf("expected ashby count 45, got %d", sourceDistributionMap["ashby"])
+	}
+}
+

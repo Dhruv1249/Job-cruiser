@@ -406,6 +406,20 @@ class ApiService {
     }
   }
 
+  /// Saves user personal profile and structured resume details to the backend.
+  Future<bool> saveProfile(Map<String, dynamic> profileData) async {
+    try {
+      final response = await _dio.post('/user/profile', data: profileData);
+      return response.statusCode == 200;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return false;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
+
   /// Parses raw CV text using Gemini AI via backend endpoint.
   Future<Map<String, dynamic>?> parseCVWithGemini(String rawCVText) async {
     try {

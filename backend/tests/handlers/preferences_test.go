@@ -330,3 +330,173 @@ func TestPreferencesRequestBindingWithMatchNotification(t *testing.T) {
 		})
 	}
 }
+
+func TestPreferencesRequestBindingWithStructuredResumeDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	testBody := map[string]interface{}{
+		"full_name":    "Dhruv Dev",
+		"target_roles": []string{"Backend Engineer"},
+		"work_models":  []string{"remote"},
+		"skills":       []string{"Go", "Postgres", "Flutter", "Docker"},
+		"projects": []map[string]interface{}{
+			{
+				"title":       "Job Cruiser",
+				"tech_stack":  []string{"Go", "Postgres", "Flutter"},
+				"description": "Full automated job matching platform",
+				"link":        "https://github.com/example/job-cruiser",
+			},
+		},
+		"experiences": []map[string]interface{}{
+			{
+				"company":    "Tech Corp",
+				"role":       "Senior Software Engineer",
+				"duration":   "2023 - Present",
+				"highlights": "Led development of core matching pipelines",
+			},
+		},
+		"education": []map[string]interface{}{
+			{
+				"institution": "Tech University",
+				"degree":      "Bachelor of Technology",
+				"year":        "2020 - 2024",
+				"grade":       "8.8 CGPA",
+			},
+		},
+		"achievements": []map[string]interface{}{
+			{
+				"title":   "Hackathon Winner",
+				"details": "First place in National Cloud Challenge",
+			},
+		},
+		"certifications": []map[string]interface{}{
+			{
+				"name":   "AWS Certified Solutions Architect",
+				"issuer": "Amazon Web Services",
+			},
+		},
+	}
+
+	jsonBytes, err := json.Marshal(testBody)
+	if err != nil {
+		t.Fatalf("failed to marshal JSON: %v", err)
+	}
+
+	router := gin.New()
+	router.POST("/preferences", func(c *gin.Context) {
+		var req handlers.PreferencesRequest
+		if bindErr := c.ShouldBindJSON(&req); bindErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": bindErr.Error()})
+			return
+		}
+
+		if len(req.Projects) != 1 || req.Projects[0].Title != "Job Cruiser" {
+			t.Errorf("unexpected projects binding: %+v", req.Projects)
+		}
+		if len(req.Experiences) != 1 || req.Experiences[0].Company != "Tech Corp" {
+			t.Errorf("unexpected experiences binding: %+v", req.Experiences)
+		}
+		if len(req.Skills) != 4 || req.Skills[0] != "Go" {
+			t.Errorf("unexpected skills binding: %+v", req.Skills)
+		}
+		if len(req.Education) != 1 || req.Education[0].Institution != "Tech University" {
+			t.Errorf("unexpected education binding: %+v", req.Education)
+		}
+		if len(req.Achievements) != 1 || req.Achievements[0].Title != "Hackathon Winner" {
+			t.Errorf("unexpected achievements binding: %+v", req.Achievements)
+		}
+		if len(req.Certifications) != 1 || req.Certifications[0].Name != "AWS Certified Solutions Architect" {
+			t.Errorf("unexpected certifications binding: %+v", req.Certifications)
+		}
+
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	recorder := httptest.NewRecorder()
+	request, _ := http.NewRequest(http.MethodPost, "/preferences", bytes.NewBuffer(jsonBytes))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+}
+
+func TestProfileUpdateRequestBinding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	testBody := map[string]interface{}{
+		"full_name":      "Dhruv Dev",
+		"email":          "dhruv@example.com",
+		"phone":          "+91 9876543210",
+		"location":       "Bangalore, India",
+		"bio_summary":    "Passionate backend developer with expertise in Go and cloud systems.",
+		"linkedin_url":   "https://linkedin.com/in/dhruv",
+		"github_url":     "https://github.com/dhruv",
+		"portfolio_url":  "https://dhruv.dev",
+		"skills":         []string{"Go", "Postgres", "Redis"},
+		"projects": []map[string]interface{}{
+			{
+				"title":       "Open Overleaf",
+				"tech_stack":  []string{"Next.js", "Docker", "TypeScript"},
+				"description": "Self-hosted LaTeX editor",
+				"link":        "https://github.com/example/overleaf",
+			},
+		},
+	}
+
+	jsonBytes, err := json.Marshal(testBody)
+	if err != nil {
+		t.Fatalf("failed to marshal JSON: %v", err)
+	}
+
+	router := gin.New()
+	router.POST("/user/profile", func(c *gin.Context) {
+		var req handlers.ProfileUpdateRequest
+		if bindErr := c.ShouldBindJSON(&req); bindErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": bindErr.Error()})
+			return
+		}
+
+		if req.FullName != "Dhruv Dev" || req.Email != "dhruv@example.com" {
+			t.Errorf("unexpected profile binding: %+v", req)
+		}
+		if len(req.Projects) != 1 || req.Projects[0].Title != "Open Overleaf" {
+			t.Errorf("unexpected projects in profile update: %+v", req.Projects)
+		}
+
+		c.JSON(http.StatusOK, gin.H{"status": "profile_updated"})
+	})
+
+	recorder := httptest.NewRecorder()
+	request, _ := http.NewRequest(http.MethodPost, "/user/profile", bytes.NewBuffer(jsonBytes))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+}
+
+func TestExtractStructuredResumeDetails(t *testing.T) {
+	masterCVText := "Raw resume text here...\n\n--- STRUCTURED RESUME DETAILS ---\n{\"skills\":[\"Go\",\"Docker\"],\"projects\":[{\"title\":\"Test Project\",\"tech_stack\":[\"Go\"],\"description\":\"Desc\",\"link\":\"\"}]}"
+
+	exp, proj, edu, skills, ach, cert := handlers.ExtractStructuredResumeDetails(masterCVText)
+
+	if len(skills) != 2 || skills[0] != "Go" {
+		t.Errorf("expected 2 skills, got %v", skills)
+	}
+	if len(proj) != 1 || proj[0].Title != "Test Project" {
+		t.Errorf("expected 1 project, got %v", proj)
+	}
+	if len(exp) != 0 || len(edu) != 0 || len(ach) != 0 || len(cert) != 0 {
+		t.Errorf("expected empty slices for unprovided fields")
+	}
+
+	emptyText := "No delimiter in this text"
+	exp2, proj2, edu2, skills2, ach2, cert2 := handlers.ExtractStructuredResumeDetails(emptyText)
+	if len(exp2) != 0 || len(proj2) != 0 || len(edu2) != 0 || len(skills2) != 0 || len(ach2) != 0 || len(cert2) != 0 {
+		t.Errorf("expected empty slices for missing delimiter")
+	}
+}
+

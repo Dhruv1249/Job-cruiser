@@ -206,6 +206,21 @@ class TopCompanyMetric {
   }
 }
 
+/// Represents statistics and yield metrics for an individual source in a specific scraper run.
+class ScraperSourceStat {
+  const ScraperSourceStat({
+    required this.source,
+    required this.jobsFound,
+    this.durationSeconds = 0.0,
+    this.errorMessage,
+  });
+
+  final String source;
+  final int jobsFound;
+  final double durationSeconds;
+  final String? errorMessage;
+}
+
 /// Representation of an individual scraper execution run.
 class ScraperRunLog {
   const ScraperRunLog({
@@ -228,14 +243,53 @@ class ScraperRunLog {
   final String errorMessage;
   final int durationSeconds;
 
-  List<String> get sourcesList {
+  List<ScraperSourceStat> get sourceDistribution {
     if (sourcesRaw.isEmpty) return const [];
     try {
       final decoded = jsonDecode(sourcesRaw);
-      if (decoded is List) {
-        return decoded.map((e) => e.toString()).toList();
+      if (decoded is Map) {
+        final statList = <ScraperSourceStat>[];
+        decoded.forEach((key, value) {
+          final sourceName = key.toString();
+          if (value is num) {
+            statList.add(
+              ScraperSourceStat(
+                source: sourceName,
+                jobsFound: value.toInt(),
+              ),
+            );
+          } else if (value is Map) {
+            final jobsCount = (value['jobs_found'] as num?)?.toInt() ??
+                (value['count'] as num?)?.toInt() ??
+                0;
+            final duration = (value['duration_seconds'] as num?)?.toDouble() ?? 0.0;
+            final errorText = value['error'] as String?;
+            statList.add(
+              ScraperSourceStat(
+                source: sourceName,
+                jobsFound: jobsCount,
+                durationSeconds: duration,
+                errorMessage: errorText,
+              ),
+            );
+          }
+        });
+        statList.sort((first, second) => second.jobsFound.compareTo(first.jobsFound));
+        return statList;
+      } else if (decoded is List) {
+        return decoded
+            .map((item) => ScraperSourceStat(source: item.toString(), jobsFound: 0))
+            .toList();
       }
     } catch (_) {}
+    return const [];
+  }
+
+  List<String> get sourcesList {
+    final distribution = sourceDistribution;
+    if (distribution.isNotEmpty) {
+      return distribution.map((item) => item.source).toList();
+    }
     return const [];
   }
 

@@ -102,6 +102,46 @@ void main() {
       expect(data.runs.first.sourcesList, contains('greenhouse'));
     });
 
+    test('parses sourceDistribution map of numbers and objects correctly', () {
+      const logWithCountMap = ScraperRunLog(
+        runId: 'run-map-1',
+        startedAt: '2026-09-08T10:00:00Z',
+        finishedAt: '2026-09-08T10:05:00Z',
+        status: 'completed',
+        jobsAdded: 205,
+        sourcesRaw: '{"greenhouse": 120, "lever": 85}',
+        errorMessage: '',
+        durationSeconds: 300,
+      );
+
+      final distribution = logWithCountMap.sourceDistribution;
+      expect(distribution.length, equals(2));
+      expect(distribution.first.source, equals('greenhouse'));
+      expect(distribution.first.jobsFound, equals(120));
+      expect(distribution.last.source, equals('lever'));
+      expect(distribution.last.jobsFound, equals(85));
+      expect(logWithCountMap.sourcesList, containsAll(['greenhouse', 'lever']));
+
+      const logWithDetailMap = ScraperRunLog(
+        runId: 'run-detail-1',
+        startedAt: '2026-09-08T10:00:00Z',
+        finishedAt: '2026-09-08T10:05:00Z',
+        status: 'completed',
+        jobsAdded: 150,
+        sourcesRaw: '{"ashby": {"jobs_found": 90, "duration_seconds": 14.5}, "workday": {"jobs_found": 60, "duration_seconds": 22.0, "error": "Rate limited"}}',
+        errorMessage: '',
+        durationSeconds: 300,
+      );
+
+      final detailDist = logWithDetailMap.sourceDistribution;
+      expect(detailDist.length, equals(2));
+      expect(detailDist.first.source, equals('ashby'));
+      expect(detailDist.first.jobsFound, equals(90));
+      expect(detailDist.first.durationSeconds, equals(14.5));
+      expect(detailDist.last.source, equals('workday'));
+      expect(detailDist.last.errorMessage, equals('Rate limited'));
+    });
+
     test('handles empty or malformed payload gracefully', () {
       final data = ScraperTelemetryData.fromJson({});
 

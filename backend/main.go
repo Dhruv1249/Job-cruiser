@@ -203,6 +203,7 @@ func main() {
 		protected.POST("/jobs/:id/undismiss", jobHandler.UndismissJob)
 		protected.POST("/preferences", prefHandler.UpdatePreferences)
 		protected.GET("/preferences", prefHandler.GetPreferences)
+		protected.POST("/user/profile", prefHandler.UpdateProfile)
 		protected.POST("/user/parse-cv", prefHandler.ParseCV)
 		protected.POST("/overleaf/config", prefHandler.UpdateOverleafConfig)
 		protected.GET("/overleaf/config", prefHandler.GetOverleafConfig)

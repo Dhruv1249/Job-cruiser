@@ -231,46 +231,7 @@ class _ScraperRunHistoryCardState extends State<ScraperRunHistoryCard> {
                           ],
                         ),
                       ),
-                    if (run.sourcesList.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Sources hit: ',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.secondary,
-                              ),
-                            ),
-                            Expanded(
-                              child: Wrap(
-                                spacing: 6,
-                                runSpacing: 4,
-                                children: run.sourcesList.map((source) {
-                                  return Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.surfaceContainerHigh,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      source,
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w500,
-                                        color: AppColors.primary,
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                    _buildSourceDistributionSection(run),
                   ],
                 );
               },
@@ -378,5 +339,155 @@ class _ScraperRunHistoryCardState extends State<ScraperRunHistoryCard> {
     } catch (_) {
       return timestamp;
     }
+  }
+
+  Widget _buildSourceDistributionSection(ScraperRunLog run) {
+    final distribution = run.sourceDistribution;
+    if (distribution.isEmpty) return const SizedBox.shrink();
+
+    final totalJobsFound = distribution.fold<int>(0, (sum, stat) => sum + stat.jobsFound);
+    final hasCounts = totalJobsFound > 0;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Distribution of Sources (${distribution.length} sources)',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                ),
+              ),
+              if (hasCounts)
+                Text(
+                  '$totalJobsFound jobs discovered',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.secondary,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          if (hasCounts) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: SizedBox(
+                height: 6,
+                child: Row(
+                  children: distribution.where((s) => s.jobsFound > 0).map((stat) {
+                    final percentage = (stat.jobsFound / totalJobsFound).clamp(0.01, 1.0);
+                    return Expanded(
+                      flex: (percentage * 1000).toInt(),
+                      child: Container(
+                        color: _getSourceColor(stat.source),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: distribution.map((stat) {
+              final percentage = hasCounts && stat.jobsFound > 0
+                  ? ((stat.jobsFound / totalJobsFound) * 100).toStringAsFixed(1)
+                  : null;
+
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: stat.errorMessage != null && stat.errorMessage!.isNotEmpty
+                        ? AppColors.error.withValues(alpha: 0.4)
+                        : AppColors.outlineVariant.withValues(alpha: 0.5),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _getSourceColor(stat.source),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      stat.source.toUpperCase(),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    if (stat.jobsFound > 0) ...[
+                      const SizedBox(width: 4),
+                      Text(
+                        '${stat.jobsFound} jobs',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.secondary,
+                        ),
+                      ),
+                    ],
+                    if (percentage != null) ...[
+                      const SizedBox(width: 3),
+                      Text(
+                        '($percentage%)',
+                        style: const TextStyle(
+                          fontSize: 9,
+                          color: AppColors.outline,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                    if (stat.durationSeconds > 0) ...[
+                      const SizedBox(width: 4),
+                      Text(
+                        '${stat.durationSeconds.toStringAsFixed(1)}s',
+                        style: const TextStyle(
+                          fontSize: 9,
+                          color: AppColors.outline,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getSourceColor(String source) {
+    final lower = source.toLowerCase();
+    if (lower.contains('greenhouse')) return AppColors.matchGreen;
+    if (lower.contains('lever')) return const Color(0xFF2563EB);
+    if (lower.contains('ashby')) return const Color(0xFF6366F1);
+    if (lower.contains('workday')) return const Color(0xFFD97706);
+    if (lower.contains('smartrecruiters')) return const Color(0xFF0D9488);
+    if (lower.contains('linkedin')) return const Color(0xFF0284C7);
+    if (lower.contains('indeed')) return const Color(0xFF9333EA);
+    if (lower.contains('remoteok')) return const Color(0xFFE11D48);
+    if (lower.contains('hn') || lower.contains('hacker')) return const Color(0xFFEA580C);
+    return AppColors.outline;
   }
 }
