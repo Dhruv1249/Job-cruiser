@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -47,7 +48,7 @@ class FCMService {
     const AndroidInitializationSettings androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
     await _localNotifications.initialize(
-      const InitializationSettings(android: androidSettings),
+      settings: const InitializationSettings(android: androidSettings),
       onDidReceiveNotificationResponse: _onLocalNotificationTap,
     );
 
@@ -77,11 +78,11 @@ class FCMService {
     final RemoteNotification? notification = message.notification;
     if (notification == null) return;
 
-    _localNotifications.show(
-      notification.hashCode,
-      notification.title,
-      notification.body,
-      NotificationDetails(
+    unawaited(_localNotifications.show(
+      id: notification.hashCode,
+      title: notification.title,
+      body: notification.body,
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           _highImportanceChannel.id,
           _highImportanceChannel.name,
@@ -91,7 +92,7 @@ class FCMService {
         ),
       ),
       payload: jsonEncode(message.data),
-    );
+    ));
   }
 
   void _handleMessageTap(RemoteMessage message) {

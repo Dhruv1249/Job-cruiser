@@ -369,29 +369,25 @@ class TestIngestPipelineEndToEnd(unittest.TestCase):
 
     @patch("scrape_all.BACKEND_API_URL", "")
     @patch("scrape_all.start_run")
-    def test_orchestration_skips_ingest_when_no_run_id(self, mock_start_run):
+    def test_orchestration_raises_when_no_run_id(self, mock_start_run):
         """
-        Verify that when start_run returns None (backend unavailable), the orchestrator
-        skips the ingest step rather than crashing.
+        Verify that when start_run returns None (backend unavailable or wrong key),
+        the orchestrator raises RuntimeError immediately rather than running for
+        hours and silently discarding all scraped jobs.
         """
         mock_start_run.return_value = None
 
         with patch("scrape_all.fetch_ats_slugs", return_value={}), \
              patch("scrape_all.load_career_pages", return_value=[]), \
-             patch("scrape_all.scrape_jobs") as mock_scrape, \
-             patch("scrape_all.save_json"), \
-             patch("scrape_all.time.sleep"), \
              patch("scrape_all.finish_run") as mock_finish:
 
-            mock_df = Mock()
-            mock_df.empty = True
-            mock_scrape.return_value = mock_df
-
             from scrape_all import run_orchestration
-            result = run_orchestration()
+            with self.assertRaises(RuntimeError) as context:
+                run_orchestration()
 
-        self.assertEqual(result["status"], "success")
+        self.assertIn("INGEST_API_KEY", str(context.exception))
         mock_finish.assert_not_called()
+
 
     def test_normalised_jobs_are_location_filtered_before_ingest(self):
         """
