@@ -79,6 +79,7 @@ class ApiService {
   /// Fetches the current FCM device token and registers it with the backend
   /// so push notifications can reach this device.
   Future<void> registerFCMToken() async {
+    if (kIsWeb) return;
     await FCMService.instance.registerTokenWithBackend(this);
   }
 

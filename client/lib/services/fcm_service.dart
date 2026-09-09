@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'api_service.dart';
@@ -38,6 +39,8 @@ class FCMService {
   /// notification channel, subscribes to foreground and tap events, and
   /// attempts to fetch the current FCM registration token.
   Future<void> initialize() async {
+    if (kIsWeb) return;
+
     await _messaging.requestPermission(alert: true, badge: true, sound: true);
 
     await _localNotifications
@@ -67,6 +70,8 @@ class FCMService {
   /// Retrieves the current FCM device token and POSTs it to the backend.
   /// Safe to call every login — the backend upserts on the user record.
   Future<void> registerTokenWithBackend(ApiService apiService) async {
+    if (kIsWeb) return;
+
     try {
       final String? token = await _messaging.getToken();
       if (token == null || token.isEmpty) return;
