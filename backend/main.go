@@ -76,9 +76,15 @@ func main() {
 	if nvidiaApiKey == "" {
 		log.Println("WARNING: NVIDIA_API_KEY missing. NVIDIA NIM GLM-5.2 features will fail.")
 	}
+	fcmService := services.NewFCMService()
+	if fcmService == nil {
+		log.Println("WARNING: FCM credentials missing (FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY). Push notifications will be disabled.")
+	}
 	nvidiaNimService := services.NewNvidiaNimService(databasePool, nvidiaApiKey)
+	nvidiaNimService.FCMService = fcmService
 	geminiApiKey := os.Getenv("GEMINI_API_KEY")
 	geminiBatchService := services.NewGeminiBatchMatchService(databasePool, geminiApiKey)
+	geminiBatchService.FCMService = fcmService
 	hybridMatchService := services.NewHybridBatchMatchService(nvidiaNimService, geminiBatchService)
 
 	hybridMatchService.StartBackgroundScheduler(context.Background())
@@ -218,6 +224,7 @@ func main() {
 		protected.POST("/notifications/:id/read", notificationsHandler.MarkNotificationAsRead)
 		protected.POST("/notifications/read-all", notificationsHandler.MarkAllNotificationsAsRead)
 		protected.GET("/notifications/unread-count", notificationsHandler.GetUnreadNotificationsCount)
+		protected.PUT("/notifications/fcm-token", notificationsHandler.RegisterFCMToken)
 
 		protected.GET("/resume-versions", versionsHandler.ListResumeVersions)
 		protected.GET("/resume-versions/:id/pdf", versionsHandler.GetResumeVersionPDF)

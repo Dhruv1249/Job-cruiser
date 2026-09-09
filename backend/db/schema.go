@@ -357,6 +357,7 @@ var schemaQueries = []string{
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;`,
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS country TEXT DEFAULT '';`,
 	`ALTER TABLE scraper_runs ADD COLUMN IF NOT EXISTS companies_hit JSONB DEFAULT '[]'::jsonb;`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS fcm_token TEXT;`,
 }
 
 // InitSchema executes the queries in sequence.

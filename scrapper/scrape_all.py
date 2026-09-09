@@ -1212,6 +1212,10 @@ def run_orchestration(target_platform: str | None = None) -> dict:
         TOTAL_STREAM_JOBS_ADDED = 0
 
     run_identifier = start_run()
+    if run_identifier is None:
+        raise RuntimeError(
+            "Backend rejected /scraper/start — check INGEST_API_KEY and that the backend is reachable. Aborting run."
+        )
     aggregated_raw_jobs = []
     run_manifest = []
     source_statistics = {}
@@ -1224,6 +1228,8 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                 "duration_seconds": round(elapsed_seconds, 2),
                 "error": error_detail,
             }
+
+    orchestration_exception: Exception | None = None
 
     try:
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as primary_executor:
@@ -1395,7 +1401,7 @@ def run_orchestration(target_platform: str | None = None) -> dict:
             if target_platform is None or target_platform == Site.LINKEDIN.value:
                 try:
                     logger.info("[orchestrator] Board searches finished. Triggering LinkedIn description enrichment pass...")
-                    enrich_linkedin_descriptions(cooldown_seconds=5, max_jobs=None, since_minutes=1440, max_workers=None)
+                    enrich_linkedin_descriptions(cooldown_seconds=5, max_jobs=500, since_minutes=1440, max_workers=None)
                 except Exception as enrichment_err:
                     logger.error(f"[enrichment] Enrichment pass failed: {enrichment_err}")
 
@@ -1426,7 +1432,7 @@ def run_orchestration(target_platform: str | None = None) -> dict:
         logger.info(f"[orchestrator] Streaming ingestion complete. Total new jobs added to DB: {TOTAL_STREAM_JOBS_ADDED}")
 
         logger.info(f"[orchestrator] Run complete: {len(STREAM_AGGREGATED_JOBS)} unique jobs scraped, {TOTAL_STREAM_JOBS_ADDED} new jobs ingested to DB")
-        
+
         if source_statistics:
             logger.info("[orchestrator] Source summary:")
             sorted_stats = sorted(source_statistics.items(), key=lambda x: x[1].get("jobs_found", 0), reverse=True)
@@ -1434,15 +1440,17 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                 err_str = f" ERROR: {stats['error']}" if stats.get("error") else ""
                 logger.info(f"  {src_key:<35} →  {stats.get('jobs_found', 0)} jobs  ({stats.get('duration_seconds', 0.0)}s){err_str}")
 
-        if run_identifier:
-            finish_run(run_identifier, "success", None, source_statistics, TOTAL_STREAM_JOBS_ADDED)
-
-        return {"status": "success", "manifest": run_manifest, "source_stats": source_statistics}
-
     except Exception as execution_exception:
-        if run_identifier:
-            finish_run(run_identifier, "failed", str(execution_exception), source_statistics, 0)
+        orchestration_exception = execution_exception
         raise execution_exception
+
+    finally:
+        if run_identifier:
+            final_status = "failed" if orchestration_exception is not None else "success"
+            final_error = str(orchestration_exception) if orchestration_exception is not None else None
+            finish_run(run_identifier, final_status, final_error, source_statistics, TOTAL_STREAM_JOBS_ADDED)
+
+    return {"status": "success", "manifest": run_manifest, "source_stats": source_statistics}
 
 
 if __name__ == "__main__":

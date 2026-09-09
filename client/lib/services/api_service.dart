@@ -6,6 +6,7 @@ import 'package:logger/logger.dart';
 import '../models/job.dart';
 import '../models/application.dart';
 import '../models/scraper_telemetry_models.dart';
+import 'fcm_service.dart';
 
 /// Central API Service handling network interactions with the Go Backend.
 class ApiService {
@@ -68,9 +69,23 @@ class ApiService {
     await _storage.delete(key: _tokenKey);
   }
 
-  /// Persists authentication token.
+  /// Persists authentication token and triggers FCM device token registration.
   Future<void> saveToken(String token) async {
     await _storage.write(key: _tokenKey, value: token);
+    unawaited(registerFCMToken());
+  }
+
+  /// Fetches the current FCM device token and registers it with the backend
+  /// so push notifications can reach this device.
+  Future<void> registerFCMToken() async {
+    await FCMService.instance.registerTokenWithBackend(this);
+  }
+
+  /// Sends the FCM device token to the backend for the authenticated user.
+  Future<void> putFCMToken(String fcmToken) async {
+    try {
+      await _dio.put('/notifications/fcm-token', data: {'fcm_token': fcmToken});
+    } catch (_) {}
   }
 
   /// Retrieves saved authentication token.

@@ -48,6 +48,7 @@ type NvidiaNimService struct {
 	Endpoint                     string
 	ModelName                    string
 	HTTPClient                   *http.Client
+	FCMService                   *FCMService
 	queueMutex                   sync.RWMutex
 	isQueuePaused                bool
 	isEvaluationInProgress       bool
@@ -77,6 +78,7 @@ type UserProfileData struct {
 	ProjectsSummary                   string   `json:"projects_summary"`
 	WorkHistory                       string   `json:"work_history"`
 	EducationSummary                  string   `json:"education_summary"`
+	FCMToken                          string   `json:"fcm_token"`
 }
 
 // JobSnippetData contains minimal job details sent for AI batch evaluation.
@@ -954,7 +956,7 @@ func (s *NvidiaNimService) evaluateJobBatchWithBackoff(
 		}
 		_ = updateJobStandardizedLocationAndWorkModel(ctx, s.DB, res.JobID, res.StandardizedLocation, res.WorkModel)
 		if matchedProfile != nil {
-			notifyUserOnHighMatch(ctx, s.DB, matchedProfile, res.JobID, res.MatchScore, res.MatchReasoning)
+			notifyUserOnHighMatch(ctx, s.DB, s.FCMService, matchedProfile, res.JobID, res.MatchScore, res.MatchReasoning)
 		}
 		syncMutex.Lock()
 		evaluatedJobIDs[res.JobID] = true
@@ -1426,6 +1428,7 @@ func scanCandidateProfileRecord(rowScanner interface{ Scan(dest ...any) error })
 		&projectsJSON,
 		&experiencesJSON,
 		&educationJSON,
+		&item.FCMToken,
 	)
 	if scanErr != nil {
 		return nil, scanErr
@@ -1519,7 +1522,8 @@ func fetchAllActiveUserProfiles(ctx context.Context, databasePool *pgxpool.Pool)
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.skills, '[]'::jsonb)) > 0 THEN up.skills ELSE u.parsed_experience->'skills' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.projects, '[]'::jsonb)) > 0 THEN up.projects ELSE u.parsed_experience->'projects' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.experiences, '[]'::jsonb)) > 0 THEN up.experiences ELSE u.parsed_experience->'experience' END, '[]'::jsonb),
-			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.education, '[]'::jsonb)) > 0 THEN up.education ELSE u.parsed_experience->'education' END, '[]'::jsonb)
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.education, '[]'::jsonb)) > 0 THEN up.education ELSE u.parsed_experience->'education' END, '[]'::jsonb),
+			COALESCE(u.fcm_token, '')
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id
 		WHERE u.ai_matching_enabled = true;
@@ -1561,7 +1565,8 @@ func fetchSingleUserProfileByID(ctx context.Context, databasePool *pgxpool.Pool,
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.skills, '[]'::jsonb)) > 0 THEN up.skills ELSE u.parsed_experience->'skills' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.projects, '[]'::jsonb)) > 0 THEN up.projects ELSE u.parsed_experience->'projects' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.experiences, '[]'::jsonb)) > 0 THEN up.experiences ELSE u.parsed_experience->'experience' END, '[]'::jsonb),
-			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.education, '[]'::jsonb)) > 0 THEN up.education ELSE u.parsed_experience->'education' END, '[]'::jsonb)
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.education, '[]'::jsonb)) > 0 THEN up.education ELSE u.parsed_experience->'education' END, '[]'::jsonb),
+			COALESCE(u.fcm_token, '')
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id
 		WHERE u.id = $1;
@@ -1706,7 +1711,7 @@ func updateJobStandardizedLocationAndWorkModel(ctx context.Context, databasePool
 	return errExec
 }
 
-func notifyUserOnHighMatch(ctx context.Context, databasePool *pgxpool.Pool, profile *UserProfileData, jobID string, matchScore int, matchReasoning string) {
+func notifyUserOnHighMatch(ctx context.Context, databasePool *pgxpool.Pool, fcmService *FCMService, profile *UserProfileData, jobID string, matchScore int, matchReasoning string) {
 	if databasePool == nil || profile == nil || !profile.MatchThresholdNotificationEnabled {
 		return
 	}
@@ -1760,8 +1765,24 @@ func notifyUserOnHighMatch(ctx context.Context, databasePool *pgxpool.Pool, prof
 			WHERE user_id = $1 AND job_id = $2;
 		`
 		_, _ = databasePool.Exec(ctx, markNotifiedQuery, profile.UserID, jobID)
+
+		if fcmService != nil && profile.FCMToken != "" {
+			go func() {
+				pushErr := fcmService.SendPushNotification(
+					context.Background(),
+					profile.FCMToken,
+					notificationTitle,
+					fmt.Sprintf("%d%% match for %s at %s", matchScore, jobTitle, companyName),
+					map[string]string{"job_id": jobID},
+				)
+				if pushErr != nil {
+					log.Printf("[FCM] push delivery failed for user %s: %v", profile.UserID, pushErr)
+				}
+			}()
+		}
 	}
 }
+
 
 func sanitizeJSONResponse(textContent string) string {
 	clean := strings.TrimSpace(textContent)

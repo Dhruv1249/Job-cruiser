@@ -64,15 +64,31 @@ type FinishRequest struct {
 	SourcesHit   json.RawMessage `json:"sources_hit"`
 }
 
-// StartRun registers a new scraper run in the telemetry tracking tables
+// StartRun registers a new scraper run in the telemetry tracking tables.
+// Any existing runs that have been in 'running' status for longer than 4 hours
+// are automatically cancelled before the new run is created.
 func (h *IngestHandler) StartRun(c *gin.Context) {
+	ctx := context.Background()
+
+	staleRunCancelQuery := `
+		UPDATE scraper_runs
+		SET status = 'cancelled',
+		    finished_at = CURRENT_TIMESTAMP,
+		    error_message = 'Auto-cancelled: run exceeded 4-hour timeout without receiving a finish signal'
+		WHERE status = 'running'
+		  AND started_at < CURRENT_TIMESTAMP - INTERVAL '4 hours';
+	`
+	if _, cancelErr := h.DB.Exec(ctx, staleRunCancelQuery); cancelErr != nil {
+		log.Printf("StartRun: failed to auto-cancel stale runs: %v", cancelErr)
+	}
+
 	var runID string
 	query := `
 		INSERT INTO scraper_runs (started_at, status, jobs_added, sources_hit)
 		VALUES (CURRENT_TIMESTAMP, 'running', 0, '[]'::jsonb)
 		RETURNING id;
 	`
-	err := h.DB.QueryRow(context.Background(), query).Scan(&runID)
+	err := h.DB.QueryRow(ctx, query).Scan(&runID)
 	if err != nil {
 		log.Printf("Failed to start scraper run: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start scraper run recording"})

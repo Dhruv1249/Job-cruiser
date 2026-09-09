@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:ui' show PointerDeviceKind;
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'details.dart' as details_page;
@@ -12,6 +14,7 @@ import 'models/job.dart';
 import 'models/job_filter_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'services/api_service.dart';
+import 'services/fcm_service.dart';
 import 'services/notification_service.dart';
 import 'services/update_checker_service.dart';
 import 'widgets/company_logo_avatar.dart';
@@ -25,6 +28,9 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
+  await Firebase.initializeApp();
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  await FCMService.instance.initialize();
   await NotificationService.instance.initialize();
   runApp(const MyApp());
 }

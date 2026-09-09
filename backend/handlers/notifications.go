@@ -171,3 +171,44 @@ func (handler *NotificationsHandler) GetUnreadNotificationsCount(ginContext *gin
 
 	ginContext.JSON(http.StatusOK, gin.H{"unread_count": unreadCount})
 }
+
+/*
+RegisterFCMToken persists the device's FCM registration token for the authenticated
+user so the backend can deliver push notifications to their Android device.
+An empty token clears the stored value, effectively opting the device out.
+*/
+func (handler *NotificationsHandler) RegisterFCMToken(ginContext *gin.Context) {
+	userIDValue, exists := ginContext.Get("user_id")
+	if !exists {
+		ginContext.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDValue)
+
+	var requestBody struct {
+		FCMToken string `json:"fcm_token"`
+	}
+	if bindErr := ginContext.ShouldBindJSON(&requestBody); bindErr != nil {
+		ginContext.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	if handler.DB == nil {
+		ginContext.JSON(http.StatusInternalServerError, gin.H{"error": "Database unavailable"})
+		return
+	}
+
+	_, updateError := handler.DB.Exec(
+		ginContext.Request.Context(),
+		`UPDATE users SET fcm_token = $1 WHERE id = $2`,
+		requestBody.FCMToken,
+		userID,
+	)
+	if updateError != nil {
+		ginContext.JSON(http.StatusInternalServerError, gin.H{"error": "Failed saving FCM token: " + updateError.Error()})
+		return
+	}
+
+	ginContext.JSON(http.StatusOK, gin.H{"message": "FCM token registered"})
+}
+

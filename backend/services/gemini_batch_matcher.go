@@ -74,6 +74,7 @@ type GeminiBatchMatchService struct {
 	disabledModels               map[string]bool
 	runDisabledModels            map[string]bool
 	ModelTokenBudgets            map[string]int
+	FCMService                   *FCMService
 }
 
 const (
@@ -698,7 +699,7 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 		}
 		_ = updateJobStandardizedLocationAndWorkModel(ctx, s.DB, resultItem.JobID, resultItem.StandardizedLocation, resultItem.WorkModel)
 		if matchedProfile != nil {
-			notifyUserOnHighMatch(ctx, s.DB, matchedProfile, resultItem.JobID, resultItem.MatchScore, resultItem.MatchReasoning)
+			notifyUserOnHighMatch(ctx, s.DB, s.FCMService, matchedProfile, resultItem.JobID, resultItem.MatchScore, resultItem.MatchReasoning)
 		}
 
 		evaluatedJobIDs[resultItem.JobID] = true
