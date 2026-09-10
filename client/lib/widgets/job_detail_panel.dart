@@ -654,7 +654,7 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
     final isApplied = _currentStatus == 'applied';
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: AppColors.surfaceContainerLowest,
         border: const Border(
@@ -771,73 +771,81 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
                       ),
                     ] else ...[
                       IconButton.outlined(
+                        visualDensity: VisualDensity.compact,
                         onPressed: _isSaving
                             ? null
                             : () => _handleSaveStatus(isBookmarked ? 'unbookmarked' : 'bookmarked'),
                         icon: Icon(
                           isBookmarked ? Icons.bookmark : Icons.bookmark_border,
                           color: isBookmarked ? AppColors.matchGreen : AppColors.primary,
-                          size: 20,
+                          size: 19,
                         ),
                         style: IconButton.styleFrom(
+                          minimumSize: const Size(36, 36),
+                          padding: const EdgeInsets.all(8),
                           side: BorderSide(
                             color: isBookmarked ? AppColors.matchGreen : AppColors.outlineVariant,
                           ),
-                          padding: const EdgeInsets.all(10),
                         ),
                         tooltip: isBookmarked ? 'Saved' : 'Save Job',
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 6),
                       IconButton.outlined(
+                        visualDensity: VisualDensity.compact,
                         onPressed: _isSaving
                             ? null
                             : () => _handleSaveStatus(isApplied ? 'not_applied' : 'applied'),
                         icon: Icon(
                           isApplied ? Icons.check_circle : Icons.check_circle_outline,
                           color: isApplied ? AppColors.matchGreen : AppColors.primary,
-                          size: 20,
+                          size: 19,
                         ),
                         style: IconButton.styleFrom(
+                          minimumSize: const Size(36, 36),
+                          padding: const EdgeInsets.all(8),
                           side: BorderSide(
                             color: isApplied ? AppColors.matchGreen : AppColors.outlineVariant,
                           ),
-                          padding: const EdgeInsets.all(10),
                         ),
                         tooltip: isApplied ? 'Applied' : 'Mark as Applied',
                       ),
                       if (widget.job.url.isNotEmpty) ...[
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
                         IconButton.outlined(
+                          visualDensity: VisualDensity.compact,
                           onPressed: () => _openJobUrl(widget.job.url),
                           icon: const Icon(
                             Icons.open_in_new,
                             color: AppColors.primary,
-                            size: 19,
+                            size: 18,
                           ),
                           style: IconButton.styleFrom(
+                            minimumSize: const Size(36, 36),
+                            padding: const EdgeInsets.all(8),
                             side: const BorderSide(color: AppColors.outlineVariant),
-                            padding: const EdgeInsets.all(10),
                           ),
                           tooltip: 'Open ATS Job Listing',
                         ),
                       ],
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 6),
                       IconButton.outlined(
+                        visualDensity: VisualDensity.compact,
                         onPressed: _handleDismissJob,
                         icon: const Icon(
                           Icons.visibility_off_outlined,
                           color: AppColors.error,
-                          size: 19,
+                          size: 18,
                         ),
                         style: IconButton.styleFrom(
+                          minimumSize: const Size(36, 36),
+                          padding: const EdgeInsets.all(8),
                           side: const BorderSide(color: AppColors.outlineVariant),
-                          padding: const EdgeInsets.all(10),
                         ),
                         tooltip: 'Hide Job',
                       ),
                     ],
-                    const Spacer(),
                     if (isWide) ...[
+                      const Spacer(),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         mainAxisSize: MainAxisSize.min,
@@ -874,29 +882,28 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
                         ],
                       ),
                     ] else ...[
-                      Flexible(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(minWidth: 140, maxWidth: 260),
-                          child: ElevatedButton.icon(
-                            onPressed: _isTailoring ? null : _handleTailorApplication,
-                            icon: _isTailoring
-                                ? const SizedBox(
-                                    width: 15,
-                                    height: 15,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                  )
-                                : const Icon(Icons.auto_awesome, size: 16, color: Colors.white),
-                            label: Text(
-                              _isTailoring ? 'Tailoring...' : 'Tailor Application',
-                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.primary,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _isTailoring ? null : _handleTailorApplication,
+                          icon: _isTailoring
+                              ? const SizedBox(
+                                  width: 15,
+                                  height: 15,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                )
+                              : const Icon(Icons.auto_awesome, size: 16, color: Colors.white),
+                          label: Text(
+                            _isTailoring ? 'Tailoring...' : 'Tailor Application',
+                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
                         ),
                       ),

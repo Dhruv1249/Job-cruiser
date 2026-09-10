@@ -744,7 +744,10 @@ func (h *AdminHandler) GetScraperStats(c *gin.Context) {
 	}
 
 	runsRows, runsErr := h.DB.Query(ctx, `
-		SELECT id, started_at, COALESCE(finished_at, started_at), status, jobs_added,
+		SELECT id, 
+		       started_at AT TIME ZONE 'Asia/Kolkata', 
+		       COALESCE(finished_at, started_at) AT TIME ZONE 'Asia/Kolkata', 
+		       status, jobs_added,
 		       COALESCE(sources_hit::text, '[]'),
 		       COALESCE(error_message, ''),
 		       EXTRACT(EPOCH FROM (COALESCE(finished_at, started_at) - started_at))::INT AS duration_seconds,
