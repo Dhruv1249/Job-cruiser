@@ -59,6 +59,7 @@ jobs:
           API_URL=$(echo "$RAW_API_URL" | tr -d '\r\n')
           CLIENT_ID=$(echo "$RAW_CLIENT_ID" | tr -d '\r\n')
           flutter build web --release \
+            --no-web-resources-cdn \
             --build-name=${{ steps.version.outputs.name }} \
             --build-number=${{ steps.version.outputs.code }} \
             --dart-define=API_BASE_URL="$API_URL" \

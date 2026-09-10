@@ -27,13 +27,28 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: ".env");
-  if (!kIsWeb) {
-    await Firebase.initializeApp();
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    await FCMService.instance.initialize();
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint("dotenv load warning: $e");
   }
-  await NotificationService.instance.initialize();
+
+  if (!kIsWeb) {
+    try {
+      await Firebase.initializeApp();
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+      await FCMService.instance.initialize();
+    } catch (e) {
+      debugPrint("Firebase/FCM init failed: $e");
+    }
+  }
+
+  try {
+    await NotificationService.instance.initialize();
+  } catch (e) {
+    debugPrint("NotificationService init failed: $e");
+  }
+
   runApp(const MyApp());
 }
 

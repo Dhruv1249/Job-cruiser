@@ -12,6 +12,7 @@
 /client/.pub-cache/
 /client/build/
 /client/android/key.properties
+/client/android/app/google-services.json
 /client/ios/.symlinks/
 
 /scrapper/venv/
