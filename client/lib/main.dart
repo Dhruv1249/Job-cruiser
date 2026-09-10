@@ -183,6 +183,8 @@ class _AppInitializerState extends State<AppInitializer> {
       return;
     }
 
+    unawaited(_apiService.registerFCMToken());
+
     final profile = await _apiService.fetchProfile();
     if (!mounted) return;
 

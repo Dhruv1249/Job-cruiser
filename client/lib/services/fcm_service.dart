@@ -119,7 +119,11 @@ class FCMService {
     } catch (_) {}
   }
 
-  Future<void> _onTokenRefresh(String newToken) async {}
+  Future<void> _onTokenRefresh(String newToken) async {
+    try {
+      await ApiService().putFCMToken(newToken);
+    } catch (_) {}
+  }
 }
 
 /// Background message handler — must be a top-level function, not a method.
