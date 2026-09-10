@@ -5,6 +5,7 @@ import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'auth.dart';
 import 'main.dart' show AppColors, JobCruiserShell;
 import 'services/api_service.dart';
+import 'widgets/month_year_picker_dialog.dart';
 
 /// Multi-step Onboarding Wizard screen for new users.
 class OnboardingWizardScreen extends StatefulWidget {
@@ -65,6 +66,8 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
   final List<String> _skills = [];
   final List<Map<String, String>> _achievements = [];
   final List<Map<String, String>> _certifications = [];
+  final List<Map<String, String>> _researchPatents = [];
+  final List<Map<String, dynamic>> _openSourceContributions = [];
 
   double _minSalary = 0.0;
   final Set<String> _selectedRoles = {};
@@ -239,6 +242,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
               _projects.add({
                 'title': item['title']?.toString() ?? '',
                 'tech_stack': ts,
+                'duration': item['duration']?.toString() ?? '',
                 'description': item['description']?.toString() ?? '',
                 'link': item['link']?.toString() ?? '',
               });
@@ -251,6 +255,49 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
               _achievements.add({
                 'title': item['title']?.toString() ?? '',
                 'details': item['details']?.toString() ?? '',
+                'date': item['date']?.toString() ?? '',
+              });
+            }
+          }
+
+          if (parsed['certifications'] is List) {
+            _certifications.clear();
+            for (var item in parsed['certifications']) {
+              _certifications.add({
+                'name': item['name']?.toString() ?? '',
+                'issuer': item['issuer']?.toString() ?? '',
+                'date': item['date']?.toString() ?? '',
+              });
+            }
+          }
+
+          if (parsed['research_patents'] is List) {
+            _researchPatents.clear();
+            for (var item in parsed['research_patents']) {
+              _researchPatents.add({
+                'title': item['title']?.toString() ?? '',
+                'authors': item['authors']?.toString() ?? '',
+                'publication_or_patent_number': item['publication_or_patent_number']?.toString() ?? '',
+                'date': item['date']?.toString() ?? '',
+                'link': item['link']?.toString() ?? '',
+                'description': item['description']?.toString() ?? '',
+              });
+            }
+          }
+
+          if (parsed['open_source_contributions'] is List) {
+            _openSourceContributions.clear();
+            for (var item in parsed['open_source_contributions']) {
+              final ts = (item['tech_stack'] is List)
+                  ? (item['tech_stack'] as List).map((e) => e.toString()).toList()
+                  : (item['tech_stack'] != null ? [item['tech_stack'].toString()] : <String>[]);
+              _openSourceContributions.add({
+                'project_name': item['project_name']?.toString() ?? '',
+                'contribution_role': item['contribution_role']?.toString() ?? '',
+                'duration': item['duration']?.toString() ?? '',
+                'tech_stack': ts,
+                'link': item['link']?.toString() ?? '',
+                'description': item['description']?.toString() ?? '',
               });
             }
           }
@@ -323,6 +370,8 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
       'skills': _skills,
       'achievements': _achievements,
       'certifications': _certifications,
+      'research_patents': _researchPatents,
+      'open_source_contributions': _openSourceContributions,
     };
     String masterCvString = jsonEncode(fullCvPayload);
     if (_rawCvText.isNotEmpty) {
@@ -362,6 +411,8 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
       'skills': _skills,
       'achievements': _achievements,
       'certifications': _certifications,
+      'research_patents': _researchPatents,
+      'open_source_contributions': _openSourceContributions,
       'target_resume_pages': 1,
       'target_cover_letter_pages': 1,
       'match_threshold_notification_enabled': _matchThresholdNotificationEnabled,
@@ -753,7 +804,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
         ),
         const SizedBox(height: 20),
         DefaultTabController(
-          length: 7,
+          length: 9,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -768,6 +819,8 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                   Tab(text: 'Skills & Tech'),
                   Tab(text: 'Achievements'),
                   Tab(text: 'Certifications'),
+                  Tab(text: 'Research & Patents'),
+                  Tab(text: 'Open Source'),
                   Tab(text: 'Bio & Location'),
                 ],
               ),
@@ -782,6 +835,8 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                     _buildSkillsTab(),
                     _buildAchievementsTab(),
                     _buildCertificationsTab(),
+                    _buildResearchPatentsTab(),
+                    _buildOpenSourceTab(),
                     _buildBioSummaryTab(),
                   ],
                 ),
@@ -903,8 +958,12 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                         subtitle: Text(
-                          'Tech: ${item['tech_stack']}\n${item['description']}',
-                          maxLines: 2,
+                          [
+                            if (item['duration'] != null && (item['duration'] as String).isNotEmpty) item['duration'] as String,
+                            if (item['tech_stack'] != null && (item['tech_stack'] as String).isNotEmpty) 'Tech: ${item['tech_stack']}',
+                            if (item['description'] != null && (item['description'] as String).isNotEmpty) item['description'] as String,
+                          ].join('\n'),
+                          maxLines: 3,
                           overflow: TextOverflow.ellipsis,
                         ),
                         trailing: Row(
@@ -1084,7 +1143,14 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                           item['title'] ?? '',
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: Text(item['details'] ?? ''),
+                        subtitle: Text(
+                          [
+                            if (item['date'] != null && (item['date'] as String).isNotEmpty) item['date'] as String,
+                            if (item['details'] != null && (item['details'] as String).isNotEmpty) item['details'] as String,
+                          ].join('\n'),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -1150,7 +1216,14 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                           item['name'] ?? '',
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: Text('Issuer: ${item['issuer']}'),
+                        subtitle: Text(
+                          [
+                            if (item['date'] != null && (item['date'] as String).isNotEmpty) item['date'] as String,
+                            if (item['issuer'] != null && (item['issuer'] as String).isNotEmpty) 'Issuer: ${item['issuer']}',
+                          ].join('\n'),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -1163,6 +1236,155 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                               onPressed: () {
                                 setState(() {
                                   _certifications.removeAt(index);
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildResearchPatentsTab() {
+    return Column(
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Research & Patents',
+                style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary, fontSize: 16),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.add_circle, color: AppColors.primary),
+              tooltip: 'Add Research or Patent',
+              onPressed: () => _showAddResearchPatentDialog(),
+            ),
+          ],
+        ),
+        Expanded(
+          child: _researchPatents.isEmpty
+              ? const Center(
+                  child: Text('No research or patents added yet. Upload CV or tap + to add.'),
+                )
+              : ListView.builder(
+                  itemCount: _researchPatents.length,
+                  itemBuilder: (context, index) {
+                    final item = _researchPatents[index];
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: const BorderSide(color: AppColors.outlineVariant),
+                      ),
+                      child: ListTile(
+                        title: Text(
+                          item['title'] ?? '',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(
+                          [
+                            if (item['date'] != null && (item['date'] as String).isNotEmpty) item['date'] as String,
+                            if (item['authors'] != null && (item['authors'] as String).isNotEmpty) 'By: ${item['authors']}',
+                            if (item['publication_or_patent_number'] != null && (item['publication_or_patent_number'] as String).isNotEmpty) item['publication_or_patent_number'] as String,
+                            if (item['description'] != null && (item['description'] as String).isNotEmpty) item['description'] as String,
+                          ].join('\n'),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit_outlined, color: AppColors.primary),
+                              onPressed: () => _showAddResearchPatentDialog(editIndex: index),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: AppColors.error),
+                              onPressed: () {
+                                setState(() {
+                                  _researchPatents.removeAt(index);
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOpenSourceTab() {
+    return Column(
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Open Source Contributions',
+                style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary, fontSize: 16),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.add_circle, color: AppColors.primary),
+              tooltip: 'Add Open Source Contribution',
+              onPressed: () => _showAddOpenSourceDialog(),
+            ),
+          ],
+        ),
+        Expanded(
+          child: _openSourceContributions.isEmpty
+              ? const Center(
+                  child: Text('No open source contributions added yet. Upload CV or tap + to add.'),
+                )
+              : ListView.builder(
+                  itemCount: _openSourceContributions.length,
+                  itemBuilder: (context, index) {
+                    final item = _openSourceContributions[index];
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: const BorderSide(color: AppColors.outlineVariant),
+                      ),
+                      child: ListTile(
+                        title: Text(
+                          item['project_name'] ?? '',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(
+                          [
+                            if (item['duration'] != null && (item['duration'] as String).isNotEmpty) item['duration'] as String,
+                            if (item['contribution_role'] != null && (item['contribution_role'] as String).isNotEmpty) item['contribution_role'] as String,
+                            if (item['description'] != null && (item['description'] as String).isNotEmpty) item['description'] as String,
+                          ].join('\n'),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit_outlined, color: AppColors.primary),
+                              onPressed: () => _showAddOpenSourceDialog(editIndex: index),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: AppColors.error),
+                              onPressed: () {
+                                setState(() {
+                                  _openSourceContributions.removeAt(index);
                                 });
                               },
                             ),
@@ -1339,106 +1561,54 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
 
     showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlgState) {
-          return AlertDialog(
-            title: Text(isEditing ? 'Edit Work Experience' : 'Add Work Experience'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(controller: companyCtrl, decoration: const InputDecoration(labelText: 'Company')),
-                  const SizedBox(height: 8),
-                  TextField(controller: roleCtrl, decoration: const InputDecoration(labelText: 'Role / Title')),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            final res = await _showMonthYearPicker(
-                              context: context,
-                              title: 'Select Start Month & Year',
-                            );
-                            if (res != null) {
-                              setDlgState(() {
-                                final parts = durationCtrl.text.split(' - ');
-                                final endPart = parts.length > 1 ? parts[1] : 'Present';
-                                durationCtrl.text = '$res - $endPart';
-                              });
-                            }
-                          },
-                          icon: const Icon(Icons.calendar_month, size: 16),
-                          label: const Text('Start Date'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            final res = await _showMonthYearPicker(
-                              context: context,
-                              title: 'Select End Month & Year',
-                              allowPresent: true,
-                            );
-                            if (res != null) {
-                              setDlgState(() {
-                                final parts = durationCtrl.text.split(' - ');
-                                final startPart = parts.isNotEmpty && parts[0].trim().isNotEmpty ? parts[0] : 'Jan 2023';
-                                durationCtrl.text = '$startPart - $res';
-                              });
-                            }
-                          },
-                          icon: const Icon(Icons.event_available, size: 16),
-                          label: const Text('End Date'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: durationCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Duration Range',
-                      hintText: 'e.g. Nov 2021 - Present',
-                      isDense: true,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: highlightsCtrl,
-                    maxLines: 3,
-                    decoration: const InputDecoration(labelText: 'Highlights & Responsibilities'),
-                  ),
-                ],
+      builder: (ctx) => AlertDialog(
+        title: Text(isEditing ? 'Edit Work Experience' : 'Add Work Experience'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: companyCtrl, decoration: const InputDecoration(labelText: 'Company')),
+              const SizedBox(height: 8),
+              TextField(controller: roleCtrl, decoration: const InputDecoration(labelText: 'Role / Title')),
+              const SizedBox(height: 12),
+              DateRangePickerField(
+                controller: durationCtrl,
+                labelText: 'Duration Range',
+                hintText: 'e.g. Nov 2021 - Present',
               ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-              ElevatedButton(
-                onPressed: () {
-                  if (roleCtrl.text.trim().isNotEmpty) {
-                    setState(() {
-                      final data = {
-                        'company': companyCtrl.text.trim(),
-                        'role': roleCtrl.text.trim(),
-                        'duration': durationCtrl.text.trim(),
-                        'highlights': highlightsCtrl.text.trim(),
-                      };
-                      if (isEditing) {
-                        _experiences[editIndex] = data;
-                      } else {
-                        _experiences.add(data);
-                      }
-                    });
-                  }
-                  Navigator.pop(ctx);
-                },
-                child: Text(isEditing ? 'Save' : 'Add'),
+              const SizedBox(height: 8),
+              TextField(
+                controller: highlightsCtrl,
+                maxLines: 3,
+                decoration: const InputDecoration(labelText: 'Highlights & Responsibilities'),
               ),
             ],
-          );
-        },
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              if (roleCtrl.text.trim().isNotEmpty) {
+                setState(() {
+                  final data = {
+                    'company': companyCtrl.text.trim(),
+                    'role': roleCtrl.text.trim(),
+                    'duration': durationCtrl.text.trim(),
+                    'highlights': highlightsCtrl.text.trim(),
+                  };
+                  if (isEditing) {
+                    _experiences[editIndex] = data;
+                  } else {
+                    _experiences.add(data);
+                  }
+                });
+              }
+              Navigator.pop(ctx);
+            },
+            child: Text(isEditing ? 'Save' : 'Add'),
+          ),
+        ],
       ),
     );
   }
@@ -1446,6 +1616,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
   void _showAddProjectDialog({int? editIndex}) {
     final isEditing = editIndex != null;
     final titleCtrl = TextEditingController(text: isEditing ? _projects[editIndex]['title'] : '');
+    final durationCtrl = TextEditingController(text: isEditing ? _projects[editIndex]['duration'] : '');
     final techCtrl = TextEditingController(text: isEditing ? _projects[editIndex]['tech_stack'] : '');
     final descCtrl = TextEditingController(text: isEditing ? _projects[editIndex]['description'] : '');
     final linkCtrl = TextEditingController(text: isEditing ? _projects[editIndex]['link'] : '');
@@ -1459,8 +1630,17 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Project Title')),
+              const SizedBox(height: 12),
+              DateRangePickerField(
+                controller: durationCtrl,
+                labelText: 'Project Duration',
+                hintText: 'e.g. Jan 2023 - Present',
+              ),
+              const SizedBox(height: 12),
               TextField(controller: techCtrl, decoration: const InputDecoration(labelText: 'Tech Stack (e.g. Go, React)')),
+              const SizedBox(height: 12),
               TextField(controller: descCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Description')),
+              const SizedBox(height: 12),
               TextField(controller: linkCtrl, decoration: const InputDecoration(labelText: 'Project Link / URL')),
             ],
           ),
@@ -1473,6 +1653,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                 setState(() {
                   final data = {
                     'title': titleCtrl.text.trim(),
+                    'duration': durationCtrl.text.trim(),
                     'tech_stack': techCtrl.text.trim(),
                     'description': descCtrl.text.trim(),
                     'link': linkCtrl.text.trim(),
@@ -1628,6 +1809,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
   void _showAddAchievementDialog({int? editIndex}) {
     final isEditing = editIndex != null;
     final titleCtrl = TextEditingController(text: isEditing ? _achievements[editIndex]['title'] : '');
+    final dateCtrl = TextEditingController(text: isEditing ? _achievements[editIndex]['date'] : '');
     final detailsCtrl = TextEditingController(text: isEditing ? _achievements[editIndex]['details'] : '');
 
     showDialog(
@@ -1639,6 +1821,14 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Achievement Title')),
+              const SizedBox(height: 12),
+              SingleDatePickerField(
+                controller: dateCtrl,
+                labelText: 'Date Received / Completed',
+                hintText: 'e.g. Oct 2024 or Present',
+                allowPresent: true,
+              ),
+              const SizedBox(height: 12),
               TextField(controller: detailsCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Details')),
             ],
           ),
@@ -1651,6 +1841,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                 setState(() {
                   final data = {
                     'title': titleCtrl.text.trim(),
+                    'date': dateCtrl.text.trim(),
                     'details': detailsCtrl.text.trim(),
                   };
                   if (isEditing) {
@@ -1673,6 +1864,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
     final isEditing = editIndex != null;
     final nameCtrl = TextEditingController(text: isEditing ? _certifications[editIndex]['name'] : '');
     final issuerCtrl = TextEditingController(text: isEditing ? _certifications[editIndex]['issuer'] : '');
+    final dateCtrl = TextEditingController(text: isEditing ? _certifications[editIndex]['date'] : '');
 
     showDialog(
       context: context,
@@ -1683,7 +1875,15 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Certification Name')),
+              const SizedBox(height: 12),
               TextField(controller: issuerCtrl, decoration: const InputDecoration(labelText: 'Issuing Organization')),
+              const SizedBox(height: 12),
+              SingleDatePickerField(
+                controller: dateCtrl,
+                labelText: 'Date Issued / Completed',
+                hintText: 'e.g. Oct 2024 or Present',
+                allowPresent: true,
+              ),
             ],
           ),
         ),
@@ -1696,11 +1896,150 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                   final data = {
                     'name': nameCtrl.text.trim(),
                     'issuer': issuerCtrl.text.trim(),
+                    'date': dateCtrl.text.trim(),
                   };
                   if (isEditing) {
                     _certifications[editIndex] = data;
                   } else {
                     _certifications.add(data);
+                  }
+                });
+              }
+              Navigator.pop(ctx);
+            },
+            child: Text(isEditing ? 'Save' : 'Add'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddResearchPatentDialog({int? editIndex}) {
+    final isEditing = editIndex != null;
+    final titleCtrl = TextEditingController(text: isEditing ? _researchPatents[editIndex]['title'] : '');
+    final authorsCtrl = TextEditingController(text: isEditing ? _researchPatents[editIndex]['authors'] : '');
+    final pubCtrl = TextEditingController(text: isEditing ? _researchPatents[editIndex]['publication_or_patent_number'] : '');
+    final dateCtrl = TextEditingController(text: isEditing ? _researchPatents[editIndex]['date'] : '');
+    final linkCtrl = TextEditingController(text: isEditing ? _researchPatents[editIndex]['link'] : '');
+    final descCtrl = TextEditingController(text: isEditing ? _researchPatents[editIndex]['description'] : '');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(isEditing ? 'Edit Research or Patent' : 'Add Research or Patent'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Title / Publication Name')),
+              const SizedBox(height: 12),
+              TextField(controller: authorsCtrl, decoration: const InputDecoration(labelText: 'Authors / Inventors')),
+              const SizedBox(height: 12),
+              TextField(controller: pubCtrl, decoration: const InputDecoration(labelText: 'Venue / Patent Number')),
+              const SizedBox(height: 12),
+              SingleDatePickerField(
+                controller: dateCtrl,
+                labelText: 'Date / Period',
+                hintText: 'e.g. Nov 2023 or Present',
+                allowPresent: true,
+              ),
+              const SizedBox(height: 12),
+              TextField(controller: linkCtrl, decoration: const InputDecoration(labelText: 'URL / DOI Link')),
+              const SizedBox(height: 12),
+              TextField(controller: descCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Abstract / Summary')),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              if (titleCtrl.text.trim().isNotEmpty) {
+                setState(() {
+                  final data = {
+                    'title': titleCtrl.text.trim(),
+                    'authors': authorsCtrl.text.trim(),
+                    'publication_or_patent_number': pubCtrl.text.trim(),
+                    'date': dateCtrl.text.trim(),
+                    'link': linkCtrl.text.trim(),
+                    'description': descCtrl.text.trim(),
+                  };
+                  if (isEditing) {
+                    _researchPatents[editIndex] = data;
+                  } else {
+                    _researchPatents.add(data);
+                  }
+                });
+              }
+              Navigator.pop(ctx);
+            },
+            child: Text(isEditing ? 'Save' : 'Add'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddOpenSourceDialog({int? editIndex}) {
+    final isEditing = editIndex != null;
+    final projectCtrl = TextEditingController(text: isEditing ? _openSourceContributions[editIndex]['project_name'] : '');
+    final roleCtrl = TextEditingController(text: isEditing ? _openSourceContributions[editIndex]['contribution_role'] : '');
+    final durationCtrl = TextEditingController(text: isEditing ? _openSourceContributions[editIndex]['duration'] : '');
+    final techCtrl = TextEditingController(
+      text: isEditing
+          ? (_openSourceContributions[editIndex]['tech_stack'] is List
+              ? (_openSourceContributions[editIndex]['tech_stack'] as List).join(', ')
+              : _openSourceContributions[editIndex]['tech_stack']?.toString() ?? '')
+          : '',
+    );
+    final linkCtrl = TextEditingController(text: isEditing ? _openSourceContributions[editIndex]['link'] : '');
+    final descCtrl = TextEditingController(text: isEditing ? _openSourceContributions[editIndex]['description'] : '');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(isEditing ? 'Edit Open Source Contribution' : 'Add Open Source Contribution'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: projectCtrl, decoration: const InputDecoration(labelText: 'Project / Repository Name')),
+              const SizedBox(height: 12),
+              TextField(controller: roleCtrl, decoration: const InputDecoration(labelText: 'Role / Contribution Type')),
+              const SizedBox(height: 12),
+              DateRangePickerField(
+                controller: durationCtrl,
+                labelText: 'Contribution Duration',
+                hintText: 'e.g. Jan 2022 - Present',
+              ),
+              const SizedBox(height: 12),
+              TextField(controller: techCtrl, decoration: const InputDecoration(labelText: 'Tech Stack (comma separated)')),
+              const SizedBox(height: 12),
+              TextField(controller: linkCtrl, decoration: const InputDecoration(labelText: 'Repository / PR Link')),
+              const SizedBox(height: 12),
+              TextField(controller: descCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Description / Impact')),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              if (projectCtrl.text.trim().isNotEmpty) {
+                final rawStack = techCtrl.text.split(',').map((item) => item.trim()).where((item) => item.isNotEmpty).toList();
+                setState(() {
+                  final data = {
+                    'project_name': projectCtrl.text.trim(),
+                    'contribution_role': roleCtrl.text.trim(),
+                    'duration': durationCtrl.text.trim(),
+                    'tech_stack': rawStack,
+                    'link': linkCtrl.text.trim(),
+                    'description': descCtrl.text.trim(),
+                  };
+                  if (isEditing) {
+                    _openSourceContributions[editIndex] = data;
+                  } else {
+                    _openSourceContributions.add(data);
                   }
                 });
               }

@@ -78,6 +78,10 @@ type UserProfileData struct {
 	ProjectsSummary                   string   `json:"projects_summary"`
 	WorkHistory                       string   `json:"work_history"`
 	EducationSummary                  string   `json:"education_summary"`
+	ResearchPatentsSummary            string   `json:"research_patents_summary"`
+	OpenSourceSummary                 string   `json:"open_source_summary"`
+	AchievementsSummary               string   `json:"achievements_summary"`
+	CertificationsSummary             string   `json:"certifications_summary"`
 	FCMToken                          string   `json:"fcm_token"`
 }
 
@@ -201,6 +205,7 @@ var CVParsingJSONSchema = map[string]any{
 					"tech_stack":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 					"description": map[string]any{"type": "string"},
 					"link":        map[string]any{"type": "string"},
+					"duration":    map[string]any{"type": "string"},
 				},
 				"required": []string{"title"},
 			},
@@ -212,6 +217,7 @@ var CVParsingJSONSchema = map[string]any{
 				"properties": map[string]any{
 					"title":   map[string]any{"type": "string"},
 					"details": map[string]any{"type": "string"},
+					"date":    map[string]any{"type": "string"},
 				},
 				"required": []string{"title"},
 			},
@@ -223,8 +229,39 @@ var CVParsingJSONSchema = map[string]any{
 				"properties": map[string]any{
 					"name":   map[string]any{"type": "string"},
 					"issuer": map[string]any{"type": "string"},
+					"date":   map[string]any{"type": "string"},
 				},
 				"required": []string{"name"},
+			},
+		},
+		"research_patents": map[string]any{
+			"type": "array",
+			"items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"title":                         map[string]any{"type": "string"},
+					"authors":                       map[string]any{"type": "string"},
+					"publication_or_patent_number": map[string]any{"type": "string"},
+					"date":                          map[string]any{"type": "string"},
+					"link":                          map[string]any{"type": "string"},
+					"description":                   map[string]any{"type": "string"},
+				},
+				"required": []string{"title"},
+			},
+		},
+		"open_source_contributions": map[string]any{
+			"type": "array",
+			"items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"project_name":      map[string]any{"type": "string"},
+					"contribution_role": map[string]any{"type": "string"},
+					"tech_stack":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"link":              map[string]any{"type": "string"},
+					"duration":          map[string]any{"type": "string"},
+					"description":       map[string]any{"type": "string"},
+				},
+				"required": []string{"project_name"},
 			},
 		},
 		"discovered_keywords": map[string]any{
@@ -1347,6 +1384,18 @@ func buildBatchMatchUserContent(userProfiles []UserProfileData, jobsBatch []JobS
 		if profile.EducationSummary != "" {
 			profileSections = append(profileSections, "Education:\n"+profile.EducationSummary)
 		}
+		if profile.ResearchPatentsSummary != "" {
+			profileSections = append(profileSections, "Research & Patents:\n"+profile.ResearchPatentsSummary)
+		}
+		if profile.OpenSourceSummary != "" {
+			profileSections = append(profileSections, "Open Source Contributions:\n"+profile.OpenSourceSummary)
+		}
+		if profile.CertificationsSummary != "" {
+			profileSections = append(profileSections, "Certifications:\n"+profile.CertificationsSummary)
+		}
+		if profile.AchievementsSummary != "" {
+			profileSections = append(profileSections, "Achievements:\n"+profile.AchievementsSummary)
+		}
 		if profile.MasterCVText != "" && !strings.Contains(profile.ParsedBio, profile.MasterCVText) {
 			profileSections = append(profileSections, "Additional Context:\n"+profile.MasterCVText)
 		}
@@ -1403,12 +1452,16 @@ func (s *NvidiaNimService) FetchJobsUnmatchedForUser(ctx context.Context, target
 
 func scanCandidateProfileRecord(rowScanner interface{ Scan(dest ...any) error }) (*UserProfileData, error) {
 	var (
-		item                              UserProfileData
-		workModelsJSON                    []byte
-		skillsJSON                        []byte
-		projectsJSON                      []byte
-		experiencesJSON                   []byte
-		educationJSON                     []byte
+		item                UserProfileData
+		workModelsJSON      []byte
+		skillsJSON          []byte
+		projectsJSON        []byte
+		experiencesJSON     []byte
+		educationJSON       []byte
+		achievementsJSON    []byte
+		certificationsJSON  []byte
+		researchPatentsJSON []byte
+		openSourceJSON      []byte
 	)
 
 	scanErr := rowScanner.Scan(
@@ -1428,6 +1481,10 @@ func scanCandidateProfileRecord(rowScanner interface{ Scan(dest ...any) error })
 		&projectsJSON,
 		&experiencesJSON,
 		&educationJSON,
+		&achievementsJSON,
+		&certificationsJSON,
+		&researchPatentsJSON,
+		&openSourceJSON,
 		&item.FCMToken,
 	)
 	if scanErr != nil {
@@ -1463,7 +1520,11 @@ func scanCandidateProfileRecord(rowScanner interface{ Scan(dest ...any) error })
 	if len(rawProjects) > 0 {
 		var projectDescriptions []string
 		for _, proj := range rawProjects {
-			projectDescriptions = append(projectDescriptions, fmt.Sprintf("- %s (%s): %s", proj.Title, strings.Join(proj.TechStack, ", "), proj.Description))
+			durationInfo := ""
+			if proj.Duration != "" {
+				durationInfo = fmt.Sprintf(" [%s]", proj.Duration)
+			}
+			projectDescriptions = append(projectDescriptions, fmt.Sprintf("- %s%s (%s): %s", proj.Title, durationInfo, strings.Join(proj.TechStack, ", "), proj.Description))
 		}
 		item.ProjectsSummary = strings.Join(projectDescriptions, "\n")
 	}
@@ -1490,6 +1551,96 @@ func scanCandidateProfileRecord(rowScanner interface{ Scan(dest ...any) error })
 			educationDescriptions = append(educationDescriptions, fmt.Sprintf("- %s, %s (%s, %s)", edu.Degree, edu.Institution, edu.Year, edu.Grade))
 		}
 		item.EducationSummary = strings.Join(educationDescriptions, "\n")
+	}
+
+	var rawAchievements []candidateAchievementItem
+	if len(achievementsJSON) > 0 {
+		_ = json.Unmarshal(achievementsJSON, &rawAchievements)
+	}
+	if len(rawAchievements) > 0 {
+		var achievementDescriptions []string
+		for _, ach := range rawAchievements {
+			dateInfo := ""
+			if ach.Date != "" {
+				dateInfo = fmt.Sprintf(" (%s)", ach.Date)
+			}
+			achievementDescriptions = append(achievementDescriptions, fmt.Sprintf("- %s%s: %s", ach.Title, dateInfo, ach.Details))
+		}
+		item.AchievementsSummary = strings.Join(achievementDescriptions, "\n")
+	}
+
+	var rawCertifications []candidateCertificationItem
+	if len(certificationsJSON) > 0 {
+		_ = json.Unmarshal(certificationsJSON, &rawCertifications)
+	}
+	if len(rawCertifications) > 0 {
+		var certDescriptions []string
+		for _, cert := range rawCertifications {
+			dateInfo := ""
+			if cert.Date != "" {
+				dateInfo = fmt.Sprintf(" (%s)", cert.Date)
+			}
+			certDescriptions = append(certDescriptions, fmt.Sprintf("- %s by %s%s", cert.Name, cert.Issuer, dateInfo))
+		}
+		item.CertificationsSummary = strings.Join(certDescriptions, "\n")
+	}
+
+	var rawResearchPatents []candidateResearchPatentItem
+	if len(researchPatentsJSON) > 0 {
+		_ = json.Unmarshal(researchPatentsJSON, &rawResearchPatents)
+	}
+	if len(rawResearchPatents) > 0 {
+		var researchDescriptions []string
+		for _, rp := range rawResearchPatents {
+			var details []string
+			if rp.Authors != "" {
+				details = append(details, rp.Authors)
+			}
+			if rp.PublicationOrPatentNumber != "" {
+				details = append(details, rp.PublicationOrPatentNumber)
+			}
+			if rp.Date != "" {
+				details = append(details, rp.Date)
+			}
+			detailText := ""
+			if len(details) > 0 {
+				detailText = fmt.Sprintf(" (%s)", strings.Join(details, ", "))
+			}
+			descriptionText := ""
+			if rp.Description != "" {
+				descriptionText = fmt.Sprintf(": %s", rp.Description)
+			}
+			researchDescriptions = append(researchDescriptions, fmt.Sprintf("- %s%s%s", rp.Title, detailText, descriptionText))
+		}
+		item.ResearchPatentsSummary = strings.Join(researchDescriptions, "\n")
+	}
+
+	var rawOpenSource []candidateOpenSourceItem
+	if len(openSourceJSON) > 0 {
+		_ = json.Unmarshal(openSourceJSON, &rawOpenSource)
+	}
+	if len(rawOpenSource) > 0 {
+		var openSourceDescriptions []string
+		for _, osItem := range rawOpenSource {
+			roleText := ""
+			if osItem.ContributionRole != "" {
+				roleText = fmt.Sprintf(" [%s]", osItem.ContributionRole)
+			}
+			durationText := ""
+			if osItem.Duration != "" {
+				durationText = fmt.Sprintf(" (%s)", osItem.Duration)
+			}
+			techText := ""
+			if len(osItem.TechStack) > 0 {
+				techText = fmt.Sprintf(" (%s)", strings.Join(osItem.TechStack, ", "))
+			}
+			descriptionText := ""
+			if osItem.Description != "" {
+				descriptionText = fmt.Sprintf(": %s", osItem.Description)
+			}
+			openSourceDescriptions = append(openSourceDescriptions, fmt.Sprintf("- %s%s%s%s%s", osItem.ProjectName, roleText, durationText, techText, descriptionText))
+		}
+		item.OpenSourceSummary = strings.Join(openSourceDescriptions, "\n")
 	}
 
 	calculatedYoE := calculateTotalExperienceYears(item.MasterCVText)
@@ -1523,6 +1674,10 @@ func fetchAllActiveUserProfiles(ctx context.Context, databasePool *pgxpool.Pool)
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.projects, '[]'::jsonb)) > 0 THEN up.projects ELSE u.parsed_experience->'projects' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.experiences, '[]'::jsonb)) > 0 THEN up.experiences ELSE u.parsed_experience->'experience' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.education, '[]'::jsonb)) > 0 THEN up.education ELSE u.parsed_experience->'education' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.achievements, '[]'::jsonb)) > 0 THEN up.achievements ELSE u.parsed_experience->'achievements' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.certifications, '[]'::jsonb)) > 0 THEN up.certifications ELSE u.parsed_experience->'certifications' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.research_patents, '[]'::jsonb)) > 0 THEN up.research_patents ELSE u.parsed_experience->'research_patents' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.open_source_contributions, '[]'::jsonb)) > 0 THEN up.open_source_contributions ELSE u.parsed_experience->'open_source_contributions' END, '[]'::jsonb),
 			COALESCE(u.fcm_token, '')
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id
@@ -1566,6 +1721,10 @@ func fetchSingleUserProfileByID(ctx context.Context, databasePool *pgxpool.Pool,
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.projects, '[]'::jsonb)) > 0 THEN up.projects ELSE u.parsed_experience->'projects' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.experiences, '[]'::jsonb)) > 0 THEN up.experiences ELSE u.parsed_experience->'experience' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.education, '[]'::jsonb)) > 0 THEN up.education ELSE u.parsed_experience->'education' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.achievements, '[]'::jsonb)) > 0 THEN up.achievements ELSE u.parsed_experience->'achievements' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.certifications, '[]'::jsonb)) > 0 THEN up.certifications ELSE u.parsed_experience->'certifications' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.research_patents, '[]'::jsonb)) > 0 THEN up.research_patents ELSE u.parsed_experience->'research_patents' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.open_source_contributions, '[]'::jsonb)) > 0 THEN up.open_source_contributions ELSE u.parsed_experience->'open_source_contributions' END, '[]'::jsonb),
 			COALESCE(u.fcm_token, '')
 		FROM users u
 		LEFT JOIN user_preferences up ON u.id = up.user_id
@@ -1848,6 +2007,37 @@ type candidateProjectItem struct {
 	Title       string   `json:"title"`
 	TechStack   []string `json:"tech_stack"`
 	Description string   `json:"description"`
+	Duration    string   `json:"duration"`
+}
+
+type candidateAchievementItem struct {
+	Title   string `json:"title"`
+	Details string `json:"details"`
+	Date    string `json:"date"`
+}
+
+type candidateCertificationItem struct {
+	Name   string `json:"name"`
+	Issuer string `json:"issuer"`
+	Date   string `json:"date"`
+}
+
+type candidateResearchPatentItem struct {
+	Title                     string `json:"title"`
+	Authors                   string `json:"authors"`
+	PublicationOrPatentNumber string `json:"publication_or_patent_number"`
+	Date                      string `json:"date"`
+	Link                      string `json:"link"`
+	Description               string `json:"description"`
+}
+
+type candidateOpenSourceItem struct {
+	ProjectName      string   `json:"project_name"`
+	ContributionRole string   `json:"contribution_role"`
+	TechStack        []string `json:"tech_stack"`
+	Link             string   `json:"link"`
+	Duration         string   `json:"duration"`
+	Description      string   `json:"description"`
 }
 
 type candidateExperienceItem struct {

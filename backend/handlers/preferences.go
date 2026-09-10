@@ -55,35 +55,39 @@ type PreferencesRequest struct {
 	TargetCoverLetterPages            int                       `json:"target_cover_letter_pages"`
 	MatchThresholdNotificationEnabled bool                      `json:"match_threshold_notification_enabled"`
 	MatchThresholdPercentage          int                       `json:"match_threshold_percentage"`
-	Experiences                       []ParsedExperienceItem    `json:"experiences"`
-	Projects                          []ParsedProjectItem       `json:"projects"`
-	Education                         []ParsedEducationItem     `json:"education"`
-	Skills                            []string                  `json:"skills"`
-	Achievements                      []ParsedAchievementItem   `json:"achievements"`
-	Certifications                    []ParsedCertificationItem `json:"certifications"`
+	Experiences                       []ParsedExperienceItem     `json:"experiences"`
+	Projects                          []ParsedProjectItem        `json:"projects"`
+	Education                         []ParsedEducationItem      `json:"education"`
+	Skills                            []string                   `json:"skills"`
+	Achievements                      []ParsedAchievementItem    `json:"achievements"`
+	Certifications                    []ParsedCertificationItem  `json:"certifications"`
+	ResearchPatents                   []ParsedResearchPatentItem `json:"research_patents"`
+	OpenSourceContributions           []ParsedOpenSourceItem     `json:"open_source_contributions"`
 }
 
 /*
 ProfileUpdateRequest encapsulates personal background, contact information, social links, and structured resume items.
 */
 type ProfileUpdateRequest struct {
-	FullName          string                    `json:"full_name" binding:"required"`
-	Email             string                    `json:"email"`
-	Phone             string                    `json:"phone"`
-	Location          string                    `json:"location"`
-	Country           string                    `json:"country"`
-	LinkedInURL       string                    `json:"linkedin_url"`
-	GitHubURL         string                    `json:"github_url"`
-	PortfolioURL      string                    `json:"portfolio_url"`
-	CustomLinks       []CustomLinkItem          `json:"custom_links"`
-	BioSummary        string                    `json:"bio_summary"`
-	BioExperienceText string                    `json:"bio_experience_text"`
-	Experiences       []ParsedExperienceItem    `json:"experiences"`
-	Projects          []ParsedProjectItem       `json:"projects"`
-	Education         []ParsedEducationItem     `json:"education"`
-	Skills            []string                  `json:"skills"`
-	Achievements      []ParsedAchievementItem   `json:"achievements"`
-	Certifications    []ParsedCertificationItem `json:"certifications"`
+	FullName                string                     `json:"full_name" binding:"required"`
+	Email                   string                     `json:"email"`
+	Phone                   string                     `json:"phone"`
+	Location                string                     `json:"location"`
+	Country                 string                     `json:"country"`
+	LinkedInURL             string                     `json:"linkedin_url"`
+	GitHubURL               string                     `json:"github_url"`
+	PortfolioURL            string                     `json:"portfolio_url"`
+	CustomLinks             []CustomLinkItem           `json:"custom_links"`
+	BioSummary              string                     `json:"bio_summary"`
+	BioExperienceText       string                     `json:"bio_experience_text"`
+	Experiences             []ParsedExperienceItem     `json:"experiences"`
+	Projects                []ParsedProjectItem        `json:"projects"`
+	Education               []ParsedEducationItem      `json:"education"`
+	Skills                  []string                   `json:"skills"`
+	Achievements            []ParsedAchievementItem    `json:"achievements"`
+	Certifications          []ParsedCertificationItem  `json:"certifications"`
+	ResearchPatents         []ParsedResearchPatentItem `json:"research_patents"`
+	OpenSourceContributions []ParsedOpenSourceItem     `json:"open_source_contributions"`
 }
 
 /*
@@ -96,6 +100,8 @@ func ExtractStructuredResumeDetails(masterCVText string) (
 	[]string,
 	[]ParsedAchievementItem,
 	[]ParsedCertificationItem,
+	[]ParsedResearchPatentItem,
+	[]ParsedOpenSourceItem,
 ) {
 	var experiences []ParsedExperienceItem
 	var projects []ParsedProjectItem
@@ -103,20 +109,22 @@ func ExtractStructuredResumeDetails(masterCVText string) (
 	var skills []string
 	var achievements []ParsedAchievementItem
 	var certifications []ParsedCertificationItem
+	var researchPatents []ParsedResearchPatentItem
+	var openSourceContributions []ParsedOpenSourceItem
 
 	delimiterIndex := strings.Index(masterCVText, "--- STRUCTURED RESUME DETAILS ---")
 	if delimiterIndex == -1 {
-		return experiences, projects, education, skills, achievements, certifications
+		return experiences, projects, education, skills, achievements, certifications, researchPatents, openSourceContributions
 	}
 
 	jsonPayloadText := strings.TrimSpace(masterCVText[delimiterIndex+len("--- STRUCTURED RESUME DETAILS ---"):])
 	if jsonPayloadText == "" {
-		return experiences, projects, education, skills, achievements, certifications
+		return experiences, projects, education, skills, achievements, certifications, researchPatents, openSourceContributions
 	}
 
 	var payloadMap map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(jsonPayloadText), &payloadMap); err != nil {
-		return experiences, projects, education, skills, achievements, certifications
+		return experiences, projects, education, skills, achievements, certifications, researchPatents, openSourceContributions
 	}
 
 	if expRaw, ok := payloadMap["experiences"]; ok {
@@ -137,8 +145,14 @@ func ExtractStructuredResumeDetails(masterCVText string) (
 	if certRaw, ok := payloadMap["certifications"]; ok {
 		_ = json.Unmarshal(certRaw, &certifications)
 	}
+	if researchRaw, ok := payloadMap["research_patents"]; ok {
+		_ = json.Unmarshal(researchRaw, &researchPatents)
+	}
+	if osRaw, ok := payloadMap["open_source_contributions"]; ok {
+		_ = json.Unmarshal(osRaw, &openSourceContributions)
+	}
 
-	return experiences, projects, education, skills, achievements, certifications
+	return experiences, projects, education, skills, achievements, certifications, researchPatents, openSourceContributions
 }
 
 type ParseCVRequest struct {
@@ -157,16 +171,19 @@ type ParsedProjectItem struct {
 	TechStack   []string `json:"tech_stack"`
 	Description string   `json:"description"`
 	Link        string   `json:"link"`
+	Duration    string   `json:"duration"`
 }
 
 type ParsedAchievementItem struct {
 	Title   string `json:"title"`
 	Details string `json:"details"`
+	Date    string `json:"date"`
 }
 
 type ParsedCertificationItem struct {
 	Name   string `json:"name"`
 	Issuer string `json:"issuer"`
+	Date   string `json:"date"`
 }
 
 type ParsedEducationItem struct {
@@ -176,17 +193,43 @@ type ParsedEducationItem struct {
 	Grade       string `json:"grade"`
 }
 
+/*
+ParsedResearchPatentItem represents a research publication, conference paper, or granted patent.
+*/
+type ParsedResearchPatentItem struct {
+	Title                     string `json:"title"`
+	Authors                   string `json:"authors"`
+	PublicationOrPatentNumber string `json:"publication_or_patent_number"`
+	Date                      string `json:"date"`
+	Link                      string `json:"link"`
+	Description               string `json:"description"`
+}
+
+/*
+ParsedOpenSourceItem represents an open-source software project or codebase contribution.
+*/
+type ParsedOpenSourceItem struct {
+	ProjectName      string   `json:"project_name"`
+	ContributionRole string   `json:"contribution_role"`
+	TechStack        []string `json:"tech_stack"`
+	Link             string   `json:"link"`
+	Duration         string   `json:"duration"`
+	Description      string   `json:"description"`
+}
+
 type ParsedCVResponse struct {
-	BioSummary         string                    `json:"bio_summary"`
-	Location           string                    `json:"location"`
-	Skills             []string                  `json:"skills"`
-	Education          []ParsedEducationItem     `json:"education"`
-	Experience         []ParsedExperienceItem    `json:"experience"`
-	Projects           []ParsedProjectItem       `json:"projects"`
-	Achievements       []ParsedAchievementItem   `json:"achievements"`
-	Certifications     []ParsedCertificationItem `json:"certifications"`
-	DiscoveredKeywords []string                  `json:"discovered_keywords"`
-	NewKeywords        []string                  `json:"new_keywords"`
+	BioSummary              string                     `json:"bio_summary"`
+	Location                string                     `json:"location"`
+	Skills                  []string                   `json:"skills"`
+	Education               []ParsedEducationItem      `json:"education"`
+	Experience              []ParsedExperienceItem     `json:"experience"`
+	Projects                []ParsedProjectItem        `json:"projects"`
+	Achievements            []ParsedAchievementItem    `json:"achievements"`
+	Certifications          []ParsedCertificationItem  `json:"certifications"`
+	ResearchPatents         []ParsedResearchPatentItem `json:"research_patents"`
+	OpenSourceContributions []ParsedOpenSourceItem     `json:"open_source_contributions"`
+	DiscoveredKeywords      []string                   `json:"discovered_keywords"`
+	NewKeywords             []string                   `json:"new_keywords"`
 }
 
 /*
@@ -240,6 +283,16 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 		certificationsJSON = []byte("[]")
 	}
 
+	researchPatentsJSON, marshalResearchError := json.Marshal(req.ResearchPatents)
+	if marshalResearchError != nil {
+		researchPatentsJSON = []byte("[]")
+	}
+
+	openSourceJSON, marshalOpenSourceError := json.Marshal(req.OpenSourceContributions)
+	if marshalOpenSourceError != nil {
+		openSourceJSON = []byte("[]")
+	}
+
 	effectiveBio := strings.TrimSpace(req.BioSummary)
 	if effectiveBio == "" {
 		effectiveBio = strings.TrimSpace(req.BioExperienceText)
@@ -263,9 +316,9 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 		INSERT INTO user_preferences (
 			user_id, full_name, email, phone, location, country, linkedin_url, github_url, portfolio_url,
 			custom_links, bio_experience_text, master_cv_text, experiences, projects, education, skills, achievements, certifications,
-			target_roles, work_models
+			research_patents, open_source_contributions, target_roles, work_models
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13, $14, $15, $16, $17, '[]'::jsonb, '[]'::jsonb)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13, $14, $15, $16, $17, $18, $19, '[]'::jsonb, '[]'::jsonb)
 		ON CONFLICT (user_id)
 		DO UPDATE SET
 			full_name = EXCLUDED.full_name,
@@ -285,6 +338,8 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 			skills = EXCLUDED.skills,
 			achievements = EXCLUDED.achievements,
 			certifications = EXCLUDED.certifications,
+			research_patents = EXCLUDED.research_patents,
+			open_source_contributions = EXCLUDED.open_source_contributions,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 	_, err := h.DB.Exec(
@@ -307,6 +362,8 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 		skillsJSON,
 		achievementsJSON,
 		certificationsJSON,
+		researchPatentsJSON,
+		openSourceJSON,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile: " + err.Error()})
@@ -360,9 +417,11 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 	skills := req.Skills
 	achievements := req.Achievements
 	certifications := req.Certifications
+	researchPatents := req.ResearchPatents
+	openSourceContributions := req.OpenSourceContributions
 
 	if len(experiences) == 0 && len(projects) == 0 && strings.Contains(req.MasterCVText, "--- STRUCTURED RESUME DETAILS ---") {
-		expExtracted, projExtracted, eduExtracted, skillsExtracted, achExtracted, certExtracted := ExtractStructuredResumeDetails(req.MasterCVText)
+		expExtracted, projExtracted, eduExtracted, skillsExtracted, achExtracted, certExtracted, researchExtracted, openSourceExtracted := ExtractStructuredResumeDetails(req.MasterCVText)
 		if len(expExtracted) > 0 {
 			experiences = expExtracted
 		}
@@ -380,6 +439,12 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 		}
 		if len(certExtracted) > 0 {
 			certifications = certExtracted
+		}
+		if len(researchExtracted) > 0 {
+			researchPatents = researchExtracted
+		}
+		if len(openSourceExtracted) > 0 {
+			openSourceContributions = openSourceExtracted
 		}
 	}
 
@@ -437,6 +502,12 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 	if certifications == nil {
 		certifications = []ParsedCertificationItem{}
 	}
+	if researchPatents == nil {
+		researchPatents = []ParsedResearchPatentItem{}
+	}
+	if openSourceContributions == nil {
+		openSourceContributions = []ParsedOpenSourceItem{}
+	}
 
 	experiencesJSON, _ := json.Marshal(experiences)
 	projectsJSON, _ := json.Marshal(projects)
@@ -444,6 +515,8 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 	skillsJSON, _ := json.Marshal(skills)
 	achievementsJSON, _ := json.Marshal(achievements)
 	certificationsJSON, _ := json.Marshal(certifications)
+	researchPatentsJSON, _ := json.Marshal(researchPatents)
+	openSourceJSON, _ := json.Marshal(openSourceContributions)
 
 	query := `
 		INSERT INTO user_preferences (
@@ -451,9 +524,10 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 			custom_links, target_roles, target_industries, target_locations, work_models,
 			min_salary, currency, master_cv_text, bio_experience_text, target_resume_pages,
 			target_cover_letter_pages, match_threshold_notification_enabled, match_threshold_percentage,
-			experiences, projects, education, skills, achievements, certifications
+			experiences, projects, education, skills, achievements, certifications,
+			research_patents, open_source_contributions
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
 		ON CONFLICT (user_id) 
 		DO UPDATE SET 
 			full_name = CASE WHEN EXCLUDED.full_name <> '' AND EXCLUDED.full_name <> 'User' THEN EXCLUDED.full_name ELSE user_preferences.full_name END,
@@ -483,6 +557,8 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 			skills = CASE WHEN jsonb_typeof(EXCLUDED.skills) = 'array' AND jsonb_array_length(EXCLUDED.skills) > 0 THEN EXCLUDED.skills ELSE user_preferences.skills END,
 			achievements = CASE WHEN jsonb_typeof(EXCLUDED.achievements) = 'array' AND jsonb_array_length(EXCLUDED.achievements) > 0 THEN EXCLUDED.achievements ELSE user_preferences.achievements END,
 			certifications = CASE WHEN jsonb_typeof(EXCLUDED.certifications) = 'array' AND jsonb_array_length(EXCLUDED.certifications) > 0 THEN EXCLUDED.certifications ELSE user_preferences.certifications END,
+			research_patents = CASE WHEN jsonb_typeof(EXCLUDED.research_patents) = 'array' AND jsonb_array_length(EXCLUDED.research_patents) > 0 THEN EXCLUDED.research_patents ELSE user_preferences.research_patents END,
+			open_source_contributions = CASE WHEN jsonb_typeof(EXCLUDED.open_source_contributions) = 'array' AND jsonb_array_length(EXCLUDED.open_source_contributions) > 0 THEN EXCLUDED.open_source_contributions ELSE user_preferences.open_source_contributions END,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 
@@ -517,6 +593,8 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 		skillsJSON,
 		achievementsJSON,
 		certificationsJSON,
+		researchPatentsJSON,
+		openSourceJSON,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save preferences: " + err.Error()})
@@ -570,6 +648,8 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 			COALESCE(p.skills, '[]'::jsonb),
 			COALESCE(p.achievements, '[]'::jsonb),
 			COALESCE(p.certifications, '[]'::jsonb),
+			COALESCE(p.research_patents, '[]'::jsonb),
+			COALESCE(p.open_source_contributions, '[]'::jsonb),
 			COALESCE(u.parsed_experience::text, ''),
 			(p.user_id IS NOT NULL) AS has_preferences
 		FROM users u
@@ -586,6 +666,8 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 	var skillsJSON []byte
 	var achievementsJSON []byte
 	var certificationsJSON []byte
+	var researchPatentsJSON []byte
+	var openSourceJSON []byte
 	var rawParsedExperience string
 
 	err := h.DB.QueryRow(context.Background(), query, userID).Scan(
@@ -617,6 +699,8 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 		&skillsJSON,
 		&achievementsJSON,
 		&certificationsJSON,
+		&researchPatentsJSON,
+		&openSourceJSON,
 		&rawParsedExperience,
 		&hasPreferences,
 	)
@@ -647,6 +731,12 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 	if len(certificationsJSON) > 0 {
 		_ = json.Unmarshal(certificationsJSON, &pref.Certifications)
 	}
+	if len(researchPatentsJSON) > 0 {
+		_ = json.Unmarshal(researchPatentsJSON, &pref.ResearchPatents)
+	}
+	if len(openSourceJSON) > 0 {
+		_ = json.Unmarshal(openSourceJSON, &pref.OpenSourceContributions)
+	}
 
 	needsBackfill := false
 	if strings.TrimSpace(rawParsedExperience) != "" {
@@ -676,6 +766,14 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 				pref.Certifications = parsedResponse.Certifications
 				needsBackfill = true
 			}
+			if len(pref.ResearchPatents) == 0 && len(parsedResponse.ResearchPatents) > 0 {
+				pref.ResearchPatents = parsedResponse.ResearchPatents
+				needsBackfill = true
+			}
+			if len(pref.OpenSourceContributions) == 0 && len(parsedResponse.OpenSourceContributions) > 0 {
+				pref.OpenSourceContributions = parsedResponse.OpenSourceContributions
+				needsBackfill = true
+			}
 			if strings.TrimSpace(pref.BioExperienceText) == "" && strings.TrimSpace(parsedResponse.BioSummary) != "" {
 				pref.BioExperienceText = strings.TrimSpace(parsedResponse.BioSummary)
 			}
@@ -683,7 +781,7 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 	}
 
 	if (len(pref.Experiences) == 0 || len(pref.Projects) == 0 || len(pref.Skills) == 0) && strings.Contains(pref.MasterCVText, "--- STRUCTURED RESUME DETAILS ---") {
-		expExtracted, projExtracted, eduExtracted, skillsExtracted, achExtracted, certExtracted := ExtractStructuredResumeDetails(pref.MasterCVText)
+		expExtracted, projExtracted, eduExtracted, skillsExtracted, achExtracted, certExtracted, researchExtracted, openSourceExtracted := ExtractStructuredResumeDetails(pref.MasterCVText)
 		if len(pref.Experiences) == 0 && len(expExtracted) > 0 {
 			pref.Experiences = expExtracted
 			needsBackfill = true
@@ -708,6 +806,14 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 			pref.Certifications = certExtracted
 			needsBackfill = true
 		}
+		if len(pref.ResearchPatents) == 0 && len(researchExtracted) > 0 {
+			pref.ResearchPatents = researchExtracted
+			needsBackfill = true
+		}
+		if len(pref.OpenSourceContributions) == 0 && len(openSourceExtracted) > 0 {
+			pref.OpenSourceContributions = openSourceExtracted
+			needsBackfill = true
+		}
 	}
 
 	if needsBackfill {
@@ -717,15 +823,17 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 		skillsBytes, _ := json.Marshal(pref.Skills)
 		achBytes, _ := json.Marshal(pref.Achievements)
 		certBytes, _ := json.Marshal(pref.Certifications)
-		go func(targetUserID interface{}, exp, proj, edu, sk, ach, cert []byte) {
+		researchBytes, _ := json.Marshal(pref.ResearchPatents)
+		openSourceBytes, _ := json.Marshal(pref.OpenSourceContributions)
+		go func(targetUserID interface{}, exp, proj, edu, sk, ach, cert, res, os []byte) {
 			_, _ = h.DB.Exec(
 				context.Background(),
 				`UPDATE user_preferences 
-				 SET experiences = $1, projects = $2, education = $3, skills = $4, achievements = $5, certifications = $6 
-				 WHERE user_id = $7`,
-				exp, proj, edu, sk, ach, cert, targetUserID,
+				 SET experiences = $1, projects = $2, education = $3, skills = $4, achievements = $5, certifications = $6, research_patents = $7, open_source_contributions = $8
+				 WHERE user_id = $9`,
+				exp, proj, edu, sk, ach, cert, res, os, targetUserID,
 			)
-		}(userID, expBytes, projBytes, eduBytes, skillsBytes, achBytes, certBytes)
+		}(userID, expBytes, projBytes, eduBytes, skillsBytes, achBytes, certBytes, researchBytes, openSourceBytes)
 	}
 
 	if strings.TrimSpace(pref.BioExperienceText) == "" {
@@ -930,28 +1038,51 @@ type flexProjectItem struct {
 	TechStack   interface{} `json:"tech_stack"`
 	Description string      `json:"description"`
 	Link        string      `json:"link"`
+	Duration    string      `json:"duration"`
 }
 
 type flexAchievementItem struct {
 	Title   string      `json:"title"`
 	Details interface{} `json:"details"`
+	Date    string      `json:"date"`
 }
 
 type flexCertificationItem struct {
 	Name   string `json:"name"`
 	Issuer string `json:"issuer"`
+	Date   string `json:"date"`
+}
+
+type flexResearchPatentItem struct {
+	Title                     string `json:"title"`
+	Authors                   string `json:"authors"`
+	PublicationOrPatentNumber string `json:"publication_or_patent_number"`
+	Date                      string `json:"date"`
+	Link                      string `json:"link"`
+	Description               string `json:"description"`
+}
+
+type flexOpenSourceItem struct {
+	ProjectName      string      `json:"project_name"`
+	ContributionRole string      `json:"contribution_role"`
+	TechStack        interface{} `json:"tech_stack"`
+	Link             string      `json:"link"`
+	Duration         string      `json:"duration"`
+	Description      string      `json:"description"`
 }
 
 type flexCVResponse struct {
-	BioSummary         string                  `json:"bio_summary"`
-	Location           string                  `json:"location"`
-	Skills             []string                `json:"skills"`
-	Education          []flexEducationItem     `json:"education"`
-	Experience         []flexExperienceItem    `json:"experience"`
-	Projects           []flexProjectItem       `json:"projects"`
-	Achievements       []flexAchievementItem   `json:"achievements"`
-	Certifications     []flexCertificationItem `json:"certifications"`
-	DiscoveredKeywords []string                `json:"discovered_keywords"`
+	BioSummary              string                   `json:"bio_summary"`
+	Location                string                   `json:"location"`
+	Skills                  []string                 `json:"skills"`
+	Education               []flexEducationItem      `json:"education"`
+	Experience              []flexExperienceItem     `json:"experience"`
+	Projects                []flexProjectItem        `json:"projects"`
+	Achievements            []flexAchievementItem    `json:"achievements"`
+	Certifications          []flexCertificationItem  `json:"certifications"`
+	ResearchPatents         []flexResearchPatentItem `json:"research_patents"`
+	OpenSourceContributions []flexOpenSourceItem     `json:"open_source_contributions"`
+	DiscoveredKeywords      []string                 `json:"discovered_keywords"`
 }
 
 func stringifyFlex(v interface{}) string {
@@ -1010,7 +1141,7 @@ func (h *PreferencesHandler) ParseCV(c *gin.Context) {
 		}
 	}
 
-	prompt := fmt.Sprintf(`You are an expert technical resume parser. Extract structured education, experience, projects, skills, achievements, certifications, location, a FIRST-PERSON bio summary, and technical domain keywords from the provided raw CV text.
+	prompt := fmt.Sprintf(`You are an expert technical resume parser. Extract structured education, experience, projects, research/patents, open-source contributions, skills, achievements, certifications, location, a FIRST-PERSON bio summary, and technical domain keywords from the provided raw CV text.
 
 [EXISTING MASTER KEYWORD TAXONOMY]:
 %s
@@ -1047,19 +1178,42 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
       "title": "Project Name",
       "tech_stack": ["Go", "Docker"],
       "description": "Short description",
-      "link": "URL or empty"
+      "link": "URL or empty",
+      "duration": "Jan 2024 - Present"
+    }
+  ],
+  "research_patents": [
+    {
+      "title": "Paper or Patent Title",
+      "authors": "Author List",
+      "publication_or_patent_number": "Conference/Journal or Patent #",
+      "date": "May 2024",
+      "link": "URL or empty",
+      "description": "Short summary"
+    }
+  ],
+  "open_source_contributions": [
+    {
+      "project_name": "Repo / Org Name",
+      "contribution_role": "Contributor / Author",
+      "tech_stack": ["Go", "Rust"],
+      "link": "PR or Repo URL",
+      "duration": "2023 - Present",
+      "description": "Short summary of work"
     }
   ],
   "achievements": [
     {
       "title": "Achievement Title",
-      "details": "Details"
+      "details": "Details",
+      "date": "Oct 2024"
     }
   ],
   "certifications": [
     {
       "name": "Certification Name",
-      "issuer": "Issuing Org"
+      "issuer": "Issuing Org",
+      "date": "Jan 2024"
     }
   ],
   "discovered_keywords": ["Golang", "Postgres", "Flutter", "Kubernetes"]
@@ -1124,9 +1278,43 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 							"items": {"type": "string"}
 						},
 						"description": {"type": "string"},
-						"link": {"type": "string"}
+						"link": {"type": "string"},
+						"duration": {"type": "string"}
 					},
 					"required": ["title"]
+				}
+			},
+			"research_patents": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"title": {"type": "string"},
+						"authors": {"type": "string"},
+						"publication_or_patent_number": {"type": "string"},
+						"date": {"type": "string"},
+						"link": {"type": "string"},
+						"description": {"type": "string"}
+					},
+					"required": ["title"]
+				}
+			},
+			"open_source_contributions": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"project_name": {"type": "string"},
+						"contribution_role": {"type": "string"},
+						"tech_stack": {
+							"type": "array",
+							"items": {"type": "string"}
+						},
+						"link": {"type": "string"},
+						"duration": {"type": "string"},
+						"description": {"type": "string"}
+					},
+					"required": ["project_name"]
 				}
 			},
 			"achievements": {
@@ -1135,7 +1323,8 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 					"type": "object",
 					"properties": {
 						"title": {"type": "string"},
-						"details": {"type": "string"}
+						"details": {"type": "string"},
+						"date": {"type": "string"}
 					},
 					"required": ["title"]
 				}
@@ -1146,7 +1335,8 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 					"type": "object",
 					"properties": {
 						"name": {"type": "string"},
-						"issuer": {"type": "string"}
+						"issuer": {"type": "string"},
+						"date": {"type": "string"}
 					},
 					"required": ["name"]
 				}
@@ -1238,6 +1428,40 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 			TechStack:   tsList,
 			Description: item.Description,
 			Link:        item.Link,
+			Duration:    item.Duration,
+		})
+	}
+
+	for _, item := range flexRes.ResearchPatents {
+		parsedResponse.ResearchPatents = append(parsedResponse.ResearchPatents, ParsedResearchPatentItem{
+			Title:                     item.Title,
+			Authors:                   item.Authors,
+			PublicationOrPatentNumber: item.PublicationOrPatentNumber,
+			Date:                      item.Date,
+			Link:                      item.Link,
+			Description:               item.Description,
+		})
+	}
+
+	for _, item := range flexRes.OpenSourceContributions {
+		var tsList []string
+		switch ts := item.TechStack.(type) {
+		case string:
+			tsList = []string{ts}
+		case []interface{}:
+			for _, t := range ts {
+				if s, ok := t.(string); ok {
+					tsList = append(tsList, s)
+				}
+			}
+		}
+		parsedResponse.OpenSourceContributions = append(parsedResponse.OpenSourceContributions, ParsedOpenSourceItem{
+			ProjectName:      item.ProjectName,
+			ContributionRole: item.ContributionRole,
+			TechStack:        tsList,
+			Link:             item.Link,
+			Duration:         item.Duration,
+			Description:      item.Description,
 		})
 	}
 
@@ -1245,6 +1469,7 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 		parsedResponse.Achievements = append(parsedResponse.Achievements, ParsedAchievementItem{
 			Title:   item.Title,
 			Details: stringifyFlex(item.Details),
+			Date:    item.Date,
 		})
 	}
 
@@ -1252,6 +1477,7 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 		parsedResponse.Certifications = append(parsedResponse.Certifications, ParsedCertificationItem{
 			Name:   item.Name,
 			Issuer: item.Issuer,
+			Date:   item.Date,
 		})
 	}
 

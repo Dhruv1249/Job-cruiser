@@ -91,7 +91,9 @@ func (handler *TailorHandler) fetchJobTailoringRecord(ctx *gin.Context, jobID st
 func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{}) string {
 	var fullName, primaryEmail, contactEmail, phone, location, linkedInURL, gitHubURL, portfolioURL string
 	var bioExperienceText, masterCVText, latexCV, parsedExperienceJSON string
-	var customLinksJSON []byte
+	var customLinksJSON, skillsJSON, projectsJSON, experiencesJSON, educationJSON []byte
+	var achievementsJSON, certificationsJSON, researchPatentsJSON, openSourceJSON []byte
+
 	queryError := handler.DB.QueryRow(
 		ctx.Request.Context(),
 		`SELECT
@@ -107,12 +109,42 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 			COALESCE(p.bio_experience_text, ''),
 			COALESCE(p.master_cv_text, ''),
 			COALESCE(u.latex_cv, ''),
-			COALESCE(u.parsed_experience::text, '[]')
+			COALESCE(u.parsed_experience::text, '[]'),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(p.skills, '[]'::jsonb)) > 0 THEN p.skills ELSE u.parsed_experience->'skills' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(p.projects, '[]'::jsonb)) > 0 THEN p.projects ELSE u.parsed_experience->'projects' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(p.experiences, '[]'::jsonb)) > 0 THEN p.experiences ELSE u.parsed_experience->'experience' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(p.education, '[]'::jsonb)) > 0 THEN p.education ELSE u.parsed_experience->'education' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(p.achievements, '[]'::jsonb)) > 0 THEN p.achievements ELSE u.parsed_experience->'achievements' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(p.certifications, '[]'::jsonb)) > 0 THEN p.certifications ELSE u.parsed_experience->'certifications' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(p.research_patents, '[]'::jsonb)) > 0 THEN p.research_patents ELSE u.parsed_experience->'research_patents' END, '[]'::jsonb),
+			COALESCE(CASE WHEN jsonb_array_length(COALESCE(p.open_source_contributions, '[]'::jsonb)) > 0 THEN p.open_source_contributions ELSE u.parsed_experience->'open_source_contributions' END, '[]'::jsonb)
 		 FROM users u
 		 LEFT JOIN user_preferences p ON u.id = p.user_id
 		 WHERE u.id = $1`,
 		userID,
-	).Scan(&fullName, &primaryEmail, &contactEmail, &phone, &location, &linkedInURL, &gitHubURL, &portfolioURL, &customLinksJSON, &bioExperienceText, &masterCVText, &latexCV, &parsedExperienceJSON)
+	).Scan(
+		&fullName,
+		&primaryEmail,
+		&contactEmail,
+		&phone,
+		&location,
+		&linkedInURL,
+		&gitHubURL,
+		&portfolioURL,
+		&customLinksJSON,
+		&bioExperienceText,
+		&masterCVText,
+		&latexCV,
+		&parsedExperienceJSON,
+		&skillsJSON,
+		&projectsJSON,
+		&experiencesJSON,
+		&educationJSON,
+		&achievementsJSON,
+		&certificationsJSON,
+		&researchPatentsJSON,
+		&openSourceJSON,
+	)
 	if queryError != nil {
 		return "Experienced software engineer with strong backend and cloud infrastructure skills."
 	}
@@ -165,131 +197,244 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 	}
 	profile.WriteString("\n")
 
-	var parsedData struct {
-		BioSummary string   `json:"bio_summary"`
-		Location   string   `json:"location"`
-		Skills     []string `json:"skills"`
-		Education  []struct {
-			Institution string `json:"institution"`
-			Degree      string `json:"degree"`
-			Year        string `json:"year"`
-			Grade       string `json:"grade"`
-		} `json:"education"`
-		Experience []struct {
-			Company    string `json:"company"`
-			Role       string `json:"role"`
-			Duration   string `json:"duration"`
-			Highlights string `json:"highlights"`
-		} `json:"experience"`
-		Projects []struct {
-			Title       string   `json:"title"`
-			TechStack   []string `json:"tech_stack"`
-			Description string   `json:"description"`
-			Link        string   `json:"link"`
-		} `json:"projects"`
-		Achievements []struct {
-			Title   string `json:"title"`
-			Details string `json:"details"`
-		} `json:"achievements"`
-		Certifications []struct {
-			Name   string `json:"name"`
-			Issuer string `json:"issuer"`
-		} `json:"certifications"`
+	type parsedSummaryRecord struct {
+		BioSummary string `json:"bio_summary"`
 	}
-
-	hasParsedData := false
+	var parsedSummary parsedSummaryRecord
 	if parsedExperienceJSON != "" && parsedExperienceJSON != "[]" {
-		if unmarshalErr := json.Unmarshal([]byte(parsedExperienceJSON), &parsedData); unmarshalErr == nil {
-			hasParsedData = parsedData.BioSummary != "" || len(parsedData.Skills) > 0 || len(parsedData.Education) > 0 || len(parsedData.Experience) > 0 || len(parsedData.Projects) > 0
-		}
+		_ = json.Unmarshal([]byte(parsedExperienceJSON), &parsedSummary)
 	}
 
-	if hasParsedData {
-		if parsedData.BioSummary != "" {
-			profile.WriteString("PROFESSIONAL SUMMARY\n")
-			profile.WriteString(parsedData.BioSummary)
-			profile.WriteString("\n\n")
-		}
-
-		if len(parsedData.Skills) > 0 {
-			profile.WriteString("TECHNICAL SKILLS\n")
-			profile.WriteString(strings.Join(parsedData.Skills, ", "))
-			profile.WriteString("\n\n")
-		}
-
-		if len(parsedData.Experience) > 0 {
-			profile.WriteString("WORK EXPERIENCE\n")
-			for _, experienceItem := range parsedData.Experience {
-				profile.WriteString(fmt.Sprintf("  %s at %s (%s)\n", experienceItem.Role, experienceItem.Company, experienceItem.Duration))
-				if experienceItem.Highlights != "" {
-					profile.WriteString(fmt.Sprintf("    %s\n", experienceItem.Highlights))
-				}
-			}
-			profile.WriteString("\n")
-		}
-
-		if len(parsedData.Education) > 0 {
-			profile.WriteString("EDUCATION\n")
-			for _, educationItem := range parsedData.Education {
-				profile.WriteString(fmt.Sprintf("  %s — %s", educationItem.Degree, educationItem.Institution))
-				if educationItem.Year != "" {
-					profile.WriteString(fmt.Sprintf(" (%s)", educationItem.Year))
-				}
-				if educationItem.Grade != "" {
-					profile.WriteString(fmt.Sprintf(" [%s]", educationItem.Grade))
-				}
-				profile.WriteString("\n")
-			}
-			profile.WriteString("\n")
-		}
-
-		if len(parsedData.Projects) > 0 {
-			profile.WriteString("PROJECTS\n")
-			for _, projectItem := range parsedData.Projects {
-				profile.WriteString(fmt.Sprintf("  %s", projectItem.Title))
-				if len(projectItem.TechStack) > 0 {
-					profile.WriteString(fmt.Sprintf(" [%s]", strings.Join(projectItem.TechStack, ", ")))
-				}
-				profile.WriteString("\n")
-				if projectItem.Description != "" {
-					profile.WriteString(fmt.Sprintf("    %s\n", projectItem.Description))
-				}
-				if projectItem.Link != "" {
-					profile.WriteString(fmt.Sprintf("    Link: %s\n", projectItem.Link))
-				}
-			}
-			profile.WriteString("\n")
-		}
-
-		if len(parsedData.Achievements) > 0 {
-			profile.WriteString("ACHIEVEMENTS\n")
-			for _, achievementItem := range parsedData.Achievements {
-				profile.WriteString(fmt.Sprintf("  %s", achievementItem.Title))
-				if achievementItem.Details != "" {
-					profile.WriteString(fmt.Sprintf(": %s", achievementItem.Details))
-				}
-				profile.WriteString("\n")
-			}
-			profile.WriteString("\n")
-		}
-
-		if len(parsedData.Certifications) > 0 {
-			profile.WriteString("CERTIFICATIONS\n")
-			for _, certItem := range parsedData.Certifications {
-				profile.WriteString(fmt.Sprintf("  %s", certItem.Name))
-				if certItem.Issuer != "" {
-					profile.WriteString(fmt.Sprintf(" — %s", certItem.Issuer))
-				}
-				profile.WriteString("\n")
-			}
-			profile.WriteString("\n")
-		}
+	effectiveBio := bioExperienceText
+	if effectiveBio == "" {
+		effectiveBio = parsedSummary.BioSummary
 	}
-
-	if bioExperienceText != "" {
-		profile.WriteString("BIOGRAPHY & OVERVIEW\n")
-		profile.WriteString(bioExperienceText)
+	if effectiveBio != "" {
+		profile.WriteString("PROFESSIONAL SUMMARY\n")
+		profile.WriteString(effectiveBio)
 		profile.WriteString("\n\n")
+	}
+
+	var rawSkills []string
+	if len(skillsJSON) > 0 {
+		_ = json.Unmarshal(skillsJSON, &rawSkills)
+	}
+	if len(rawSkills) > 0 {
+		profile.WriteString("TECHNICAL SKILLS\n")
+		profile.WriteString(strings.Join(rawSkills, ", "))
+		profile.WriteString("\n\n")
+	}
+
+	type experienceRecord struct {
+		Company    string `json:"company"`
+		Role       string `json:"role"`
+		Duration   string `json:"duration"`
+		Highlights string `json:"highlights"`
+	}
+	var rawExperiences []experienceRecord
+	if len(experiencesJSON) > 0 {
+		_ = json.Unmarshal(experiencesJSON, &rawExperiences)
+	}
+	if len(rawExperiences) > 0 {
+		profile.WriteString("WORK EXPERIENCE\n")
+		for _, experienceItem := range rawExperiences {
+			durationText := ""
+			if experienceItem.Duration != "" {
+				durationText = fmt.Sprintf(" (%s)", experienceItem.Duration)
+			}
+			profile.WriteString(fmt.Sprintf("  %s at %s%s\n", experienceItem.Role, experienceItem.Company, durationText))
+			if experienceItem.Highlights != "" {
+				profile.WriteString(fmt.Sprintf("    %s\n", experienceItem.Highlights))
+			}
+		}
+		profile.WriteString("\n")
+	}
+
+	type educationRecord struct {
+		Institution string `json:"institution"`
+		Degree      string `json:"degree"`
+		Year        string `json:"year"`
+		Grade       string `json:"grade"`
+	}
+	var rawEducation []educationRecord
+	if len(educationJSON) > 0 {
+		_ = json.Unmarshal(educationJSON, &rawEducation)
+	}
+	if len(rawEducation) > 0 {
+		profile.WriteString("EDUCATION\n")
+		for _, educationItem := range rawEducation {
+			profile.WriteString(fmt.Sprintf("  %s — %s", educationItem.Degree, educationItem.Institution))
+			if educationItem.Year != "" {
+				profile.WriteString(fmt.Sprintf(" (%s)", educationItem.Year))
+			}
+			if educationItem.Grade != "" {
+				profile.WriteString(fmt.Sprintf(" [%s]", educationItem.Grade))
+			}
+			profile.WriteString("\n")
+		}
+		profile.WriteString("\n")
+	}
+
+	type projectRecord struct {
+		Title       string   `json:"title"`
+		TechStack   []string `json:"tech_stack"`
+		Description string   `json:"description"`
+		Link        string   `json:"link"`
+		Duration    string   `json:"duration"`
+	}
+	var rawProjects []projectRecord
+	if len(projectsJSON) > 0 {
+		_ = json.Unmarshal(projectsJSON, &rawProjects)
+	}
+	if len(rawProjects) > 0 {
+		profile.WriteString("PROJECTS\n")
+		for _, projectItem := range rawProjects {
+			durationText := ""
+			if projectItem.Duration != "" {
+				durationText = fmt.Sprintf(" (%s)", projectItem.Duration)
+			}
+			profile.WriteString(fmt.Sprintf("  %s%s", projectItem.Title, durationText))
+			if len(projectItem.TechStack) > 0 {
+				profile.WriteString(fmt.Sprintf(" [%s]", strings.Join(projectItem.TechStack, ", ")))
+			}
+			profile.WriteString("\n")
+			if projectItem.Description != "" {
+				profile.WriteString(fmt.Sprintf("    %s\n", projectItem.Description))
+			}
+			if projectItem.Link != "" {
+				profile.WriteString(fmt.Sprintf("    Link: %s\n", projectItem.Link))
+			}
+		}
+		profile.WriteString("\n")
+	}
+
+	type achievementRecord struct {
+		Title   string `json:"title"`
+		Details string `json:"details"`
+		Date    string `json:"date"`
+	}
+	var rawAchievements []achievementRecord
+	if len(achievementsJSON) > 0 {
+		_ = json.Unmarshal(achievementsJSON, &rawAchievements)
+	}
+	if len(rawAchievements) > 0 {
+		profile.WriteString("ACHIEVEMENTS\n")
+		for _, achievementItem := range rawAchievements {
+			dateText := ""
+			if achievementItem.Date != "" {
+				dateText = fmt.Sprintf(" (%s)", achievementItem.Date)
+			}
+			profile.WriteString(fmt.Sprintf("  %s%s", achievementItem.Title, dateText))
+			if achievementItem.Details != "" {
+				profile.WriteString(fmt.Sprintf(": %s", achievementItem.Details))
+			}
+			profile.WriteString("\n")
+		}
+		profile.WriteString("\n")
+	}
+
+	type certificationRecord struct {
+		Name   string `json:"name"`
+		Issuer string `json:"issuer"`
+		Date   string `json:"date"`
+	}
+	var rawCertifications []certificationRecord
+	if len(certificationsJSON) > 0 {
+		_ = json.Unmarshal(certificationsJSON, &rawCertifications)
+	}
+	if len(rawCertifications) > 0 {
+		profile.WriteString("CERTIFICATIONS\n")
+		for _, certItem := range rawCertifications {
+			dateText := ""
+			if certItem.Date != "" {
+				dateText = fmt.Sprintf(" (%s)", certItem.Date)
+			}
+			profile.WriteString(fmt.Sprintf("  %s", certItem.Name))
+			if certItem.Issuer != "" {
+				profile.WriteString(fmt.Sprintf(" — %s", certItem.Issuer))
+			}
+			profile.WriteString(dateText)
+			profile.WriteString("\n")
+		}
+		profile.WriteString("\n")
+	}
+
+	type researchPatentRecord struct {
+		Title                     string `json:"title"`
+		Authors                   string `json:"authors"`
+		PublicationOrPatentNumber string `json:"publication_or_patent_number"`
+		Date                      string `json:"date"`
+		Link                      string `json:"link"`
+		Description               string `json:"description"`
+	}
+	var rawResearchPatents []researchPatentRecord
+	if len(researchPatentsJSON) > 0 {
+		_ = json.Unmarshal(researchPatentsJSON, &rawResearchPatents)
+	}
+	if len(rawResearchPatents) > 0 {
+		profile.WriteString("RESEARCH & PATENTS\n")
+		for _, rp := range rawResearchPatents {
+			var metaParts []string
+			if rp.Authors != "" {
+				metaParts = append(metaParts, rp.Authors)
+			}
+			if rp.PublicationOrPatentNumber != "" {
+				metaParts = append(metaParts, rp.PublicationOrPatentNumber)
+			}
+			if rp.Date != "" {
+				metaParts = append(metaParts, rp.Date)
+			}
+			metaText := ""
+			if len(metaParts) > 0 {
+				metaText = fmt.Sprintf(" (%s)", strings.Join(metaParts, ", "))
+			}
+			profile.WriteString(fmt.Sprintf("  %s%s\n", rp.Title, metaText))
+			if rp.Description != "" {
+				profile.WriteString(fmt.Sprintf("    %s\n", rp.Description))
+			}
+			if rp.Link != "" {
+				profile.WriteString(fmt.Sprintf("    Link: %s\n", rp.Link))
+			}
+		}
+		profile.WriteString("\n")
+	}
+
+	type openSourceRecord struct {
+		ProjectName      string   `json:"project_name"`
+		ContributionRole string   `json:"contribution_role"`
+		TechStack        []string `json:"tech_stack"`
+		Link             string   `json:"link"`
+		Duration         string   `json:"duration"`
+		Description      string   `json:"description"`
+	}
+	var rawOpenSource []openSourceRecord
+	if len(openSourceJSON) > 0 {
+		_ = json.Unmarshal(openSourceJSON, &rawOpenSource)
+	}
+	if len(rawOpenSource) > 0 {
+		profile.WriteString("OPEN SOURCE CONTRIBUTIONS\n")
+		for _, osItem := range rawOpenSource {
+			roleText := ""
+			if osItem.ContributionRole != "" {
+				roleText = fmt.Sprintf(" [%s]", osItem.ContributionRole)
+			}
+			durationText := ""
+			if osItem.Duration != "" {
+				durationText = fmt.Sprintf(" (%s)", osItem.Duration)
+			}
+			techText := ""
+			if len(osItem.TechStack) > 0 {
+				techText = fmt.Sprintf(" [%s]", strings.Join(osItem.TechStack, ", "))
+			}
+			profile.WriteString(fmt.Sprintf("  %s%s%s%s\n", osItem.ProjectName, roleText, durationText, techText))
+			if osItem.Description != "" {
+				profile.WriteString(fmt.Sprintf("    %s\n", osItem.Description))
+			}
+			if osItem.Link != "" {
+				profile.WriteString(fmt.Sprintf("    Link: %s\n", osItem.Link))
+			}
+		}
+		profile.WriteString("\n")
 	}
 
 	if masterCVText != "" && masterCVText != bioExperienceText {
@@ -298,7 +443,7 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 		profile.WriteString("\n\n")
 	}
 
-	if latexCV != "" && !hasParsedData {
+	if latexCV != "" && len(rawExperiences) == 0 && len(rawProjects) == 0 {
 		profile.WriteString("RAW LATEX CV SOURCE\n")
 		profile.WriteString(latexCV)
 		profile.WriteString("\n\n")

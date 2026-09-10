@@ -358,6 +358,8 @@ var schemaQueries = []string{
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS country TEXT DEFAULT '';`,
 	`ALTER TABLE scraper_runs ADD COLUMN IF NOT EXISTS companies_hit JSONB DEFAULT '[]'::jsonb;`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS fcm_token TEXT;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS research_patents JSONB DEFAULT '[]'::jsonb;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS open_source_contributions JSONB DEFAULT '[]'::jsonb;`,
 }
 
 // InitSchema executes the queries in sequence.

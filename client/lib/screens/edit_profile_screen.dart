@@ -4,6 +4,7 @@ import "package:flutter/material.dart";
 import "package:syncfusion_flutter_pdf/pdf.dart";
 import "../main.dart" show AppColors;
 import "../services/api_service.dart";
+import "../widgets/month_year_picker_dialog.dart";
 
 /// Screen enabling users to view and update their personal profile, contact links, bio, and structured resume records.
 class EditProfileScreen extends StatefulWidget {
@@ -41,6 +42,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   List<Map<String, dynamic>> _education = [];
   List<Map<String, dynamic>> _achievements = [];
   List<Map<String, dynamic>> _certifications = [];
+  List<Map<String, dynamic>> _researchPatents = [];
+  List<Map<String, dynamic>> _openSourceContributions = [];
 
   bool _isLoading = false;
   bool _isSaving = false;
@@ -149,6 +152,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     final rawCertifications = data["certifications"] as List<dynamic>? ?? [];
     _certifications = rawCertifications.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList();
+
+    final rawResearch = data["research_patents"] as List<dynamic>? ?? [];
+    _researchPatents = rawResearch.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList();
+
+    final rawOpenSource = data["open_source_contributions"] as List<dynamic>? ?? [];
+    _openSourceContributions = rawOpenSource.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList();
   }
 
   Future<void> _loadProfileData() async {
@@ -205,6 +214,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           ? (existingProject!["tech_stack"] as List).join(", ")
           : existingProject?["tech_stack"]?.toString() ?? "",
     );
+    final durationController = TextEditingController(text: existingProject?["duration"]?.toString() ?? "");
     final descriptionController = TextEditingController(text: existingProject?["description"]?.toString() ?? "");
     final linkController = TextEditingController(text: existingProject?["link"]?.toString() ?? "");
 
@@ -224,6 +234,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     labelText: "Project Title *",
                     hintText: "e.g. Distributed Task Queue",
                   ),
+                ),
+                const SizedBox(height: 12),
+                DateRangePickerField(
+                  controller: durationController,
+                  labelText: "Project Duration",
+                  hintText: "e.g. Jan 2023 - Present",
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -281,6 +297,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final updatedItem = <String, dynamic>{
         "title": titleController.text.trim(),
         "tech_stack": techStack,
+        "duration": durationController.text.trim(),
         "description": descriptionController.text.trim(),
         "link": linkController.text.trim(),
       };
@@ -296,6 +313,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     titleController.dispose();
     techStackController.dispose();
+    durationController.dispose();
     descriptionController.dispose();
     linkController.dispose();
   }
@@ -336,12 +354,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                TextField(
+                DateRangePickerField(
                   controller: durationController,
-                  decoration: const InputDecoration(
-                    labelText: "Duration",
-                    hintText: "e.g. Jan 2023 - Present",
-                  ),
+                  labelText: "Duration Range",
+                  hintText: "e.g. Jan 2023 - Present",
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -487,6 +503,400 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     gradeController.dispose();
   }
 
+  Future<void> _showAchievementDialog({Map<String, dynamic>? existingAchievement, int? editIndex}) async {
+    final titleController = TextEditingController(text: existingAchievement?["title"]?.toString() ?? "");
+    final dateController = TextEditingController(text: existingAchievement?["date"]?.toString() ?? "");
+    final detailsController = TextEditingController(text: existingAchievement?["details"]?.toString() ?? "");
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(existingAchievement != null ? "Edit Achievement" : "Add Achievement"),
+        content: SingleChildScrollView(
+          child: SizedBox(
+            width: 480,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                    labelText: "Achievement / Award Title *",
+                    hintText: "e.g. 1st Place at Global Hackathon",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SingleDatePickerField(
+                  controller: dateController,
+                  labelText: "Date Received / Completed",
+                  hintText: "e.g. Oct 2024 or Present",
+                  allowPresent: true,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: detailsController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: "Details / Impact",
+                    hintText: "Outperformed 120 teams; recognized for scalable architecture...",
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (titleController.text.trim().isEmpty) return;
+              FocusManager.instance.primaryFocus?.unfocus();
+              Navigator.of(dialogContext).pop(true);
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true && mounted) {
+      final updatedItem = <String, dynamic>{
+        "title": titleController.text.trim(),
+        "date": dateController.text.trim(),
+        "details": detailsController.text.trim(),
+      };
+
+      setState(() {
+        if (editIndex != null && editIndex >= 0 && editIndex < _achievements.length) {
+          _achievements[editIndex] = updatedItem;
+        } else {
+          _achievements.add(updatedItem);
+        }
+      });
+    }
+
+    titleController.dispose();
+    dateController.dispose();
+    detailsController.dispose();
+  }
+
+  Future<void> _showCertificationDialog({Map<String, dynamic>? existingCertification, int? editIndex}) async {
+    final nameController = TextEditingController(text: existingCertification?["name"]?.toString() ?? "");
+    final issuerController = TextEditingController(text: existingCertification?["issuer"]?.toString() ?? "");
+    final dateController = TextEditingController(text: existingCertification?["date"]?.toString() ?? "");
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(existingCertification != null ? "Edit Certification" : "Add Certification"),
+        content: SingleChildScrollView(
+          child: SizedBox(
+            width: 480,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: "Certification Name *",
+                    hintText: "e.g. AWS Certified Solutions Architect",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: issuerController,
+                  decoration: const InputDecoration(
+                    labelText: "Issuing Organization",
+                    hintText: "e.g. Amazon Web Services",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SingleDatePickerField(
+                  controller: dateController,
+                  labelText: "Date Issued / Completed",
+                  hintText: "e.g. May 2023 or Present",
+                  allowPresent: true,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (nameController.text.trim().isEmpty) return;
+              FocusManager.instance.primaryFocus?.unfocus();
+              Navigator.of(dialogContext).pop(true);
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true && mounted) {
+      final updatedItem = <String, dynamic>{
+        "name": nameController.text.trim(),
+        "issuer": issuerController.text.trim(),
+        "date": dateController.text.trim(),
+      };
+
+      setState(() {
+        if (editIndex != null && editIndex >= 0 && editIndex < _certifications.length) {
+          _certifications[editIndex] = updatedItem;
+        } else {
+          _certifications.add(updatedItem);
+        }
+      });
+    }
+
+    nameController.dispose();
+    issuerController.dispose();
+    dateController.dispose();
+  }
+
+  Future<void> _showResearchPatentDialog({Map<String, dynamic>? existingItem, int? editIndex}) async {
+    final titleController = TextEditingController(text: existingItem?["title"]?.toString() ?? "");
+    final authorsController = TextEditingController(text: existingItem?["authors"]?.toString() ?? "");
+    final pubController = TextEditingController(text: existingItem?["publication_or_patent_number"]?.toString() ?? "");
+    final dateController = TextEditingController(text: existingItem?["date"]?.toString() ?? "");
+    final linkController = TextEditingController(text: existingItem?["link"]?.toString() ?? "");
+    final descController = TextEditingController(text: existingItem?["description"]?.toString() ?? "");
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(existingItem != null ? "Edit Research / Patent" : "Add Research / Patent"),
+        content: SingleChildScrollView(
+          child: SizedBox(
+            width: 480,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                    labelText: "Paper or Patent Title *",
+                    hintText: "e.g. Distributed Consensus in Asynchronous Networks",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: authorsController,
+                  decoration: const InputDecoration(
+                    labelText: "Authors",
+                    hintText: "e.g. John Doe, Jane Smith",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: pubController,
+                  decoration: const InputDecoration(
+                    labelText: "Publication Venue / Patent Number",
+                    hintText: "e.g. IEEE Transactions on Cloud / US Patent #987654",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SingleDatePickerField(
+                  controller: dateController,
+                  labelText: "Date / Year",
+                  hintText: "e.g. Nov 2023",
+                  allowPresent: false,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: linkController,
+                  decoration: const InputDecoration(
+                    labelText: "URL / DOI Link",
+                    hintText: "https://doi.org/...",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: descController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: "Abstract / Summary",
+                    hintText: "Key contributions, methodology, and theoretical findings...",
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (titleController.text.trim().isEmpty) return;
+              FocusManager.instance.primaryFocus?.unfocus();
+              Navigator.of(dialogContext).pop(true);
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true && mounted) {
+      final updatedItem = <String, dynamic>{
+        "title": titleController.text.trim(),
+        "authors": authorsController.text.trim(),
+        "publication_or_patent_number": pubController.text.trim(),
+        "date": dateController.text.trim(),
+        "link": linkController.text.trim(),
+        "description": descController.text.trim(),
+      };
+
+      setState(() {
+        if (editIndex != null && editIndex >= 0 && editIndex < _researchPatents.length) {
+          _researchPatents[editIndex] = updatedItem;
+        } else {
+          _researchPatents.add(updatedItem);
+        }
+      });
+    }
+
+    titleController.dispose();
+    authorsController.dispose();
+    pubController.dispose();
+    dateController.dispose();
+    linkController.dispose();
+    descController.dispose();
+  }
+
+  Future<void> _showOpenSourceDialog({Map<String, dynamic>? existingItem, int? editIndex}) async {
+    final projectNameController = TextEditingController(text: existingItem?["project_name"]?.toString() ?? "");
+    final roleController = TextEditingController(text: existingItem?["contribution_role"]?.toString() ?? "");
+    final durationController = TextEditingController(text: existingItem?["duration"]?.toString() ?? "");
+    final techStackController = TextEditingController(
+      text: existingItem?["tech_stack"] is List
+          ? (existingItem!["tech_stack"] as List).join(", ")
+          : existingItem?["tech_stack"]?.toString() ?? "",
+    );
+    final linkController = TextEditingController(text: existingItem?["link"]?.toString() ?? "");
+    final descController = TextEditingController(text: existingItem?["description"]?.toString() ?? "");
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(existingItem != null ? "Edit Open Source Contribution" : "Add Open Source Contribution"),
+        content: SingleChildScrollView(
+          child: SizedBox(
+            width: 480,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: projectNameController,
+                  decoration: const InputDecoration(
+                    labelText: "Project / Repository Name *",
+                    hintText: "e.g. kubernetes/kubernetes or golang/go",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: roleController,
+                  decoration: const InputDecoration(
+                    labelText: "Role / Contribution Type",
+                    hintText: "e.g. Core Maintainer or Active Contributor",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DateRangePickerField(
+                  controller: durationController,
+                  labelText: "Contribution Duration",
+                  hintText: "e.g. Jan 2022 - Present",
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: techStackController,
+                  decoration: const InputDecoration(
+                    labelText: "Tech Stack (comma separated)",
+                    hintText: "Go, Kubernetes, Docker",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: linkController,
+                  decoration: const InputDecoration(
+                    labelText: "Repository / PR Link",
+                    hintText: "https://github.com/...",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: descController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: "Contribution Highlights",
+                    hintText: "Authored custom scheduler plugin; reviewed 40+ PRs...",
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (projectNameController.text.trim().isEmpty) return;
+              FocusManager.instance.primaryFocus?.unfocus();
+              Navigator.of(dialogContext).pop(true);
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true && mounted) {
+      final techStack = techStackController.text
+          .split(",")
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
+          .toList();
+
+      final updatedItem = <String, dynamic>{
+        "project_name": projectNameController.text.trim(),
+        "contribution_role": roleController.text.trim(),
+        "duration": durationController.text.trim(),
+        "tech_stack": techStack,
+        "link": linkController.text.trim(),
+        "description": descController.text.trim(),
+      };
+
+      setState(() {
+        if (editIndex != null && editIndex >= 0 && editIndex < _openSourceContributions.length) {
+          _openSourceContributions[editIndex] = updatedItem;
+        } else {
+          _openSourceContributions.add(updatedItem);
+        }
+      });
+    }
+
+    projectNameController.dispose();
+    roleController.dispose();
+    durationController.dispose();
+    techStackController.dispose();
+    linkController.dispose();
+    descController.dispose();
+  }
+
   Future<void> _extractPdfToBio() async {
     try {
       final result = await FilePicker.platform.pickFiles(
@@ -577,6 +987,34 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 .toList();
             _education.addAll(parsedEduList);
           }
+          if (parsed["achievements"] is List) {
+            final parsedAchList = (parsed["achievements"] as List)
+                .whereType<Map>()
+                .map((m) => Map<String, dynamic>.from(m))
+                .toList();
+            _achievements.addAll(parsedAchList);
+          }
+          if (parsed["certifications"] is List) {
+            final parsedCertList = (parsed["certifications"] as List)
+                .whereType<Map>()
+                .map((m) => Map<String, dynamic>.from(m))
+                .toList();
+            _certifications.addAll(parsedCertList);
+          }
+          if (parsed["research_patents"] is List) {
+            final parsedResearchList = (parsed["research_patents"] as List)
+                .whereType<Map>()
+                .map((m) => Map<String, dynamic>.from(m))
+                .toList();
+            _researchPatents.addAll(parsedResearchList);
+          }
+          if (parsed["open_source_contributions"] is List) {
+            final parsedOSList = (parsed["open_source_contributions"] as List)
+                .whereType<Map>()
+                .map((m) => Map<String, dynamic>.from(m))
+                .toList();
+            _openSourceContributions.addAll(parsedOSList);
+          }
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text("CV parsed and structured profile details updated!"),
@@ -634,6 +1072,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       "education": _education,
       "achievements": _achievements,
       "certifications": _certifications,
+      "research_patents": _researchPatents,
+      "open_source_contributions": _openSourceContributions,
     };
 
     final success = await _apiService.saveProfile(profilePayload);
@@ -788,6 +1228,58 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         ),
                         const SizedBox(height: 12),
                         _buildEducationCard(),
+                        const SizedBox(height: 24),
+                        _buildSectionHeader(
+                          title: "Honors & Achievements",
+                          subtitle: "Awards, hackathons, academic distinctions, and competitions.",
+                          icon: Icons.emoji_events_outlined,
+                          trailing: OutlinedButton.icon(
+                            onPressed: () => _showAchievementDialog(),
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text("Add Achievement"),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _buildAchievementsCard(),
+                        const SizedBox(height: 24),
+                        _buildSectionHeader(
+                          title: "Licenses & Certifications",
+                          subtitle: "Professional certifications and accredited credentials.",
+                          icon: Icons.verified_outlined,
+                          trailing: OutlinedButton.icon(
+                            onPressed: () => _showCertificationDialog(),
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text("Add Certification"),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _buildCertificationsCard(),
+                        const SizedBox(height: 24),
+                        _buildSectionHeader(
+                          title: "Research & Patents",
+                          subtitle: "Publications, academic papers, and registered patents.",
+                          icon: Icons.menu_book_outlined,
+                          trailing: OutlinedButton.icon(
+                            onPressed: () => _showResearchPatentDialog(),
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text("Add Paper / Patent"),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _buildResearchPatentsCard(),
+                        const SizedBox(height: 24),
+                        _buildSectionHeader(
+                          title: "Open Source Contributions",
+                          subtitle: "Open-source projects maintained or community repositories contributed to.",
+                          icon: Icons.hub_outlined,
+                          trailing: OutlinedButton.icon(
+                            onPressed: () => _showOpenSourceDialog(),
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text("Add Contribution"),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _buildOpenSourceCard(),
                         const SizedBox(height: 32),
                         SizedBox(
                           width: double.infinity,
@@ -1131,6 +1623,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               itemBuilder: (context, index) {
                 final project = _projects[index];
                 final title = project["title"]?.toString() ?? "Untitled";
+                final duration = project["duration"]?.toString() ?? "";
                 final description = project["description"]?.toString() ?? "";
                 final link = project["link"]?.toString() ?? "";
                 final techStack = project["tech_stack"] is List
@@ -1144,9 +1637,24 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            title,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  title,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                ),
+                              ),
+                              if (duration.isNotEmpty)
+                                Text(
+                                  duration,
+                                  style: const TextStyle(
+                                    color: AppColors.onSurfaceVariant,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                            ],
                           ),
                           if (description.isNotEmpty) ...[
                             const SizedBox(height: 4),
@@ -1340,6 +1848,373 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     IconButton(
                       icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
                       onPressed: () => setState(() => _education.removeAt(index)),
+                    ),
+                  ],
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildAchievementsCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
+      child: _achievements.isEmpty
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Text(
+                  "No achievements or awards added yet. Click \"Add Achievement\" to record them.",
+                  style: TextStyle(color: AppColors.onSurfaceVariant, fontSize: 13),
+                ),
+              ),
+            )
+          : ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _achievements.length,
+              separatorBuilder: (separatorContext, separatorIndex) => const Divider(height: 20, color: AppColors.outlineVariant),
+              itemBuilder: (context, index) {
+                final achievement = _achievements[index];
+                final title = achievement["title"]?.toString() ?? "";
+                final date = achievement["date"]?.toString() ?? "";
+                final details = achievement["details"]?.toString() ?? "";
+
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  title,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                ),
+                              ),
+                              if (date.isNotEmpty)
+                                Text(
+                                  date,
+                                  style: const TextStyle(
+                                    color: AppColors.onSurfaceVariant,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          if (details.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              details,
+                              style: const TextStyle(color: AppColors.onSurfaceVariant, fontSize: 13),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      onPressed: () => _showAchievementDialog(existingAchievement: achievement, editIndex: index),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
+                      onPressed: () => setState(() => _achievements.removeAt(index)),
+                    ),
+                  ],
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildCertificationsCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
+      child: _certifications.isEmpty
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Text(
+                  "No certifications added yet. Click \"Add Certification\" to record verified credentials.",
+                  style: TextStyle(color: AppColors.onSurfaceVariant, fontSize: 13),
+                ),
+              ),
+            )
+          : ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _certifications.length,
+              separatorBuilder: (separatorContext, separatorIndex) => const Divider(height: 20, color: AppColors.outlineVariant),
+              itemBuilder: (context, index) {
+                final cert = _certifications[index];
+                final name = cert["name"]?.toString() ?? "";
+                final issuer = cert["issuer"]?.toString() ?? "";
+                final date = cert["date"]?.toString() ?? "";
+
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  name,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                ),
+                              ),
+                              if (date.isNotEmpty)
+                                Text(
+                                  date,
+                                  style: const TextStyle(
+                                    color: AppColors.onSurfaceVariant,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          if (issuer.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              issuer,
+                              style: const TextStyle(color: AppColors.onSurfaceVariant, fontSize: 13),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      onPressed: () => _showCertificationDialog(existingCertification: cert, editIndex: index),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
+                      onPressed: () => setState(() => _certifications.removeAt(index)),
+                    ),
+                  ],
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildResearchPatentsCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
+      child: _researchPatents.isEmpty
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Text(
+                  "No publications or patents added yet. Click \"Add Paper / Patent\" to add entries.",
+                  style: TextStyle(color: AppColors.onSurfaceVariant, fontSize: 13),
+                ),
+              ),
+            )
+          : ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _researchPatents.length,
+              separatorBuilder: (separatorContext, separatorIndex) => const Divider(height: 20, color: AppColors.outlineVariant),
+              itemBuilder: (context, index) {
+                final item = _researchPatents[index];
+                final title = item["title"]?.toString() ?? "";
+                final authors = item["authors"]?.toString() ?? "";
+                final pub = item["publication_or_patent_number"]?.toString() ?? "";
+                final date = item["date"]?.toString() ?? "";
+                final link = item["link"]?.toString() ?? "";
+                final desc = item["description"]?.toString() ?? "";
+
+                final metaList = [
+                  if (authors.isNotEmpty) authors,
+                  if (pub.isNotEmpty) pub,
+                  if (date.isNotEmpty) date,
+                ];
+
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                          if (metaList.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              metaList.join(" • "),
+                              style: const TextStyle(
+                                color: AppColors.onSurfaceVariant,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                          if (desc.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              desc,
+                              style: const TextStyle(color: AppColors.onSurfaceVariant, fontSize: 13),
+                            ),
+                          ],
+                          if (link.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              link,
+                              style: const TextStyle(color: AppColors.primary, fontSize: 12),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      onPressed: () => _showResearchPatentDialog(existingItem: item, editIndex: index),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
+                      onPressed: () => setState(() => _researchPatents.removeAt(index)),
+                    ),
+                  ],
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildOpenSourceCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
+      child: _openSourceContributions.isEmpty
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Text(
+                  "No open-source contributions added yet. Click \"Add Contribution\" to showcase projects.",
+                  style: TextStyle(color: AppColors.onSurfaceVariant, fontSize: 13),
+                ),
+              ),
+            )
+          : ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _openSourceContributions.length,
+              separatorBuilder: (separatorContext, separatorIndex) => const Divider(height: 20, color: AppColors.outlineVariant),
+              itemBuilder: (context, index) {
+                final item = _openSourceContributions[index];
+                final projectName = item["project_name"]?.toString() ?? "";
+                final role = item["contribution_role"]?.toString() ?? "";
+                final duration = item["duration"]?.toString() ?? "";
+                final link = item["link"]?.toString() ?? "";
+                final desc = item["description"]?.toString() ?? "";
+                final techStack = item["tech_stack"] is List
+                    ? List<String>.from(item["tech_stack"])
+                    : <String>[];
+
+                final headerSubtitle = [
+                  if (role.isNotEmpty) role,
+                  if (duration.isNotEmpty) duration,
+                ].join(" • ");
+
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            projectName,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                          ),
+                          if (headerSubtitle.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              headerSubtitle,
+                              style: const TextStyle(
+                                color: AppColors.onSurfaceVariant,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                          if (desc.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              desc,
+                              style: const TextStyle(color: AppColors.onSurfaceVariant, fontSize: 13),
+                            ),
+                          ],
+                          if (techStack.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              children: techStack
+                                  .map(
+                                    (tech) => Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.surfaceContainerHigh,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        tech,
+                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          ],
+                          if (link.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              link,
+                              style: const TextStyle(color: AppColors.primary, fontSize: 12),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      onPressed: () => _showOpenSourceDialog(existingItem: item, editIndex: index),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
+                      onPressed: () => setState(() => _openSourceContributions.removeAt(index)),
                     ),
                   ],
                 );

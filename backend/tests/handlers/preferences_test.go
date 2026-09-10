@@ -485,23 +485,35 @@ func TestProfileUpdateRequestBinding(t *testing.T) {
 }
 
 func TestExtractStructuredResumeDetails(t *testing.T) {
-	masterCVText := "Raw resume text here...\n\n--- STRUCTURED RESUME DETAILS ---\n{\"skills\":[\"Go\",\"Docker\"],\"projects\":[{\"title\":\"Test Project\",\"tech_stack\":[\"Go\"],\"description\":\"Desc\",\"link\":\"\"}]}"
+	masterCVText := "Raw resume text here...\n\n--- STRUCTURED RESUME DETAILS ---\n{\"skills\":[\"Go\",\"Docker\"],\"projects\":[{\"title\":\"Test Project\",\"tech_stack\":[\"Go\"],\"description\":\"Desc\",\"link\":\"\",\"duration\":\"Jan 2023 - Present\"}],\"achievements\":[{\"title\":\"Hackathon Winner\",\"details\":\"1st place\",\"date\":\"Oct 2024\"}],\"certifications\":[{\"name\":\"AWS SAA\",\"issuer\":\"Amazon\",\"date\":\"May 2023\"}],\"research_patents\":[{\"title\":\"Distributed Consensus\",\"authors\":\"Jane Doe\",\"date\":\"2024\"}],\"open_source_contributions\":[{\"project_name\":\"Kubernetes\",\"contribution_role\":\"Maintainer\",\"tech_stack\":[\"Go\"],\"duration\":\"2022 - Present\"}]}"
 
-	exp, proj, edu, skills, ach, cert := handlers.ExtractStructuredResumeDetails(masterCVText)
+	exp, proj, edu, skills, ach, cert, research, openSource := handlers.ExtractStructuredResumeDetails(masterCVText)
 
 	if len(skills) != 2 || skills[0] != "Go" {
 		t.Errorf("expected 2 skills, got %v", skills)
 	}
-	if len(proj) != 1 || proj[0].Title != "Test Project" {
-		t.Errorf("expected 1 project, got %v", proj)
+	if len(proj) != 1 || proj[0].Title != "Test Project" || proj[0].Duration != "Jan 2023 - Present" {
+		t.Errorf("expected 1 project with duration, got %v", proj)
 	}
-	if len(exp) != 0 || len(edu) != 0 || len(ach) != 0 || len(cert) != 0 {
+	if len(ach) != 1 || ach[0].Title != "Hackathon Winner" || ach[0].Date != "Oct 2024" {
+		t.Errorf("expected 1 achievement with date, got %v", ach)
+	}
+	if len(cert) != 1 || cert[0].Name != "AWS SAA" || cert[0].Date != "May 2023" {
+		t.Errorf("expected 1 certification with date, got %v", cert)
+	}
+	if len(research) != 1 || research[0].Title != "Distributed Consensus" {
+		t.Errorf("expected 1 research item, got %v", research)
+	}
+	if len(openSource) != 1 || openSource[0].ProjectName != "Kubernetes" || openSource[0].Duration != "2022 - Present" {
+		t.Errorf("expected 1 open source item, got %v", openSource)
+	}
+	if len(exp) != 0 || len(edu) != 0 {
 		t.Errorf("expected empty slices for unprovided fields")
 	}
 
 	emptyText := "No delimiter in this text"
-	exp2, proj2, edu2, skills2, ach2, cert2 := handlers.ExtractStructuredResumeDetails(emptyText)
-	if len(exp2) != 0 || len(proj2) != 0 || len(edu2) != 0 || len(skills2) != 0 || len(ach2) != 0 || len(cert2) != 0 {
+	exp2, proj2, edu2, skills2, ach2, cert2, research2, openSource2 := handlers.ExtractStructuredResumeDetails(emptyText)
+	if len(exp2) != 0 || len(proj2) != 0 || len(edu2) != 0 || len(skills2) != 0 || len(ach2) != 0 || len(cert2) != 0 || len(research2) != 0 || len(openSource2) != 0 {
 		t.Errorf("expected empty slices for missing delimiter")
 	}
 }
