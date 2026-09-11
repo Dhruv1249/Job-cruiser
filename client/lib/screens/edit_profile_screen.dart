@@ -138,6 +138,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         parsedTechStack = rawTechStack.split(",").map((techItem) => techItem.trim()).toList();
       }
       itemMap["tech_stack"] = parsedTechStack;
+      final existingLink = itemMap["link"]?.toString() ?? "";
+      final existingGithub = itemMap["github_url"]?.toString() ?? "";
+      final existingDeployment = itemMap["deployment_url"]?.toString() ?? "";
+      if (existingGithub.isEmpty && existingLink.contains("github.com")) {
+        itemMap["github_url"] = existingLink;
+      }
+      if (existingDeployment.isEmpty && !existingLink.contains("github.com") && existingLink.isNotEmpty) {
+        itemMap["deployment_url"] = existingLink;
+      }
       return itemMap;
     }).toList();
 
@@ -216,7 +225,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
     final durationController = TextEditingController(text: existingProject?["duration"]?.toString() ?? "");
     final descriptionController = TextEditingController(text: existingProject?["description"]?.toString() ?? "");
-    final linkController = TextEditingController(text: existingProject?["link"]?.toString() ?? "");
+
+    final existingGithub = existingProject?["github_url"]?.toString();
+    final existingDeployment = existingProject?["deployment_url"]?.toString();
+    final legacyLink = existingProject?["link"]?.toString() ?? "";
+
+    final initialGithub = (existingGithub != null && existingGithub.isNotEmpty)
+        ? existingGithub
+        : (legacyLink.contains("github.com") ? legacyLink : "");
+    final initialDeployment = (existingDeployment != null && existingDeployment.isNotEmpty)
+        ? existingDeployment
+        : (!legacyLink.contains("github.com") ? legacyLink : "");
+
+    final githubLinkController = TextEditingController(text: initialGithub);
+    final deploymentLinkController = TextEditingController(text: initialDeployment);
 
     final result = await showDialog<bool>(
       context: context,
@@ -260,10 +282,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 ),
                 const SizedBox(height: 12),
                 TextField(
-                  controller: linkController,
+                  controller: githubLinkController,
                   decoration: const InputDecoration(
-                    labelText: "Project / GitHub Link",
+                    labelText: "GitHub Repository Link",
                     hintText: "https://github.com/...",
+                    prefixIcon: Icon(Icons.code, size: 20),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: deploymentLinkController,
+                  decoration: const InputDecoration(
+                    labelText: "Deployment / Live Link",
+                    hintText: "https://...",
+                    prefixIcon: Icon(Icons.launch, size: 20),
                   ),
                 ),
               ],
@@ -294,12 +326,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           .where((tech) => tech.isNotEmpty)
           .toList();
 
+      final githubValue = githubLinkController.text.trim();
+      final deploymentValue = deploymentLinkController.text.trim();
+      final resolvedLegacyLink = githubValue.isNotEmpty ? githubValue : deploymentValue;
+
       final updatedItem = <String, dynamic>{
         "title": titleController.text.trim(),
         "tech_stack": techStack,
         "duration": durationController.text.trim(),
         "description": descriptionController.text.trim(),
-        "link": linkController.text.trim(),
+        "github_url": githubValue,
+        "deployment_url": deploymentValue,
+        "link": resolvedLegacyLink,
       };
 
       setState(() {
@@ -315,7 +353,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     techStackController.dispose();
     durationController.dispose();
     descriptionController.dispose();
-    linkController.dispose();
+    githubLinkController.dispose();
+    deploymentLinkController.dispose();
   }
 
   Future<void> _showExperienceDialog({Map<String, dynamic>? existingExperience, int? editIndex}) async {
@@ -1626,6 +1665,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 final duration = project["duration"]?.toString() ?? "";
                 final description = project["description"]?.toString() ?? "";
                 final link = project["link"]?.toString() ?? "";
+                final githubUrl = project["github_url"]?.toString() ?? "";
+                final deploymentUrl = project["deployment_url"]?.toString() ?? "";
                 final techStack = project["tech_stack"] is List
                     ? List<String>.from(project["tech_stack"])
                     : <String>[];
@@ -1685,11 +1726,52 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                   .toList(),
                             ),
                           ],
-                          if (link.isNotEmpty) ...[
+                          if (githubUrl.isNotEmpty) ...[
                             const SizedBox(height: 4),
-                            Text(
-                              link,
-                              style: const TextStyle(color: AppColors.primary, fontSize: 12),
+                            Row(
+                              children: [
+                                const Icon(Icons.code, size: 14, color: AppColors.primary),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    githubUrl,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(color: AppColors.primary, fontSize: 12),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          if (deploymentUrl.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(Icons.launch, size: 14, color: AppColors.secondary),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    deploymentUrl,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(color: AppColors.secondary, fontSize: 12),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          if (githubUrl.isEmpty && deploymentUrl.isEmpty && link.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(Icons.link, size: 14, color: AppColors.primary),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    link,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(color: AppColors.primary, fontSize: 12),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ],

@@ -138,7 +138,7 @@ var schemaQueries = []string{
 		title VARCHAR(100) NOT NULL,
 		message TEXT NOT NULL,
 		is_read BOOLEAN DEFAULT false,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 	);`,
 
 	// 3. The Market
@@ -362,6 +362,7 @@ var schemaQueries = []string{
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS research_patents JSONB DEFAULT '[]'::jsonb;`,
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS open_source_contributions JSONB DEFAULT '[]'::jsonb;`,
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS notification_prompt_criteria TEXT DEFAULT '';`,
+	`ALTER TABLE notifications ALTER COLUMN created_at TYPE TIMESTAMPTZ;`,
 }
 
 // InitSchema executes the queries in sequence.

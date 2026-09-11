@@ -20,6 +20,7 @@ import 'services/notification_service.dart';
 import 'services/update_checker_service.dart';
 import 'widgets/company_logo_avatar.dart';
 import 'widgets/notifications_sheet.dart';
+import 'screens/tailored_documents_screen.dart' show TailoredDocumentsScreen;
 import 'widgets/job_filter_bar.dart';
 import 'widgets/job_filter_dialog.dart';
 import 'widgets/job_detail_panel.dart';
@@ -258,8 +259,17 @@ class _JobCruiserShellState extends State<JobCruiserShell> with WidgetsBindingOb
     }
   }
 
-  void _handleNotificationJobTap(String jobId) async {
-    final job = await _apiService.fetchJobById(jobId);
+  void _handleNotificationJobTap(String payload) async {
+    if (payload.startsWith('tailor:')) {
+      final jobId = payload.substring('tailor:'.length);
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => TailoredDocumentsScreen(initialJobId: jobId),
+        ),
+      );
+      return;
+    }
+    final job = await _apiService.fetchJobById(payload);
     if (!mounted || job == null) return;
     _openJobDetails(job);
   }
@@ -619,11 +629,17 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           final title = item['title']?.toString() ?? 'Job Cruiser';
           final message = item['message']?.toString() ?? '';
           final jobId = item['job_id']?.toString();
+          final isTailoring = title.toLowerCase().contains('tailor') ||
+              title.toLowerCase().contains('application ready') ||
+              message.toLowerCase().contains('resume') ||
+              message.toLowerCase().contains('cover letter');
+          final notificationPayload =
+              isTailoring && jobId != null ? 'tailor:$jobId' : (jobId ?? '');
           NotificationService.instance.showLocalNotification(
             id: id.hashCode,
             title: title,
             body: message,
-            payload: jobId,
+            payload: notificationPayload,
           );
         }
       }

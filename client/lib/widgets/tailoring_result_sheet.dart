@@ -1,12 +1,10 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:open_file/open_file.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../main.dart' show AppColors;
+import '../utils/file_download_helper.dart';
 
 /// Reusable bottom sheet displayed after a successful resume tailoring or cover letter generation.
 /// Renders the compiled PDF inline using SfPdfViewer, and provides controls to open the
@@ -38,9 +36,10 @@ class _TailoringResultSheetState extends State<TailoringResultSheet> {
       widget.sessionType == 'cover_letter' ? 'Cover Letter' : 'Resume';
 
   Uint8List? get _pdfBytes {
-    if (widget.pdfBase64.isEmpty) return null;
+    final cleanedBase64 = widget.pdfBase64.trim().replaceAll(RegExp(r'\s+'), '');
+    if (cleanedBase64.isEmpty) return null;
     try {
-      return base64Decode(widget.pdfBase64);
+      return base64Decode(cleanedBase64);
     } catch (_) {
       return null;
     }
@@ -72,12 +71,12 @@ class _TailoringResultSheetState extends State<TailoringResultSheet> {
     setState(() => _isDownloading = true);
 
     try {
-      final tempDirectory = await getTemporaryDirectory();
       final safeFileName =
           '${widget.folderPath}_${widget.sessionType}.pdf'.replaceAll('/', '_');
-      final targetFile = File('${tempDirectory.path}/$safeFileName');
-      await targetFile.writeAsBytes(pdfBytes);
-      await OpenFile.open(targetFile.path);
+      await FileDownloadHelper.downloadAndOpenFile(
+        bytes: pdfBytes,
+        fileName: safeFileName,
+      );
     } catch (downloadError) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

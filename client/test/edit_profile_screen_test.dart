@@ -146,6 +146,14 @@ void main() {
         find.widgetWithText(TextField, "Description"),
         "In-memory cache cluster",
       );
+      await tester.enterText(
+        find.widgetWithText(TextField, "GitHub Repository Link"),
+        "https://github.com/example/cache",
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, "Deployment / Live Link"),
+        "https://cache.example.com",
+      );
 
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pump();
@@ -153,6 +161,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text("Distributed Cache"), findsOneWidget);
       expect(find.text("In-memory cache cluster"), findsOneWidget);
+      expect(find.text("https://github.com/example/cache"), findsOneWidget);
+      expect(find.text("https://cache.example.com"), findsOneWidget);
     });
 
     testWidgets("extracts bio from master_cv_text when bio_experience_text is omitted", (tester) async {

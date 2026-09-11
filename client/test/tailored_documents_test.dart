@@ -87,5 +87,31 @@ void main() {
       expect(find.text('Generated Cover Letter'), findsOneWidget);
       expect(find.text('View PDF'), findsNWidgets(2));
     });
+
+    testWidgets('TailoredJobCard renders expanded automatically when initialExpanded is true', (tester) async {
+      final groups = groupTailoredDocuments(mockResumes, mockCoverLetters);
+      final acmeGroup = groups.firstWhere((g) => g.company == 'Acme Corp');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: TailoredJobCard(
+                group: acmeGroup,
+                initialExpanded: true,
+                onViewDocument: (doc, type) {},
+                onDeleteDocument: (docId, type) {},
+                onSetDefaultResume: (docId) {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Senior Backend Engineer'), findsOneWidget);
+      expect(find.text('Tailored CV / Resume'), findsOneWidget);
+      expect(find.text('Generated Cover Letter'), findsOneWidget);
+      expect(find.text('View PDF'), findsNWidgets(2));
+    });
   });
 }

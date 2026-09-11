@@ -239,12 +239,17 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
               final ts = (item['tech_stack'] is List)
                   ? (item['tech_stack'] as List).join(', ')
                   : (item['tech_stack']?.toString() ?? '');
+              final linkVal = item['link']?.toString() ?? '';
+              final githubVal = item['github_url']?.toString() ?? (linkVal.contains('github.com') ? linkVal : '');
+              final deploymentVal = item['deployment_url']?.toString() ?? (!linkVal.contains('github.com') ? linkVal : '');
               _projects.add({
                 'title': item['title']?.toString() ?? '',
                 'tech_stack': ts,
                 'duration': item['duration']?.toString() ?? '',
                 'description': item['description']?.toString() ?? '',
-                'link': item['link']?.toString() ?? '',
+                'github_url': githubVal,
+                'deployment_url': deploymentVal,
+                'link': linkVal.isNotEmpty ? linkVal : (githubVal.isNotEmpty ? githubVal : deploymentVal),
               });
             }
           }
@@ -962,8 +967,11 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                             if (item['duration'] != null && (item['duration'] as String).isNotEmpty) item['duration'] as String,
                             if (item['tech_stack'] != null && (item['tech_stack'] as String).isNotEmpty) 'Tech: ${item['tech_stack']}',
                             if (item['description'] != null && (item['description'] as String).isNotEmpty) item['description'] as String,
+                            if (item['github_url'] != null && (item['github_url'] as String).isNotEmpty) 'GitHub: ${item['github_url']}',
+                            if (item['deployment_url'] != null && (item['deployment_url'] as String).isNotEmpty) 'Live: ${item['deployment_url']}',
+                            if ((item['github_url'] == null || (item['github_url'] as String).isEmpty) && (item['deployment_url'] == null || (item['deployment_url'] as String).isEmpty) && item['link'] != null && (item['link'] as String).isNotEmpty) 'Link: ${item['link']}',
                           ].join('\n'),
-                          maxLines: 3,
+                          maxLines: 4,
                           overflow: TextOverflow.ellipsis,
                         ),
                         trailing: Row(
@@ -1619,7 +1627,20 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
     final durationCtrl = TextEditingController(text: isEditing ? _projects[editIndex]['duration'] : '');
     final techCtrl = TextEditingController(text: isEditing ? _projects[editIndex]['tech_stack'] : '');
     final descCtrl = TextEditingController(text: isEditing ? _projects[editIndex]['description'] : '');
-    final linkCtrl = TextEditingController(text: isEditing ? _projects[editIndex]['link'] : '');
+
+    final existingGithub = isEditing ? _projects[editIndex]['github_url'] : null;
+    final existingDeployment = isEditing ? _projects[editIndex]['deployment_url'] : null;
+    final legacyLink = isEditing ? (_projects[editIndex]['link'] ?? '') : '';
+
+    final initialGithub = (existingGithub != null && existingGithub.isNotEmpty)
+        ? existingGithub
+        : (legacyLink.contains('github.com') ? legacyLink : '');
+    final initialDeployment = (existingDeployment != null && existingDeployment.isNotEmpty)
+        ? existingDeployment
+        : (!legacyLink.contains('github.com') ? legacyLink : '');
+
+    final githubCtrl = TextEditingController(text: initialGithub);
+    final deploymentCtrl = TextEditingController(text: initialDeployment);
 
     showDialog(
       context: context,
@@ -1641,7 +1662,23 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
               const SizedBox(height: 12),
               TextField(controller: descCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Description')),
               const SizedBox(height: 12),
-              TextField(controller: linkCtrl, decoration: const InputDecoration(labelText: 'Project Link / URL')),
+              TextField(
+                controller: githubCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'GitHub Repository Link',
+                  hintText: 'https://github.com/...',
+                  prefixIcon: Icon(Icons.code, size: 20),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: deploymentCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Deployment / Live Link',
+                  hintText: 'https://...',
+                  prefixIcon: Icon(Icons.launch, size: 20),
+                ),
+              ),
             ],
           ),
         ),
@@ -1650,13 +1687,18 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
           ElevatedButton(
             onPressed: () {
               if (titleCtrl.text.trim().isNotEmpty) {
+                final githubVal = githubCtrl.text.trim();
+                final deploymentVal = deploymentCtrl.text.trim();
+                final resolvedLegacyLink = githubVal.isNotEmpty ? githubVal : deploymentVal;
                 setState(() {
                   final data = {
                     'title': titleCtrl.text.trim(),
                     'duration': durationCtrl.text.trim(),
                     'tech_stack': techCtrl.text.trim(),
                     'description': descCtrl.text.trim(),
-                    'link': linkCtrl.text.trim(),
+                    'github_url': githubVal,
+                    'deployment_url': deploymentVal,
+                    'link': resolvedLegacyLink,
                   };
                   if (isEditing) {
                     _projects[editIndex] = data;

@@ -304,7 +304,7 @@ class _ProfilePageState extends State<ProfilePage> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 768),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _buildProfileBento(context),
                 const SizedBox(height: 24),
@@ -678,6 +678,7 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget _buildDocumentsSection() {
     if (_isLoadingDocuments) {
       return Container(
+        width: double.infinity,
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
           color: AppColors.surfaceContainerLowest,
@@ -692,6 +693,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
     if (_tailoredGroups.isEmpty) {
       return Container(
+        width: double.infinity,
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
           color: AppColors.surfaceContainerLowest,
@@ -743,6 +745,7 @@ class _ProfilePageState extends State<ProfilePage> {
     }
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         ..._tailoredGroups.map((group) {
           return TailoredJobCard(

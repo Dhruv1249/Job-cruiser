@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../details.dart' show CompanyDetailsPage;
 import '../main.dart' show AppColors;
 import '../models/job.dart';
+import '../screens/tailored_documents_screen.dart' show TailoredDocumentsScreen;
 import '../services/api_service.dart';
 
 /// Shows a bottom sheet displaying user notifications for background operations.
@@ -75,6 +76,14 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
     }
   }
 
+  bool _isTailoringNotification(String title, String message) {
+    final combined = '${title.toLowerCase()} ${message.toLowerCase()}';
+    return combined.contains('tailor') ||
+        combined.contains('resume') ||
+        combined.contains('cover letter') ||
+        combined.contains('application ready');
+  }
+
   Future<void> _handleNotificationTap(Map<String, dynamic> notification, int index) async {
     final id = notification['id']?.toString() ?? '';
     final isRead = notification['is_read'] == true;
@@ -83,6 +92,21 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
     }
 
     final jobId = notification['job_id']?.toString();
+    final title = notification['title']?.toString() ?? '';
+    final message = notification['message']?.toString() ?? '';
+    final isTailoring = _isTailoringNotification(title, message);
+
+    if (isTailoring) {
+      final navigator = Navigator.of(context);
+      navigator.pop();
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => TailoredDocumentsScreen(initialJobId: jobId),
+        ),
+      );
+      return;
+    }
+
     if (jobId != null && jobId.isNotEmpty) {
       setState(() => _openingJobId = jobId);
       final scaffoldMessenger = ScaffoldMessenger.of(context);
@@ -114,12 +138,25 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
   String _formatTimestamp(String? raw) {
     if (raw == null || raw.isEmpty) return '';
     try {
-      final dateTime = DateTime.parse(raw).toLocal();
+      final parsed = DateTime.parse(raw);
+      final dateTime = parsed.isUtc ? parsed.toLocal() : parsed;
       final difference = DateTime.now().difference(dateTime);
-      if (difference.inMinutes < 1) return 'Just now';
-      if (difference.inMinutes < 60) return '${difference.inMinutes}m ago';
-      if (difference.inHours < 24) return '${difference.inHours}h ago';
-      return '${difference.inDays}d ago';
+      if (difference.isNegative && difference.inSeconds.abs() < 60) {
+        return 'Just now';
+      }
+      if (difference.inMinutes < 1 && !difference.isNegative) {
+        return 'Just now';
+      }
+      if (difference.inMinutes < 60 && difference.inMinutes >= 1) {
+        return '${difference.inMinutes}m ago';
+      }
+      if (difference.inHours < 24 && difference.inHours >= 1) {
+        return '${difference.inHours}h ago';
+      }
+      if (difference.inDays >= 1) {
+        return '${difference.inDays}d ago';
+      }
+      return 'Just now';
     } catch (_) {
       return '';
     }
@@ -240,6 +277,8 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
                             final jobId = notification['job_id']?.toString();
                             final isOpening = _openingJobId == jobId && jobId != null;
 
+                            final isTailoringItem = _isTailoringNotification(title, notification['message']?.toString() ?? '');
+
                             return Material(
                               color: Colors.transparent,
                               child: InkWell(
@@ -276,14 +315,18 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
                                             child: Icon(
                                               title.toLowerCase().contains('failed')
                                                   ? Icons.error_outline
-                                                  : (reasoningText.isNotEmpty
-                                                      ? Icons.auto_awesome
-                                                      : Icons.notifications_none),
+                                                  : (isTailoringItem
+                                                      ? Icons.description_outlined
+                                                      : (reasoningText.isNotEmpty
+                                                          ? Icons.auto_awesome
+                                                          : Icons.notifications_none)),
                                               color: title.toLowerCase().contains('failed')
                                                   ? Colors.redAccent
-                                                  : (reasoningText.isNotEmpty
-                                                      ? AppColors.matchGreen
-                                                      : AppColors.primary),
+                                                  : (isTailoringItem
+                                                      ? AppColors.primary
+                                                      : (reasoningText.isNotEmpty
+                                                          ? AppColors.matchGreen
+                                                          : AppColors.primary)),
                                               size: 18,
                                             ),
                                           ),
@@ -392,17 +435,17 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
                                             else
                                               Row(
                                                 mainAxisSize: MainAxisSize.min,
-                                                children: const [
+                                                children: [
                                                   Text(
-                                                    'View Job Details',
-                                                    style: TextStyle(
+                                                    isTailoringItem ? 'View Documents' : 'View Job Details',
+                                                    style: const TextStyle(
                                                       fontSize: 12,
                                                       fontWeight: FontWeight.w600,
                                                       color: AppColors.primary,
                                                     ),
                                                   ),
-                                                  SizedBox(width: 4),
-                                                  Icon(Icons.arrow_forward, size: 14, color: AppColors.primary),
+                                                  const SizedBox(width: 4),
+                                                  const Icon(Icons.arrow_forward, size: 14, color: AppColors.primary),
                                                 ],
                                               ),
                                           ],

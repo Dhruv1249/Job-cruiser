@@ -203,11 +203,13 @@ var CVParsingJSONSchema = map[string]any{
 			"items": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"title":       map[string]any{"type": "string"},
-					"tech_stack":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"description": map[string]any{"type": "string"},
-					"link":        map[string]any{"type": "string"},
-					"duration":    map[string]any{"type": "string"},
+					"title":          map[string]any{"type": "string"},
+					"tech_stack":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"description":    map[string]any{"type": "string"},
+					"link":           map[string]any{"type": "string"},
+					"github_url":     map[string]any{"type": "string"},
+					"deployment_url": map[string]any{"type": "string"},
+					"duration":       map[string]any{"type": "string"},
 				},
 				"required": []string{"title"},
 			},
@@ -1539,7 +1541,17 @@ func scanCandidateProfileRecord(rowScanner interface{ Scan(dest ...any) error })
 			if proj.Duration != "" {
 				durationInfo = fmt.Sprintf(" [%s]", proj.Duration)
 			}
-			projectDescriptions = append(projectDescriptions, fmt.Sprintf("- %s%s (%s): %s", proj.Title, durationInfo, strings.Join(proj.TechStack, ", "), proj.Description))
+			extraLinks := ""
+			if proj.GithubURL != "" && proj.DeploymentURL != "" {
+				extraLinks = fmt.Sprintf(" (GitHub: %s, Live: %s)", proj.GithubURL, proj.DeploymentURL)
+			} else if proj.GithubURL != "" {
+				extraLinks = fmt.Sprintf(" (GitHub: %s)", proj.GithubURL)
+			} else if proj.DeploymentURL != "" {
+				extraLinks = fmt.Sprintf(" (Live: %s)", proj.DeploymentURL)
+			} else if proj.Link != "" {
+				extraLinks = fmt.Sprintf(" (%s)", proj.Link)
+			}
+			projectDescriptions = append(projectDescriptions, fmt.Sprintf("- %s%s (%s)%s: %s", proj.Title, durationInfo, strings.Join(proj.TechStack, ", "), extraLinks, proj.Description))
 		}
 		item.ProjectsSummary = strings.Join(projectDescriptions, "\n")
 	}
@@ -2037,10 +2049,13 @@ func SanitizeJSONResponseForTest(s string) string {
 }
 
 type candidateProjectItem struct {
-	Title       string   `json:"title"`
-	TechStack   []string `json:"tech_stack"`
-	Description string   `json:"description"`
-	Duration    string   `json:"duration"`
+	Title         string   `json:"title"`
+	TechStack     []string `json:"tech_stack"`
+	Description   string   `json:"description"`
+	Duration      string   `json:"duration"`
+	Link          string   `json:"link"`
+	GithubURL     string   `json:"github_url"`
+	DeploymentURL string   `json:"deployment_url"`
 }
 
 type candidateAchievementItem struct {

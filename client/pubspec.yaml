@@ -53,6 +53,7 @@ dependencies:
   fl_chart: ^1.2.0
   firebase_messaging: ^15.2.4
   firebase_core: ^3.13.1
+  web: ^1.1.1
 dev_dependencies:
   flutter_launcher_icons: ^0.14.3
   flutter_test:
@@ -111,3 +112,6 @@ flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
   image_path: "assets/icon/jclogo.png"
+  web:
+    generate: true
+    image_path: "assets/icon/jclogo.png"

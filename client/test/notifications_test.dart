@@ -77,5 +77,38 @@ void main() {
       );
       expect(find.text('View Job Details'), findsOneWidget);
     });
+
+    testWidgets('renders tailoring notification with View Documents and relative timestamp', (tester) async {
+      tester.view.physicalSize = const Size(1200, 1800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      final twoHoursAgo = DateTime.now().subtract(const Duration(hours: 2)).toUtc().toIso8601String();
+      final mockTailorNotification = {
+        'id': 'notif-tailor-1',
+        'job_id': 'job-789',
+        'title': 'Application Ready: Stripe',
+        'message': 'Your tailored resume (1 p) and cover letter (1 p) for Staff Backend Engineer at Stripe are ready in Open-Overleaf.',
+        'reasoning': '',
+        'is_read': false,
+        'created_at': twoHoursAgo,
+      };
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: NotificationsSheet(
+              initialNotifications: [mockTailorNotification],
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      expect(find.text('Application Ready: Stripe'), findsOneWidget);
+      expect(find.text('View Documents'), findsOneWidget);
+      expect(find.text('2h ago'), findsOneWidget);
+      expect(find.byIcon(Icons.description_outlined), findsOneWidget);
+    });
   });
 }

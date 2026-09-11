@@ -356,10 +356,12 @@ func TestPreferencesRequestBindingWithStructuredResumeDetails(t *testing.T) {
 		"skills":       []string{"Go", "Postgres", "Flutter", "Docker"},
 		"projects": []map[string]interface{}{
 			{
-				"title":       "Job Cruiser",
-				"tech_stack":  []string{"Go", "Postgres", "Flutter"},
-				"description": "Full automated job matching platform",
-				"link":        "https://github.com/example/job-cruiser",
+				"title":          "Job Cruiser",
+				"tech_stack":     []string{"Go", "Postgres", "Flutter"},
+				"description":    "Full automated job matching platform",
+				"link":           "https://github.com/example/job-cruiser",
+				"github_url":     "https://github.com/example/job-cruiser",
+				"deployment_url": "https://jobcruiser.app",
 			},
 		},
 		"experiences": []map[string]interface{}{
@@ -405,7 +407,7 @@ func TestPreferencesRequestBindingWithStructuredResumeDetails(t *testing.T) {
 			return
 		}
 
-		if len(req.Projects) != 1 || req.Projects[0].Title != "Job Cruiser" {
+		if len(req.Projects) != 1 || req.Projects[0].Title != "Job Cruiser" || req.Projects[0].GithubURL != "https://github.com/example/job-cruiser" || req.Projects[0].DeploymentURL != "https://jobcruiser.app" {
 			t.Errorf("unexpected projects binding: %+v", req.Projects)
 		}
 		if len(req.Experiences) != 1 || req.Experiences[0].Company != "Tech Corp" {
@@ -495,15 +497,15 @@ func TestProfileUpdateRequestBinding(t *testing.T) {
 }
 
 func TestExtractStructuredResumeDetails(t *testing.T) {
-	masterCVText := "Raw resume text here...\n\n--- STRUCTURED RESUME DETAILS ---\n{\"skills\":[\"Go\",\"Docker\"],\"projects\":[{\"title\":\"Test Project\",\"tech_stack\":[\"Go\"],\"description\":\"Desc\",\"link\":\"\",\"duration\":\"Jan 2023 - Present\"}],\"achievements\":[{\"title\":\"Hackathon Winner\",\"details\":\"1st place\",\"date\":\"Oct 2024\"}],\"certifications\":[{\"name\":\"AWS SAA\",\"issuer\":\"Amazon\",\"date\":\"May 2023\"}],\"research_patents\":[{\"title\":\"Distributed Consensus\",\"authors\":\"Jane Doe\",\"date\":\"2024\"}],\"open_source_contributions\":[{\"project_name\":\"Kubernetes\",\"contribution_role\":\"Maintainer\",\"tech_stack\":[\"Go\"],\"duration\":\"2022 - Present\"}]}"
+	masterCVText := "Raw resume text here...\n\n--- STRUCTURED RESUME DETAILS ---\n{\"skills\":[\"Go\",\"Docker\"],\"projects\":[{\"title\":\"Test Project\",\"tech_stack\":[\"Go\"],\"description\":\"Desc\",\"link\":\"\",\"github_url\":\"https://github.com/example/test\",\"deployment_url\":\"https://test.example.com\",\"duration\":\"Jan 2023 - Present\"}],\"achievements\":[{\"title\":\"Hackathon Winner\",\"details\":\"1st place\",\"date\":\"Oct 2024\"}],\"certifications\":[{\"name\":\"AWS SAA\",\"issuer\":\"Amazon\",\"date\":\"May 2023\"}],\"research_patents\":[{\"title\":\"Distributed Consensus\",\"authors\":\"Jane Doe\",\"date\":\"2024\"}],\"open_source_contributions\":[{\"project_name\":\"Kubernetes\",\"contribution_role\":\"Maintainer\",\"tech_stack\":[\"Go\"],\"duration\":\"2022 - Present\"}]}"
 
 	exp, proj, edu, skills, ach, cert, research, openSource := handlers.ExtractStructuredResumeDetails(masterCVText)
 
 	if len(skills) != 2 || skills[0] != "Go" {
 		t.Errorf("expected 2 skills, got %v", skills)
 	}
-	if len(proj) != 1 || proj[0].Title != "Test Project" || proj[0].Duration != "Jan 2023 - Present" {
-		t.Errorf("expected 1 project with duration, got %v", proj)
+	if len(proj) != 1 || proj[0].Title != "Test Project" || proj[0].Duration != "Jan 2023 - Present" || proj[0].GithubURL != "https://github.com/example/test" || proj[0].DeploymentURL != "https://test.example.com" {
+		t.Errorf("expected 1 project with duration and URLs, got %v", proj)
 	}
 	if len(ach) != 1 || ach[0].Title != "Hackathon Winner" || ach[0].Date != "Oct 2024" {
 		t.Errorf("expected 1 achievement with date, got %v", ach)

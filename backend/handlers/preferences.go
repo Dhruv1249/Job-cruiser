@@ -170,11 +170,13 @@ type ParsedExperienceItem struct {
 }
 
 type ParsedProjectItem struct {
-	Title       string   `json:"title"`
-	TechStack   []string `json:"tech_stack"`
-	Description string   `json:"description"`
-	Link        string   `json:"link"`
-	Duration    string   `json:"duration"`
+	Title         string   `json:"title"`
+	TechStack     []string `json:"tech_stack"`
+	Description   string   `json:"description"`
+	Link          string   `json:"link"`
+	GithubURL     string   `json:"github_url"`
+	DeploymentURL string   `json:"deployment_url"`
+	Duration      string   `json:"duration"`
 }
 
 type ParsedAchievementItem struct {
@@ -1068,11 +1070,13 @@ type flexExperienceItem struct {
 }
 
 type flexProjectItem struct {
-	Title       string      `json:"title"`
-	TechStack   interface{} `json:"tech_stack"`
-	Description string      `json:"description"`
-	Link        string      `json:"link"`
-	Duration    string      `json:"duration"`
+	Title         string      `json:"title"`
+	TechStack     interface{} `json:"tech_stack"`
+	Description   string      `json:"description"`
+	Link          string      `json:"link"`
+	GithubURL     string      `json:"github_url"`
+	DeploymentURL string      `json:"deployment_url"`
+	Duration      string      `json:"duration"`
 }
 
 type flexAchievementItem struct {
@@ -1457,12 +1461,27 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 				}
 			}
 		}
+		resolvedGithubURL := item.GithubURL
+		resolvedDeploymentURL := item.DeploymentURL
+		resolvedLink := item.Link
+		if resolvedGithubURL == "" && strings.Contains(resolvedLink, "github.com") {
+			resolvedGithubURL = resolvedLink
+		}
+		if resolvedLink == "" {
+			if resolvedGithubURL != "" {
+				resolvedLink = resolvedGithubURL
+			} else {
+				resolvedLink = resolvedDeploymentURL
+			}
+		}
 		parsedResponse.Projects = append(parsedResponse.Projects, ParsedProjectItem{
-			Title:       item.Title,
-			TechStack:   tsList,
-			Description: item.Description,
-			Link:        item.Link,
-			Duration:    item.Duration,
+			Title:         item.Title,
+			TechStack:     tsList,
+			Description:   item.Description,
+			Link:          resolvedLink,
+			GithubURL:     resolvedGithubURL,
+			DeploymentURL: resolvedDeploymentURL,
+			Duration:      item.Duration,
 		})
 	}
 

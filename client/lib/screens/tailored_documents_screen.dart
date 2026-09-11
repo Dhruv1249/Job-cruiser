@@ -167,19 +167,27 @@ class TailoredJobCard extends StatefulWidget {
     required this.onViewDocument,
     required this.onDeleteDocument,
     required this.onSetDefaultResume,
+    this.initialExpanded = false,
   });
 
   final TailoredJobDocumentGroup group;
   final Function(Map<String, dynamic> doc, String type) onViewDocument;
   final Function(String docId, String type) onDeleteDocument;
   final Function(String docId) onSetDefaultResume;
+  final bool initialExpanded;
 
   @override
   State<TailoredJobCard> createState() => _TailoredJobCardState();
 }
 
 class _TailoredJobCardState extends State<TailoredJobCard> {
-  bool _isExpanded = false;
+  late bool _isExpanded;
+
+  @override
+  void initState() {
+    super.initState();
+    _isExpanded = widget.initialExpanded;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -533,7 +541,9 @@ class _TailoredJobCardState extends State<TailoredJobCard> {
 
 /// Standalone screen rendering all tailored applications grouped by job with dropdown documents.
 class TailoredDocumentsScreen extends StatefulWidget {
-  const TailoredDocumentsScreen({super.key});
+  const TailoredDocumentsScreen({super.key, this.initialJobId});
+
+  final String? initialJobId;
 
   @override
   State<TailoredDocumentsScreen> createState() => _TailoredDocumentsScreenState();
@@ -557,6 +567,23 @@ class _TailoredDocumentsScreenState extends State<TailoredDocumentsScreen> {
     super.dispose();
   }
 
+  List<TailoredJobDocumentGroup> _prioritizeInitialJob(
+    List<TailoredJobDocumentGroup> groups,
+  ) {
+    final targetJobId = widget.initialJobId;
+    if (targetJobId == null || targetJobId.isEmpty) {
+      return groups;
+    }
+    final targetIndex = groups.indexWhere((group) => group.jobId == targetJobId);
+    if (targetIndex > 0) {
+      final prioritized = List<TailoredJobDocumentGroup>.from(groups);
+      final targetGroup = prioritized.removeAt(targetIndex);
+      prioritized.insert(0, targetGroup);
+      return prioritized;
+    }
+    return groups;
+  }
+
   void _checkAndStartPolling() {
     final hasGenerating = _groups.any((g) => g.isGenerating);
     if (hasGenerating && _pollingTimer == null) {
@@ -566,7 +593,9 @@ class _TailoredDocumentsScreenState extends State<TailoredDocumentsScreen> {
           _apiService.fetchCoverLetterVersions(),
         ]);
         if (!mounted) return;
-        final updatedGroups = groupTailoredDocuments(results[0], results[1]);
+        final updatedGroups = _prioritizeInitialJob(
+          groupTailoredDocuments(results[0], results[1]),
+        );
         setState(() {
           _groups = updatedGroups;
         });
@@ -589,8 +618,11 @@ class _TailoredDocumentsScreenState extends State<TailoredDocumentsScreen> {
       _apiService.fetchCoverLetterVersions(),
     ]);
     if (!mounted) return;
+    final mappedGroups = _prioritizeInitialJob(
+      groupTailoredDocuments(results[0], results[1]),
+    );
     setState(() {
-      _groups = groupTailoredDocuments(results[0], results[1]);
+      _groups = mappedGroups;
       _isLoading = false;
     });
     _checkAndStartPolling();
@@ -733,12 +765,18 @@ class _TailoredDocumentsScreenState extends State<TailoredDocumentsScreen> {
                   child: ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
                     itemCount: _groups.length,
-                    itemBuilder: (itemContext, index) => TailoredJobCard(
-                      group: _groups[index],
-                      onViewDocument: _handleViewDocument,
-                      onDeleteDocument: _handleDeleteDocument,
-                      onSetDefaultResume: _handleSetDefault,
-                    ),
+                    itemBuilder: (itemContext, index) {
+                      final isTarget = widget.initialJobId != null &&
+                          widget.initialJobId!.isNotEmpty &&
+                          _groups[index].jobId == widget.initialJobId;
+                      return TailoredJobCard(
+                        group: _groups[index],
+                        initialExpanded: isTarget,
+                        onViewDocument: _handleViewDocument,
+                        onDeleteDocument: _handleDeleteDocument,
+                        onSetDefaultResume: _handleSetDefault,
+                      );
+                    },
                   ),
                 ),
     );

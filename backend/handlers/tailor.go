@@ -276,11 +276,13 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 	}
 
 	type projectRecord struct {
-		Title       string   `json:"title"`
-		TechStack   []string `json:"tech_stack"`
-		Description string   `json:"description"`
-		Link        string   `json:"link"`
-		Duration    string   `json:"duration"`
+		Title         string   `json:"title"`
+		TechStack     []string `json:"tech_stack"`
+		Description   string   `json:"description"`
+		Link          string   `json:"link"`
+		GithubURL     string   `json:"github_url"`
+		DeploymentURL string   `json:"deployment_url"`
+		Duration      string   `json:"duration"`
 	}
 	var rawProjects []projectRecord
 	if len(projectsJSON) > 0 {
@@ -301,7 +303,13 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 			if projectItem.Description != "" {
 				profile.WriteString(fmt.Sprintf("    %s\n", projectItem.Description))
 			}
-			if projectItem.Link != "" {
+			if projectItem.GithubURL != "" {
+				profile.WriteString(fmt.Sprintf("    GitHub: %s\n", projectItem.GithubURL))
+			}
+			if projectItem.DeploymentURL != "" {
+				profile.WriteString(fmt.Sprintf("    Deployment: %s\n", projectItem.DeploymentURL))
+			}
+			if projectItem.Link != "" && projectItem.GithubURL == "" && projectItem.DeploymentURL == "" {
 				profile.WriteString(fmt.Sprintf("    Link: %s\n", projectItem.Link))
 			}
 		}

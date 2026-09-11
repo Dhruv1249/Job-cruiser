@@ -1191,28 +1191,25 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
                     color: AppColors.onSurfaceVariant,
                   ),
                 ),
-                Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.outlineVariant),
+                SegmentedButton<String>(
+                  style: SegmentedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.outlineVariant),
                   ),
-                  child: SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: "USD", label: Text("USD (\$)")),
-                      ButtonSegment(value: "INR", label: Text("INR (₹)")),
-                    ],
-                    selected: {_currency},
-                    onSelectionChanged: (newSelection) {
-                      setState(() {
-                        _currency = newSelection.first;
-                        if (_currency == "INR" && _baseSalary > 100) {
-                          _baseSalary = 0.0;
-                        } else if (_currency == "USD" && _baseSalary > 400) {
-                          _baseSalary = 0.0;
-                        }
-                      });
-                    },
-                  ),
+                  segments: const [
+                    ButtonSegment(value: "USD", label: Text("USD (\$)")),
+                    ButtonSegment(value: "INR", label: Text("INR (₹)")),
+                  ],
+                  selected: {_currency},
+                  onSelectionChanged: (newSelection) {
+                    setState(() {
+                      _currency = newSelection.first;
+                      if (_currency == "INR" && _baseSalary > 100) {
+                        _baseSalary = 0.0;
+                      } else if (_currency == "USD" && _baseSalary > 400) {
+                        _baseSalary = 0.0;
+                      }
+                    });
+                  },
                 ),
               ],
             ),
