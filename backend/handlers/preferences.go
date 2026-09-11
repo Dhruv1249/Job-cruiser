@@ -63,6 +63,7 @@ type PreferencesRequest struct {
 	Certifications                    []ParsedCertificationItem  `json:"certifications"`
 	ResearchPatents                   []ParsedResearchPatentItem `json:"research_patents"`
 	OpenSourceContributions           []ParsedOpenSourceItem     `json:"open_source_contributions"`
+	CustomFormAnswers                 map[string]any             `json:"custom_form_answers"`
 }
 
 /*
@@ -88,6 +89,7 @@ type ProfileUpdateRequest struct {
 	Certifications          []ParsedCertificationItem  `json:"certifications"`
 	ResearchPatents         []ParsedResearchPatentItem `json:"research_patents"`
 	OpenSourceContributions []ParsedOpenSourceItem     `json:"open_source_contributions"`
+	CustomFormAnswers       map[string]any             `json:"custom_form_answers"`
 }
 
 /*
@@ -293,6 +295,11 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 		openSourceJSON = []byte("[]")
 	}
 
+	var customFormAnswersJSON []byte
+	if req.CustomFormAnswers != nil {
+		customFormAnswersJSON, _ = json.Marshal(req.CustomFormAnswers)
+	}
+
 	effectiveBio := strings.TrimSpace(req.BioSummary)
 	if effectiveBio == "" {
 		effectiveBio = strings.TrimSpace(req.BioExperienceText)
@@ -316,9 +323,9 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 		INSERT INTO user_preferences (
 			user_id, full_name, email, phone, location, country, linkedin_url, github_url, portfolio_url,
 			custom_links, bio_experience_text, master_cv_text, experiences, projects, education, skills, achievements, certifications,
-			research_patents, open_source_contributions, target_roles, work_models
+			research_patents, open_source_contributions, custom_form_answers, target_roles, work_models
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13, $14, $15, $16, $17, $18, $19, '[]'::jsonb, '[]'::jsonb)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13, $14, $15, $16, $17, $18, $19, COALESCE($20::jsonb, '{}'::jsonb), '[]'::jsonb, '[]'::jsonb)
 		ON CONFLICT (user_id)
 		DO UPDATE SET
 			full_name = EXCLUDED.full_name,
@@ -340,6 +347,7 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 			certifications = EXCLUDED.certifications,
 			research_patents = EXCLUDED.research_patents,
 			open_source_contributions = EXCLUDED.open_source_contributions,
+			custom_form_answers = CASE WHEN $20::jsonb IS NOT NULL THEN $20::jsonb ELSE user_preferences.custom_form_answers END,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 	_, err := h.DB.Exec(
@@ -364,6 +372,7 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 		certificationsJSON,
 		researchPatentsJSON,
 		openSourceJSON,
+		customFormAnswersJSON,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile: " + err.Error()})
@@ -518,6 +527,11 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 	researchPatentsJSON, _ := json.Marshal(researchPatents)
 	openSourceJSON, _ := json.Marshal(openSourceContributions)
 
+	var customFormAnswersJSON []byte
+	if req.CustomFormAnswers != nil {
+		customFormAnswersJSON, _ = json.Marshal(req.CustomFormAnswers)
+	}
+
 	query := `
 		INSERT INTO user_preferences (
 			user_id, full_name, email, phone, location, country, linkedin_url, github_url, portfolio_url,
@@ -525,9 +539,9 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 			min_salary, currency, master_cv_text, bio_experience_text, target_resume_pages,
 			target_cover_letter_pages, match_threshold_notification_enabled, match_threshold_percentage,
 			experiences, projects, education, skills, achievements, certifications,
-			research_patents, open_source_contributions
+			research_patents, open_source_contributions, custom_form_answers
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, COALESCE($31::jsonb, '{}'::jsonb))
 		ON CONFLICT (user_id) 
 		DO UPDATE SET 
 			full_name = CASE WHEN EXCLUDED.full_name <> '' AND EXCLUDED.full_name <> 'User' THEN EXCLUDED.full_name ELSE user_preferences.full_name END,
@@ -559,6 +573,7 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 			certifications = CASE WHEN jsonb_typeof(EXCLUDED.certifications) = 'array' AND jsonb_array_length(EXCLUDED.certifications) > 0 THEN EXCLUDED.certifications ELSE user_preferences.certifications END,
 			research_patents = CASE WHEN jsonb_typeof(EXCLUDED.research_patents) = 'array' AND jsonb_array_length(EXCLUDED.research_patents) > 0 THEN EXCLUDED.research_patents ELSE user_preferences.research_patents END,
 			open_source_contributions = CASE WHEN jsonb_typeof(EXCLUDED.open_source_contributions) = 'array' AND jsonb_array_length(EXCLUDED.open_source_contributions) > 0 THEN EXCLUDED.open_source_contributions ELSE user_preferences.open_source_contributions END,
+			custom_form_answers = CASE WHEN $31::jsonb IS NOT NULL THEN $31::jsonb ELSE user_preferences.custom_form_answers END,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 
@@ -595,6 +610,7 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 		certificationsJSON,
 		researchPatentsJSON,
 		openSourceJSON,
+		customFormAnswersJSON,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save preferences: " + err.Error()})
@@ -650,6 +666,7 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 			COALESCE(p.certifications, '[]'::jsonb),
 			COALESCE(p.research_patents, '[]'::jsonb),
 			COALESCE(p.open_source_contributions, '[]'::jsonb),
+			COALESCE(p.custom_form_answers, '{}'::jsonb),
 			COALESCE(u.parsed_experience::text, ''),
 			(p.user_id IS NOT NULL) AS has_preferences
 		FROM users u
@@ -668,6 +685,7 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 	var certificationsJSON []byte
 	var researchPatentsJSON []byte
 	var openSourceJSON []byte
+	var customFormAnswersJSON []byte
 	var rawParsedExperience string
 
 	err := h.DB.QueryRow(context.Background(), query, userID).Scan(
@@ -701,6 +719,7 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 		&certificationsJSON,
 		&researchPatentsJSON,
 		&openSourceJSON,
+		&customFormAnswersJSON,
 		&rawParsedExperience,
 		&hasPreferences,
 	)
@@ -736,6 +755,12 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 	}
 	if len(openSourceJSON) > 0 {
 		_ = json.Unmarshal(openSourceJSON, &pref.OpenSourceContributions)
+	}
+	if len(customFormAnswersJSON) > 0 {
+		_ = json.Unmarshal(customFormAnswersJSON, &pref.CustomFormAnswers)
+	}
+	if pref.CustomFormAnswers == nil {
+		pref.CustomFormAnswers = make(map[string]any)
 	}
 
 	needsBackfill := false

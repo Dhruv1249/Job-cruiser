@@ -10,6 +10,7 @@ import 'preferences.dart' as preferences_page;
 import 'auth.dart';
 import 'onboarding.dart';
 import 'tracker.dart';
+import 'screens/quick_fill_screen.dart';
 import 'models/job.dart';
 import 'models/job_filter_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -254,7 +255,6 @@ class _JobCruiserShellState extends State<JobCruiserShell> with WidgetsBindingOb
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _loadUnreadNotificationsCount();
-      _inboxRefreshTrigger.value++;
     }
   }
 
@@ -294,6 +294,7 @@ class _JobCruiserShellState extends State<JobCruiserShell> with WidgetsBindingOb
             refreshTrigger: _inboxRefreshTrigger,
           ),
           const ApplicationTrackerPage(),
+          const QuickFillScreen(),
           const ProfilePage(),
         ],
       ),
@@ -344,7 +345,9 @@ class _JobCruiserShellState extends State<JobCruiserShell> with WidgetsBindingOb
           const SizedBox(width: 8),
           _buildDesktopNavItem(1, 'CRM Tracker', Icons.work_history_outlined, Icons.work_history),
           const SizedBox(width: 8),
-          _buildDesktopNavItem(2, 'Profile & Preferences', Icons.account_circle_outlined, Icons.account_circle),
+          _buildDesktopNavItem(2, 'Quick Fill', Icons.content_paste_go_outlined, Icons.content_paste_go),
+          const SizedBox(width: 8),
+          _buildDesktopNavItem(3, 'Profile & Preferences', Icons.account_circle_outlined, Icons.account_circle),
           const Spacer(),
           Stack(
             alignment: Alignment.center,
@@ -465,6 +468,11 @@ class _JobCruiserShellState extends State<JobCruiserShell> with WidgetsBindingOb
             icon: Icon(Icons.work_history_outlined),
             selectedIcon: Icon(Icons.work_history),
             label: 'Tracker',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.content_paste_go_outlined),
+            selectedIcon: Icon(Icons.content_paste_go),
+            label: 'Quick Fill',
           ),
           NavigationDestination(
             icon: Icon(Icons.account_circle_outlined),

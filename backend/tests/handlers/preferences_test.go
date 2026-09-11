@@ -666,3 +666,57 @@ func TestPreferencesBindingWithAllOptions(testingContext *testing.T) {
 	}
 }
 
+func TestCustomFormAnswersBinding(testingContext *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rawPayload := map[string]interface{}{
+		"full_name": "Alex Mercer",
+		"custom_form_answers": map[string]interface{}{
+			"visa_sponsorship":   "No",
+			"work_authorization": "Authorized in US",
+			"notice_period":      "Immediate",
+			"custom_fields": []interface{}{
+				map[string]interface{}{
+					"id":       "field-1",
+					"label":    "Why Us?",
+					"value":    "Passionate about distributed systems",
+					"category": "Short Answers",
+				},
+			},
+		},
+	}
+
+	jsonBytes, err := json.Marshal(rawPayload)
+	if err != nil {
+		testingContext.Fatalf("marshal failed: %v", err)
+	}
+
+	router := gin.New()
+	router.POST("/preferences", func(ginContext *gin.Context) {
+		var requestPayload handlers.PreferencesRequest
+		if bindError := ginContext.ShouldBindJSON(&requestPayload); bindError != nil {
+			ginContext.JSON(http.StatusBadRequest, gin.H{"error": bindError.Error()})
+			return
+		}
+
+		if requestPayload.CustomFormAnswers == nil {
+			testingContext.Fatalf("expected custom form answers map, got nil")
+		}
+
+		if requestPayload.CustomFormAnswers["visa_sponsorship"] != "No" {
+			testingContext.Errorf("expected visa_sponsorship 'No', got: %v", requestPayload.CustomFormAnswers["visa_sponsorship"])
+		}
+
+		ginContext.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	recorder := httptest.NewRecorder()
+	request, _ := http.NewRequest(http.MethodPost, "/preferences", bytes.NewBuffer(jsonBytes))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		testingContext.Errorf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+}
+
