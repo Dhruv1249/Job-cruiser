@@ -77,6 +77,12 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 		maxScore = 100
 	}
 
+	hoursParam := c.DefaultQuery("hours", "0")
+	hoursFilter, hoursErr := strconv.Atoi(hoursParam)
+	if hoursErr != nil || hoursFilter < 0 {
+		hoursFilter = 0
+	}
+
 	daysParam := c.DefaultQuery("days", "0")
 	daysFilter, daysErr := strconv.Atoi(daysParam)
 	if daysErr != nil || daysFilter < 0 {
@@ -107,7 +113,9 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 	var args []interface{}
 	args = append(args, userID)
 
-	if daysFilter > 0 {
+	if hoursFilter > 0 {
+		conditions = append(conditions, fmt.Sprintf("j.scraped_at >= NOW() - INTERVAL '%d hours'", hoursFilter))
+	} else if daysFilter > 0 {
 		conditions = append(conditions, fmt.Sprintf("j.scraped_at >= NOW() - INTERVAL '%d days'", daysFilter))
 	}
 	conditions = append(conditions, "COALESCE(ujm.is_dismissed, false) = false")

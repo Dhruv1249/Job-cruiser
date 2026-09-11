@@ -1067,7 +1067,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
   Widget _buildItemCard(QuickFillItem item) {
     final isCopied = _copiedItemId == item.id;
-    final hasMoreContent = item.value.length > 70 || item.value.contains("\n");
+    final hasMoreContent = item.value.length > 40 || item.value.contains("\n");
 
     return Container(
       decoration: BoxDecoration(
@@ -1118,6 +1118,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
                                 color: AppColors.onSurface,
                               ),
                               overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
                           ),
                         ],
@@ -1176,54 +1177,52 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
                 const SizedBox(height: 10),
                 Container(
                   width: double.infinity,
+                  height: 38,
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
                     color: AppColors.surfaceContainerLow,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: AppColors.outlineVariant.withValues(alpha: 0.6)),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
+                  child: Row(
                     children: [
-                      Text(
-                        item.value,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontFamily: "monospace",
-                          color: AppColors.onSurface,
+                      Expanded(
+                        child: Text(
+                          item.value.replaceAll("\n", " ").trim(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontFamily: "monospace",
+                            color: AppColors.onSurface,
+                          ),
                         ),
                       ),
                       if (hasMoreContent) ...[
-                        const SizedBox(height: 6),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: InkWell(
-                            onTap: () => _showViewFullContentDialog(item),
-                            borderRadius: BorderRadius.circular(4),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Text(
-                                    "More",
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppColors.primary,
-                                    ),
-                                  ),
-                                  SizedBox(width: 2),
-                                  Icon(
-                                    Icons.unfold_more,
-                                    size: 13,
+                        const SizedBox(width: 8),
+                        InkWell(
+                          onTap: () => _showViewFullContentDialog(item),
+                          borderRadius: BorderRadius.circular(4),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Text(
+                                  "More",
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
                                     color: AppColors.primary,
                                   ),
-                                ],
-                              ),
+                                ),
+                                SizedBox(width: 2),
+                                Icon(
+                                  Icons.unfold_more,
+                                  size: 13,
+                                  color: AppColors.primary,
+                                ),
+                              ],
                             ),
                           ),
                         ),

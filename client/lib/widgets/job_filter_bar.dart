@@ -70,7 +70,7 @@ class _JobFilterBarState extends State<JobFilterBar> {
   Widget build(BuildContext context) {
     final activeCount = widget.filterState.activeFilterCount;
     final isCustomScore = widget.filterState.minScore > 0 || widget.filterState.maxScore < 100;
-    final isCustomRecency = widget.filterState.recencyDays != null && widget.filterState.recencyDays! > 0;
+    final isCustomRecency = widget.filterState.recencyHours != null && widget.filterState.recencyHours! > 0;
 
     return Container(
       color: AppColors.surface,
@@ -436,38 +436,48 @@ class _JobFilterBarState extends State<JobFilterBar> {
 
   Widget _buildRecencyPresetChip(bool isCustomRecency) {
     String label = 'Any Time';
-    final days = widget.filterState.recencyDays;
-    if (days == 1) label = 'Today (24h)';
-    if (days == 2) label = '2 Days Ago';
-    if (days == 3) label = '3 Days Ago';
-    if (days == 7) label = 'Past Week';
-    if (days == 14) label = 'Past 2 Weeks';
-    if (days != null && days > 0 && label == 'Any Time') label = '$days Days Ago';
+    final hours = widget.filterState.recencyHours;
+    if (hours == 6) label = 'Past 6h';
+    if (hours == 12) label = 'Past 12h';
+    if (hours == 24) label = 'Past 24h';
+    if (hours == 48) label = 'Past 2d';
+    if (hours == 72) label = 'Past 3d';
+    if (hours == 168) label = 'Past Week';
+    if (hours == 336) label = 'Past 2 Weeks';
+    if (hours != null && hours > 0 && label == 'Any Time') {
+      if (hours % 24 == 0) {
+        label = '${hours ~/ 24}d Ago';
+      } else {
+        label = '${hours}h Ago';
+      }
+    }
 
     return PopupMenuButton<String>(
       tooltip: 'Filter by posting date',
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       onSelected: (value) {
         if (value == 'null') {
-          widget.onFilterChanged(widget.filterState.copyWith(recencyDays: () => null));
+          widget.onFilterChanged(widget.filterState.copyWith(recencyHours: () => null));
         } else if (value == 'custom') {
           widget.onOpenFilterDialog();
         } else {
           final parsed = int.tryParse(value);
           if (parsed != null) {
-            widget.onFilterChanged(widget.filterState.copyWith(recencyDays: () => parsed));
+            widget.onFilterChanged(widget.filterState.copyWith(recencyHours: () => parsed));
           }
         }
       },
       itemBuilder: (context) => const [
         PopupMenuItem(value: 'null', child: Text('Any Time')),
-        PopupMenuItem(value: '1', child: Text('Today / Past 24h')),
-        PopupMenuItem(value: '2', child: Text('Past 2 Days')),
-        PopupMenuItem(value: '3', child: Text('Past 3 Days')),
-        PopupMenuItem(value: '7', child: Text('Past Week (7d)')),
-        PopupMenuItem(value: '14', child: Text('Past 2 Weeks (14d)')),
+        PopupMenuItem(value: '6', child: Text('Past 6 Hours (6h)')),
+        PopupMenuItem(value: '12', child: Text('Past 12 Hours (12h)')),
+        PopupMenuItem(value: '24', child: Text('Past 24 Hours (1d)')),
+        PopupMenuItem(value: '48', child: Text('Past 2 Days (48h)')),
+        PopupMenuItem(value: '72', child: Text('Past 3 Days (72h)')),
+        PopupMenuItem(value: '168', child: Text('Past Week (7d)')),
+        PopupMenuItem(value: '336', child: Text('Past 2 Weeks (14d)')),
         PopupMenuDivider(),
-        PopupMenuItem(value: 'custom', child: Text('Custom Days...')),
+        PopupMenuItem(value: 'custom', child: Text('Custom Timeframe...')),
       ],
       child: Container(
         height: 32,

@@ -692,6 +692,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     final jobsFuture = _apiService.fetchMatchedJobs(
       minScore: _filterState.minScore,
       maxScore: _filterState.maxScore,
+      hours: _filterState.recencyHours,
       days: _filterState.recencyDays,
       matchScope: _filterState.matchScope,
       remoteOnly: _filterState.workModel == 'remote_only',
@@ -740,6 +741,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     final moreJobs = await _apiService.fetchMatchedJobs(
       minScore: _filterState.minScore,
       maxScore: _filterState.maxScore,
+      hours: _filterState.recencyHours,
       days: _filterState.recencyDays,
       matchScope: _filterState.matchScope,
       remoteOnly: _filterState.workModel == 'remote_only',

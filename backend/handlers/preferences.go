@@ -55,6 +55,7 @@ type PreferencesRequest struct {
 	TargetCoverLetterPages            int                       `json:"target_cover_letter_pages"`
 	MatchThresholdNotificationEnabled bool                      `json:"match_threshold_notification_enabled"`
 	MatchThresholdPercentage          int                       `json:"match_threshold_percentage"`
+	NotificationPromptCriteria        string                    `json:"notification_prompt_criteria"`
 	Experiences                       []ParsedExperienceItem     `json:"experiences"`
 	Projects                          []ParsedProjectItem        `json:"projects"`
 	Education                         []ParsedEducationItem      `json:"education"`
@@ -538,10 +539,11 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 			custom_links, target_roles, target_industries, target_locations, work_models,
 			min_salary, currency, master_cv_text, bio_experience_text, target_resume_pages,
 			target_cover_letter_pages, match_threshold_notification_enabled, match_threshold_percentage,
+			notification_prompt_criteria,
 			experiences, projects, education, skills, achievements, certifications,
 			research_patents, open_source_contributions, custom_form_answers
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, COALESCE($31::jsonb, '{}'::jsonb))
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, COALESCE($32::jsonb, '{}'::jsonb))
 		ON CONFLICT (user_id) 
 		DO UPDATE SET 
 			full_name = CASE WHEN EXCLUDED.full_name <> '' AND EXCLUDED.full_name <> 'User' THEN EXCLUDED.full_name ELSE user_preferences.full_name END,
@@ -565,6 +567,7 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 			target_cover_letter_pages = EXCLUDED.target_cover_letter_pages,
 			match_threshold_notification_enabled = EXCLUDED.match_threshold_notification_enabled,
 			match_threshold_percentage = EXCLUDED.match_threshold_percentage,
+			notification_prompt_criteria = EXCLUDED.notification_prompt_criteria,
 			experiences = CASE WHEN jsonb_typeof(EXCLUDED.experiences) = 'array' AND jsonb_array_length(EXCLUDED.experiences) > 0 THEN EXCLUDED.experiences ELSE user_preferences.experiences END,
 			projects = CASE WHEN jsonb_typeof(EXCLUDED.projects) = 'array' AND jsonb_array_length(EXCLUDED.projects) > 0 THEN EXCLUDED.projects ELSE user_preferences.projects END,
 			education = CASE WHEN jsonb_typeof(EXCLUDED.education) = 'array' AND jsonb_array_length(EXCLUDED.education) > 0 THEN EXCLUDED.education ELSE user_preferences.education END,
@@ -573,7 +576,7 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 			certifications = CASE WHEN jsonb_typeof(EXCLUDED.certifications) = 'array' AND jsonb_array_length(EXCLUDED.certifications) > 0 THEN EXCLUDED.certifications ELSE user_preferences.certifications END,
 			research_patents = CASE WHEN jsonb_typeof(EXCLUDED.research_patents) = 'array' AND jsonb_array_length(EXCLUDED.research_patents) > 0 THEN EXCLUDED.research_patents ELSE user_preferences.research_patents END,
 			open_source_contributions = CASE WHEN jsonb_typeof(EXCLUDED.open_source_contributions) = 'array' AND jsonb_array_length(EXCLUDED.open_source_contributions) > 0 THEN EXCLUDED.open_source_contributions ELSE user_preferences.open_source_contributions END,
-			custom_form_answers = CASE WHEN $31::jsonb IS NOT NULL THEN $31::jsonb ELSE user_preferences.custom_form_answers END,
+			custom_form_answers = CASE WHEN $32::jsonb IS NOT NULL THEN $32::jsonb ELSE user_preferences.custom_form_answers END,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 
@@ -602,6 +605,7 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 		targetCoverLetterPages,
 		req.MatchThresholdNotificationEnabled,
 		matchThresholdPercentage,
+		strings.TrimSpace(req.NotificationPromptCriteria),
 		experiencesJSON,
 		projectsJSON,
 		educationJSON,
@@ -658,6 +662,7 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 			COALESCE(p.target_cover_letter_pages, 1),
 			COALESCE(p.match_threshold_notification_enabled, false),
 			COALESCE(p.match_threshold_percentage, 80),
+			COALESCE(p.notification_prompt_criteria, ''),
 			COALESCE(p.experiences, '[]'::jsonb),
 			COALESCE(p.projects, '[]'::jsonb),
 			COALESCE(p.education, '[]'::jsonb),
@@ -711,6 +716,7 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 		&pref.TargetCoverLetterPages,
 		&pref.MatchThresholdNotificationEnabled,
 		&pref.MatchThresholdPercentage,
+		&pref.NotificationPromptCriteria,
 		&experiencesJSON,
 		&projectsJSON,
 		&educationJSON,

@@ -74,6 +74,7 @@ type UserProfileData struct {
 	Country                           string   `json:"country"`
 	MatchThresholdNotificationEnabled bool     `json:"match_threshold_notification_enabled"`
 	MatchThresholdPercentage          int      `json:"match_threshold_percentage"`
+	NotificationPromptCriteria        string   `json:"notification_prompt_criteria"`
 	SkillsSummary                     string   `json:"skills_summary"`
 	ProjectsSummary                   string   `json:"projects_summary"`
 	WorkHistory                       string   `json:"work_history"`
@@ -96,14 +97,15 @@ type JobSnippetData struct {
 
 // BatchMatchResultItem encapsulates an evaluated job match output for a specific candidate.
 type BatchMatchResultItem struct {
-	JobID                string `json:"job_id"`
-	UserID               string `json:"user_id"`
-	MatchScore           int    `json:"match_score"`
-	MatchReasoning       string `json:"match_reasoning"`
-	InferredRequiredYoE  int    `json:"inferred_required_yoe"`
-	StandardizedLocation string `json:"standardized_location"`
-	WorkModel            string `json:"work_model"`
-	IsMatched            bool   `json:"is_matched"`
+	JobID                   string `json:"job_id"`
+	UserID                  string `json:"user_id"`
+	MatchScore              int    `json:"match_score"`
+	MatchReasoning          string `json:"match_reasoning"`
+	InferredRequiredYoE     int    `json:"inferred_required_yoe"`
+	StandardizedLocation    string `json:"standardized_location"`
+	WorkModel               string `json:"work_model"`
+	IsMatched               bool   `json:"is_matched"`
+	NotificationCriteriaMet bool   `json:"notification_criteria_met"`
 }
 
 // BatchMatchResponse defines the structured JSON array envelope emitted by AI matching engines.
@@ -993,7 +995,7 @@ func (s *NvidiaNimService) evaluateJobBatchWithBackoff(
 		}
 		_ = updateJobStandardizedLocationAndWorkModel(ctx, s.DB, res.JobID, res.StandardizedLocation, res.WorkModel)
 		if matchedProfile != nil {
-			notifyUserOnHighMatch(ctx, s.DB, s.FCMService, matchedProfile, res.JobID, res.MatchScore, res.MatchReasoning)
+			notifyUserOnHighMatch(ctx, s.DB, s.FCMService, matchedProfile, res.JobID, res.MatchScore, res.MatchReasoning, res.NotificationCriteriaMet)
 		}
 		syncMutex.Lock()
 		evaluatedJobIDs[res.JobID] = true
@@ -1272,7 +1274,8 @@ SCHEMA FORMAT:
       "inferred_required_yoe": <integer minimum required years of experience inferred from JD, title, or requirements>,
       "standardized_location": "<standardized canonical location e.g. Bengaluru, India or Remote (Global)>",
       "work_model": "<remote|hybrid|onsite>",
-      "is_matched": <true|false>
+      "is_matched": <true|false>,
+      "notification_criteria_met": <true|false>
     }
   ]
 }
@@ -1323,7 +1326,13 @@ SCORING INSTRUCTIONS & CONSTRAINTS:
    - If a job has a location mismatch (match_score <= 15), is_matched MUST be false.
 
 5. REASONING:
-   - "match_reasoning" must be 2-3 clear, natural sentences explaining: (1) location verification & compatibility, (2) technical stack overlap & missing skills, and (3) experience comparison.`, expectedResultCount, currentTimeText)
+   - "match_reasoning" must be 2-3 clear, natural sentences explaining: (1) location verification & compatibility, (2) technical stack overlap & missing skills, and (3) experience comparison.
+
+6. NOTIFICATION CRITERIA EVALUATION:
+   - Each candidate profile may optionally specify "Notification Criteria".
+   - If the candidate profile does NOT contain "Notification Criteria" (or it is empty), set "notification_criteria_met" to true.
+   - If the candidate profile DOES specify "Notification Criteria", evaluate whether this job listing satisfies all the candidate's custom criteria. Set "notification_criteria_met" to true IF AND ONLY IF the job satisfies the candidate's criteria, otherwise set to false.
+   - INDEPENDENCE MANDATE: "notification_criteria_met" is an isolated alerting flag for push notifications only. It MUST NEVER influence, reduce, cap, or alter "match_score" or "is_matched". Evaluate "match_score" strictly and independently on skills, experience, and location compatibility regardless of whether notification criteria are met.`, expectedResultCount, currentTimeText)
 }
 
 /*
@@ -1402,8 +1411,13 @@ func buildBatchMatchUserContent(userProfiles []UserProfileData, jobsBatch []JobS
 		combinedProfileText := strings.Join(profileSections, "\n\n")
 
 		candidateCountry := resolveCandidateCountry(profile.Country, profile.CurrentLocation)
-		fmt.Fprintf(&builder, "User ID: %s\nCandidate Country: %s\nCandidate YoE: %d\nPreferred Locations: %s\nWork Model Preference: %s\nPreferred Roles: %s\nProfile & Resume Context:\n%s\n\n",
-			profile.UserID, candidateCountry, profile.ExperienceYears, strings.Join(profile.PreferredLocations, ", "), profile.WorkModel, strings.Join(profile.PreferredRoles, ", "), combinedProfileText)
+		criteriaPrompt := strings.TrimSpace(profile.NotificationPromptCriteria)
+		criteriaLine := ""
+		if criteriaPrompt != "" {
+			criteriaLine = fmt.Sprintf("Notification Criteria (Alerting Only, does NOT affect match score): %s\n", criteriaPrompt)
+		}
+		fmt.Fprintf(&builder, "User ID: %s\nCandidate Country: %s\nCandidate YoE: %d\nPreferred Locations: %s\nWork Model Preference: %s\nPreferred Roles: %s\n%sProfile & Resume Context:\n%s\n\n",
+			profile.UserID, candidateCountry, profile.ExperienceYears, strings.Join(profile.PreferredLocations, ", "), profile.WorkModel, strings.Join(profile.PreferredRoles, ", "), criteriaLine, combinedProfileText)
 	}
 
 	builder.WriteString("### JOB LISTINGS TO EVALUATE\n")
@@ -1477,6 +1491,7 @@ func scanCandidateProfileRecord(rowScanner interface{ Scan(dest ...any) error })
 		&item.Country,
 		&item.MatchThresholdNotificationEnabled,
 		&item.MatchThresholdPercentage,
+		&item.NotificationPromptCriteria,
 		&skillsJSON,
 		&projectsJSON,
 		&experiencesJSON,
@@ -1670,6 +1685,7 @@ func fetchAllActiveUserProfiles(ctx context.Context, databasePool *pgxpool.Pool)
 			COALESCE(NULLIF(up.country, ''), ''),
 			COALESCE(up.match_threshold_notification_enabled, false),
 			COALESCE(up.match_threshold_percentage, 80),
+			COALESCE(up.notification_prompt_criteria, ''),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.skills, '[]'::jsonb)) > 0 THEN up.skills ELSE u.parsed_experience->'skills' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.projects, '[]'::jsonb)) > 0 THEN up.projects ELSE u.parsed_experience->'projects' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.experiences, '[]'::jsonb)) > 0 THEN up.experiences ELSE u.parsed_experience->'experience' END, '[]'::jsonb),
@@ -1709,7 +1725,7 @@ func fetchSingleUserProfileByID(ctx context.Context, databasePool *pgxpool.Pool,
 			u.primary_email, 
 			COALESCE(NULLIF(up.bio_experience_text, ''), NULLIF(u.parsed_experience->>'bio_summary', ''), NULLIF(up.master_cv_text, ''), ''),
 			COALESCE(up.master_cv_text, ''), 
-			COALESCE(up.target_roles, '[]'::jsonb),
+			COALESCE(up.target_roles, '[]'::jsonb), 
 			COALESCE(up.target_locations, '[]'::jsonb), 
 			COALESCE(up.work_models, '[]'::jsonb), 
 			0,
@@ -1717,6 +1733,7 @@ func fetchSingleUserProfileByID(ctx context.Context, databasePool *pgxpool.Pool,
 			COALESCE(NULLIF(up.country, ''), ''),
 			COALESCE(up.match_threshold_notification_enabled, false),
 			COALESCE(up.match_threshold_percentage, 80),
+			COALESCE(up.notification_prompt_criteria, ''),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.skills, '[]'::jsonb)) > 0 THEN up.skills ELSE u.parsed_experience->'skills' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.projects, '[]'::jsonb)) > 0 THEN up.projects ELSE u.parsed_experience->'projects' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.experiences, '[]'::jsonb)) > 0 THEN up.experiences ELSE u.parsed_experience->'experience' END, '[]'::jsonb),
@@ -1870,7 +1887,16 @@ func updateJobStandardizedLocationAndWorkModel(ctx context.Context, databasePool
 	return errExec
 }
 
-func notifyUserOnHighMatch(ctx context.Context, databasePool *pgxpool.Pool, fcmService *FCMService, profile *UserProfileData, jobID string, matchScore int, matchReasoning string) {
+func notifyUserOnHighMatch(
+	ctx context.Context,
+	databasePool *pgxpool.Pool,
+	fcmService *FCMService,
+	profile *UserProfileData,
+	jobID string,
+	matchScore int,
+	matchReasoning string,
+	notificationCriteriaMet bool,
+) {
 	if databasePool == nil || profile == nil || !profile.MatchThresholdNotificationEnabled {
 		return
 	}
@@ -1879,6 +1905,9 @@ func notifyUserOnHighMatch(ctx context.Context, databasePool *pgxpool.Pool, fcmS
 		targetThreshold = 80
 	}
 	if matchScore < targetThreshold {
+		return
+	}
+	if strings.TrimSpace(profile.NotificationPromptCriteria) != "" && !notificationCriteriaMet {
 		return
 	}
 
@@ -1907,6 +1936,10 @@ func notifyUserOnHighMatch(ctx context.Context, databasePool *pgxpool.Pool, fcmS
 
 	notificationTitle := fmt.Sprintf("High Match Found (%d%%): %s", matchScore, jobTitle)
 	notificationMessage := fmt.Sprintf("New high match (%d%%) for %s at %s based on your profile preferences.", matchScore, jobTitle, companyName)
+	cleanCriteria := strings.TrimSpace(profile.NotificationPromptCriteria)
+	if cleanCriteria != "" {
+		notificationMessage = fmt.Sprintf("%s\n\nAlert Criteria Matched:\n%s", notificationMessage, cleanCriteria)
+	}
 	cleanReasoning := strings.TrimSpace(matchReasoning)
 	if cleanReasoning != "" {
 		notificationMessage = fmt.Sprintf("%s\n\nAI Reasoning:\n%s", notificationMessage, cleanReasoning)

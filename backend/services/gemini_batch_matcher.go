@@ -699,7 +699,7 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 		}
 		_ = updateJobStandardizedLocationAndWorkModel(ctx, s.DB, resultItem.JobID, resultItem.StandardizedLocation, resultItem.WorkModel)
 		if matchedProfile != nil {
-			notifyUserOnHighMatch(ctx, s.DB, s.FCMService, matchedProfile, resultItem.JobID, resultItem.MatchScore, resultItem.MatchReasoning)
+			notifyUserOnHighMatch(ctx, s.DB, s.FCMService, matchedProfile, resultItem.JobID, resultItem.MatchScore, resultItem.MatchReasoning, resultItem.NotificationCriteriaMet)
 		}
 
 		evaluatedJobIDs[resultItem.JobID] = true

@@ -203,6 +203,7 @@ class ApiService {
   Future<List<MatchedJob>> fetchMatchedJobs({
     int minScore = 0,
     int maxScore = 100,
+    int? hours,
     int? days,
     String matchScope = 'all',
     bool remoteOnly = false,
@@ -227,7 +228,9 @@ class ApiService {
         'offset': offset,
       };
 
-      if (days != null && days > 0) {
+      if (hours != null && hours > 0) {
+        queryParams['hours'] = hours;
+      } else if (days != null && days > 0) {
         queryParams['days'] = days;
       }
       if (applicationStatus != 'all') {

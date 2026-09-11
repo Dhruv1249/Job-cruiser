@@ -8,32 +8,36 @@ class JobFilterState {
     this.matchScope = 'all',
     this.minScore = 0,
     this.maxScore = 100,
-    this.recencyDays,
+    int? recencyHours,
+    int? recencyDays,
     this.viewMode = 'all',
     this.workModel = 'all',
     this.applicationStatus = 'all',
     this.sortBy = 'score_desc',
     this.searchQuery = '',
-  });
+  }) : recencyHours = recencyHours ?? (recencyDays != null ? recencyDays * 24 : null);
 
   static const String storageKey = 'jobcruiser_filter_state_v1';
 
   final String matchScope;
   final int minScore;
   final int maxScore;
-  final int? recencyDays;
+  final int? recencyHours;
   final String viewMode;
   final String workModel;
   final String applicationStatus;
   final String sortBy;
   final String searchQuery;
 
+  /// Returns legacy days count calculated from hours.
+  int? get recencyDays => recencyHours != null ? (recencyHours! / 24).round() : null;
+
   /// Returns true if all filter dimensions match their default values.
   bool get isDefault {
     return matchScope == 'all' &&
         minScore == 0 &&
         maxScore == 100 &&
-        recencyDays == null &&
+        recencyHours == null &&
         viewMode == 'all' &&
         workModel == 'all' &&
         applicationStatus == 'all' &&
@@ -46,7 +50,7 @@ class JobFilterState {
     var count = 0;
     if (matchScope != 'all') count++;
     if (minScore > 0 || maxScore < 100) count++;
-    if (recencyDays != null && recencyDays! > 0) count++;
+    if (recencyHours != null && recencyHours! > 0) count++;
     if (viewMode != 'all') count++;
     if (workModel != 'all') count++;
     if (applicationStatus != 'all') count++;
@@ -65,6 +69,7 @@ class JobFilterState {
     String? matchScope,
     int? minScore,
     int? maxScore,
+    int? Function()? recencyHours,
     int? Function()? recencyDays,
     String? viewMode,
     String? workModel,
@@ -72,11 +77,21 @@ class JobFilterState {
     String? sortBy,
     String? searchQuery,
   }) {
+    int? resolvedHours;
+    if (recencyHours != null) {
+      resolvedHours = recencyHours();
+    } else if (recencyDays != null) {
+      final daysVal = recencyDays();
+      resolvedHours = daysVal != null ? daysVal * 24 : null;
+    } else {
+      resolvedHours = this.recencyHours;
+    }
+
     return JobFilterState(
       matchScope: matchScope ?? this.matchScope,
       minScore: minScore ?? this.minScore,
       maxScore: maxScore ?? this.maxScore,
-      recencyDays: recencyDays != null ? recencyDays() : this.recencyDays,
+      recencyHours: resolvedHours,
       viewMode: viewMode ?? this.viewMode,
       workModel: workModel ?? this.workModel,
       applicationStatus: applicationStatus ?? this.applicationStatus,
@@ -91,6 +106,7 @@ class JobFilterState {
       'match_scope': matchScope,
       'min_score': minScore,
       'max_score': maxScore,
+      'recency_hours': recencyHours,
       'recency_days': recencyDays,
       'view_mode': viewMode,
       'work_model': workModel,
@@ -102,11 +118,19 @@ class JobFilterState {
 
   /// Constructs a [JobFilterState] from a JSON map.
   factory JobFilterState.fromJson(Map<String, dynamic> json) {
+    int? hours = (json['recency_hours'] as num?)?.toInt();
+    if (hours == null && json['recency_days'] != null) {
+      final days = (json['recency_days'] as num?)?.toInt();
+      if (days != null && days > 0) {
+        hours = days * 24;
+      }
+    }
+
     return JobFilterState(
       matchScope: json['match_scope'] as String? ?? 'all',
       minScore: (json['min_score'] as num?)?.toInt() ?? 0,
       maxScore: (json['max_score'] as num?)?.toInt() ?? 100,
-      recencyDays: (json['recency_days'] as num?)?.toInt(),
+      recencyHours: hours,
       viewMode: json['view_mode'] as String? ?? 'all',
       workModel: json['work_model'] as String? ?? 'all',
       applicationStatus: json['application_status'] as String? ?? 'all',
@@ -172,10 +196,10 @@ class JobFilterState {
       }
     }
 
-    if (recencyDays != null && recencyDays! > 0) {
+    if (recencyHours != null && recencyHours! > 0) {
       final targetDate = _extractJobDate(job);
       if (targetDate != null) {
-        final cutoff = DateTime.now().subtract(Duration(days: recencyDays!));
+        final cutoff = DateTime.now().subtract(Duration(hours: recencyHours!));
         if (targetDate.isBefore(cutoff)) {
           return false;
         }

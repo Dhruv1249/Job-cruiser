@@ -272,22 +272,28 @@ func TestPreferencesRequestBindingWithMatchNotification(t *testing.T) {
 		name                        string
 		notificationEnabled         bool
 		thresholdPercentage         int
+		criteriaPrompt              string
 		expectedNotificationEnabled bool
 		expectedThresholdPercentage int
+		expectedCriteriaPrompt      string
 	}{
 		{
 			name:                        "default disabled notification with custom threshold",
 			notificationEnabled:         false,
 			thresholdPercentage:         85,
+			criteriaPrompt:              "",
 			expectedNotificationEnabled: false,
 			expectedThresholdPercentage: 85,
+			expectedCriteriaPrompt:      "",
 		},
 		{
-			name:                        "enabled notification with 80 percent threshold",
+			name:                        "enabled notification with 80 percent threshold and custom criteria",
 			notificationEnabled:         true,
 			thresholdPercentage:         80,
+			criteriaPrompt:              "Must be 100% remote and Go or Kubernetes",
 			expectedNotificationEnabled: true,
 			expectedThresholdPercentage: 80,
+			expectedCriteriaPrompt:      "Must be 100% remote and Go or Kubernetes",
 		},
 	}
 
@@ -299,6 +305,7 @@ func TestPreferencesRequestBindingWithMatchNotification(t *testing.T) {
 				"work_models":                          []string{"remote"},
 				"match_threshold_notification_enabled": tc.notificationEnabled,
 				"match_threshold_percentage":          tc.thresholdPercentage,
+				"notification_prompt_criteria":        tc.criteriaPrompt,
 			}
 
 			jsonBytes, err := json.Marshal(testBody)
@@ -319,6 +326,9 @@ func TestPreferencesRequestBindingWithMatchNotification(t *testing.T) {
 				}
 				if req.MatchThresholdPercentage != tc.expectedThresholdPercentage {
 					t.Errorf("expected threshold percentage %d, got %d", tc.expectedThresholdPercentage, req.MatchThresholdPercentage)
+				}
+				if req.NotificationPromptCriteria != tc.expectedCriteriaPrompt {
+					t.Errorf("expected notification prompt criteria %s, got %s", tc.expectedCriteriaPrompt, req.NotificationPromptCriteria)
 				}
 
 				c.JSON(http.StatusOK, gin.H{"status": "ok"})

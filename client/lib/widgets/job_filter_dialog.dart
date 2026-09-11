@@ -70,14 +70,15 @@ class _JobFilterDialogState extends State<JobFilterDialog> {
   late String _matchScope;
   late double _minScore;
   late double _maxScore;
-  late int? _recencyDays;
+  late int? _recencyHours;
+  late String _customUnit;
   late String _viewMode;
   late String _workModel;
   late String _applicationStatus;
   late String _sortBy;
-  late TextEditingController _customDaysController;
+  late TextEditingController _customTimeController;
 
-  final List<int?> _recencyPresets = [null, 1, 2, 3, 7, 14];
+  final List<int?> _recencyPresets = [null, 6, 12, 24, 48, 72, 168, 336];
 
   @override
   void initState() {
@@ -86,22 +87,23 @@ class _JobFilterDialogState extends State<JobFilterDialog> {
     _matchScope = initial.matchScope;
     _minScore = initial.minScore.toDouble().clamp(0.0, 100.0);
     _maxScore = initial.maxScore.toDouble().clamp(0.0, 100.0);
-    _recencyDays = initial.recencyDays;
+    _recencyHours = initial.recencyHours;
+    _customUnit = (_recencyHours != null && _recencyHours! % 24 == 0 && _recencyHours! >= 24) ? 'days' : 'hours';
     _viewMode = initial.viewMode;
     _workModel = initial.workModel;
     _applicationStatus = initial.applicationStatus;
     _sortBy = initial.sortBy;
 
-    final isPreset = _recencyPresets.contains(_recencyDays);
-    final initialText = (!isPreset && _recencyDays != null && _recencyDays! > 0)
-        ? _recencyDays.toString()
+    final isPreset = _recencyPresets.contains(_recencyHours);
+    final initialText = (!isPreset && _recencyHours != null && _recencyHours! > 0)
+        ? (_customUnit == 'days' ? (_recencyHours! ~/ 24).toString() : _recencyHours.toString())
         : '';
-    _customDaysController = TextEditingController(text: initialText);
+    _customTimeController = TextEditingController(text: initialText);
   }
 
   @override
   void dispose() {
-    _customDaysController.dispose();
+    _customTimeController.dispose();
     super.dispose();
   }
 
@@ -110,22 +112,31 @@ class _JobFilterDialogState extends State<JobFilterDialog> {
       _matchScope = 'all';
       _minScore = 0.0;
       _maxScore = 100.0;
-      _recencyDays = null;
+      _recencyHours = null;
       _viewMode = 'all';
       _workModel = 'all';
       _applicationStatus = 'all';
       _sortBy = 'score_desc';
-      _customDaysController.clear();
+      _customTimeController.clear();
     });
   }
 
+  void _updateCustomRecency(String text) {
+    final parsed = int.tryParse(text.trim());
+    if (parsed != null && parsed > 0) {
+      setState(() {
+        _recencyHours = _customUnit == 'days' ? parsed * 24 : parsed;
+      });
+    }
+  }
+
   void _handleApply() {
-    int? finalDays = _recencyDays;
-    final customText = _customDaysController.text.trim();
+    int? finalHours = _recencyHours;
+    final customText = _customTimeController.text.trim();
     if (customText.isNotEmpty) {
       final parsed = int.tryParse(customText);
       if (parsed != null && parsed > 0) {
-        finalDays = parsed;
+        finalHours = _customUnit == 'days' ? parsed * 24 : parsed;
       }
     }
 
@@ -133,7 +144,7 @@ class _JobFilterDialogState extends State<JobFilterDialog> {
       matchScope: _matchScope,
       minScore: _minScore.toInt(),
       maxScore: _maxScore.toInt(),
-      recencyDays: () => finalDays,
+      recencyHours: () => finalHours,
       viewMode: _viewMode,
       workModel: _workModel,
       applicationStatus: _applicationStatus,
@@ -375,12 +386,14 @@ class _JobFilterDialogState extends State<JobFilterDialog> {
 
   Widget _buildRecencySelector() {
     final presets = [
-      {'days': null, 'label': 'Any Time'},
-      {'days': 1, 'label': 'Today (24h)'},
-      {'days': 2, 'label': '2 Days Ago'},
-      {'days': 3, 'label': '3 Days Ago'},
-      {'days': 7, 'label': 'Past Week (7d)'},
-      {'days': 14, 'label': 'Past 2 Weeks (14d)'},
+      {'hours': null, 'label': 'Any Time'},
+      {'hours': 6, 'label': '6 Hours'},
+      {'hours': 12, 'label': '12 Hours'},
+      {'hours': 24, 'label': '24 Hours (1d)'},
+      {'hours': 48, 'label': '2 Days'},
+      {'hours': 72, 'label': '3 Days'},
+      {'hours': 168, 'label': 'Past Week (7d)'},
+      {'hours': 336, 'label': 'Past 2 Weeks (14d)'},
     ];
 
     return Column(
@@ -390,8 +403,8 @@ class _JobFilterDialogState extends State<JobFilterDialog> {
           spacing: 8,
           runSpacing: 8,
           children: presets.map((p) {
-            final daysVal = p['days'] as int?;
-            final isSelected = _recencyDays == daysVal && _customDaysController.text.isEmpty;
+            final hoursVal = p['hours'] as int?;
+            final isSelected = _recencyHours == hoursVal && _customTimeController.text.isEmpty;
             return ChoiceChip(
               label: Text(p['label'] as String),
               selected: isSelected,
@@ -404,8 +417,8 @@ class _JobFilterDialogState extends State<JobFilterDialog> {
               onSelected: (selected) {
                 if (selected) {
                   setState(() {
-                    _recencyDays = daysVal;
-                    _customDaysController.clear();
+                    _recencyHours = hoursVal;
+                    _customTimeController.clear();
                   });
                 }
               },
@@ -421,30 +434,40 @@ class _JobFilterDialogState extends State<JobFilterDialog> {
             ),
             const SizedBox(width: 8),
             SizedBox(
-              width: 90,
+              width: 80,
               height: 36,
               child: TextField(
-                controller: _customDaysController,
+                controller: _customTimeController,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
-                  hintText: 'e.g. 5',
+                  hintText: 'e.g. 8',
                   contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
                 style: const TextStyle(fontSize: 13),
                 onChanged: (val) {
-                  final parsed = int.tryParse(val.trim());
-                  if (parsed != null && parsed > 0) {
-                    setState(() => _recencyDays = parsed);
-                  }
+                  _updateCustomRecency(val);
                 },
               ),
             ),
-            const SizedBox(width: 6),
-            const Text(
-              'days ago',
-              style: TextStyle(fontSize: 12, color: AppColors.onSurfaceVariant),
+            const SizedBox(width: 8),
+            DropdownButton<String>(
+              value: _customUnit,
+              isDense: true,
+              underline: const SizedBox(),
+              items: const [
+                DropdownMenuItem(value: 'hours', child: Text('hours ago', style: TextStyle(fontSize: 12))),
+                DropdownMenuItem(value: 'days', child: Text('days ago', style: TextStyle(fontSize: 12))),
+              ],
+              onChanged: (newUnit) {
+                if (newUnit != null) {
+                  setState(() {
+                    _customUnit = newUnit;
+                    _updateCustomRecency(_customTimeController.text);
+                  });
+                }
+              },
             ),
           ],
         ),

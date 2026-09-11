@@ -54,6 +54,7 @@ var schemaQueries = []string{
 		master_cv_text TEXT,
 		bio_experience_text TEXT,
 		country TEXT DEFAULT '',
+		notification_prompt_criteria TEXT DEFAULT '',
 		custom_form_answers JSONB DEFAULT '{}'::jsonb,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`,
@@ -360,6 +361,7 @@ var schemaQueries = []string{
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS fcm_token TEXT;`,
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS research_patents JSONB DEFAULT '[]'::jsonb;`,
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS open_source_contributions JSONB DEFAULT '[]'::jsonb;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS notification_prompt_criteria TEXT DEFAULT '';`,
 }
 
 // InitSchema executes the queries in sequence.

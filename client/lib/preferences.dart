@@ -151,6 +151,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   int _targetCoverLetterPages = 1;
   bool _matchThresholdNotificationEnabled = false;
   int _matchThresholdPercentage = 80;
+  late TextEditingController _notificationCriteriaController;
 
   @override
   void initState() {
@@ -164,6 +165,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     _overleafProjectController = TextEditingController(text: "job_applications");
     _resumeTemplateController = TextEditingController(text: "templates/resume.tex");
     _coverLetterTemplateController = TextEditingController(text: "templates/cover_letter.tex");
+    _notificationCriteriaController = TextEditingController();
     _baseSalary = 0.0;
     _equityExpectation = "";
 
@@ -256,6 +258,9 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
         if (apiPref["match_threshold_percentage"] != null && (apiPref["match_threshold_percentage"] as num) > 0) {
           _matchThresholdPercentage = (apiPref["match_threshold_percentage"] as num).toInt().clamp(50, 100);
         }
+        if (apiPref["notification_prompt_criteria"] != null) {
+          _notificationCriteriaController.text = apiPref["notification_prompt_criteria"].toString();
+        }
       });
     }
 
@@ -286,6 +291,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     _overleafProjectController.dispose();
     _resumeTemplateController.dispose();
     _coverLetterTemplateController.dispose();
+    _notificationCriteriaController.dispose();
     super.dispose();
   }
 
@@ -1459,6 +1465,52 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
                 Text("95% (Strict)", style: TextStyle(fontSize: 11, color: AppColors.onSurfaceVariant)),
               ],
             ),
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 12),
+            const Text(
+              "CUSTOM NOTIFICATION CRITERIA (PROMPT)",
+              style: TextStyle(
+                fontFamily: "Geist",
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                letterSpacing: 0.5,
+                color: AppColors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              "Optional criteria prompt evaluated by AI matcher. Only jobs satisfying this prompt will trigger push alerts.",
+              style: TextStyle(
+                fontSize: 12,
+                color: AppColors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _notificationCriteriaController,
+              maxLines: 2,
+              style: const TextStyle(fontSize: 13),
+              decoration: InputDecoration(
+                hintText: "e.g. Only notify if 100% remote and mentions Kubernetes or Go",
+                hintStyle: const TextStyle(fontSize: 12, color: AppColors.outlineVariant),
+                filled: true,
+                fillColor: AppColors.surfaceContainerLow,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: AppColors.outlineVariant),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: AppColors.outlineVariant),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+                ),
+              ),
+            ),
           ],
         ],
       ),
@@ -1504,6 +1556,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             "target_cover_letter_pages": _targetCoverLetterPages,
             "match_threshold_notification_enabled": _matchThresholdNotificationEnabled,
             "match_threshold_percentage": _matchThresholdPercentage,
+            "notification_prompt_criteria": _notificationCriteriaController.text.trim(),
           });
 
           if (!mounted) return;

@@ -138,12 +138,17 @@ void main() {
 
     test('filters by recency in days correctly', () {
       const past24Hours = JobFilterState(recencyDays: 1);
+      expect(past24Hours.recencyHours, equals(24));
       expect(past24Hours.matchesJob(highMatchedJob), isTrue);
       expect(past24Hours.matchesJob(unmatchedJob), isFalse);
 
       const past7Days = JobFilterState(recencyDays: 7);
+      expect(past7Days.recencyHours, equals(168));
       expect(past7Days.matchesJob(highMatchedJob), isTrue);
       expect(past7Days.matchesJob(unmatchedJob), isTrue);
+
+      const subDayHours = JobFilterState(recencyHours: 6);
+      expect(subDayHours.recencyHours, equals(6));
     });
 
     test('filters by remote work model correctly', () {
