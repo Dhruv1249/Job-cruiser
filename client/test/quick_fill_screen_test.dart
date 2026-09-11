@@ -69,7 +69,7 @@ void main() {
         }
       ],
       "bio_experience_text": "Experienced software engineer specializing in scalable distributed backends.",
-      "skills": ["Go", "Flutter", "PostgreSQL", "Docker", "Kubernetes"],
+      "skills": ["Go", "Flutter", "PostgreSQL", "Docker", "Kubernetes", "Redis", "Kafka"],
       "experiences": [
         {
           "company": "Cruiser Tech",
@@ -245,6 +245,86 @@ void main() {
 
       expect(find.text("Field Label *"), findsOneWidget);
       expect(find.text("Value to Copy *"), findsOneWidget);
+    });
+
+    testWidgets("displays More button on long content and opens view dialog", (tester) async {
+      tester.view.physicalSize = const Size(1280, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: QuickFillScreen(
+            initialProfileData: mockProfilePreferences,
+            onSavePreferences: (_) async => true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final moreButtonFinder = find.text("More");
+      expect(moreButtonFinder, findsWidgets);
+
+      await tester.ensureVisible(moreButtonFinder.first);
+      await tester.tap(moreButtonFinder.first);
+      await tester.pumpAndSettle();
+
+      expect(find.text("Close"), findsOneWidget);
+      expect(find.text("Copy Value"), findsOneWidget);
+    });
+
+    testWidgets("allows editing and deleting any field including prefilled ones", (tester) async {
+      tester.view.physicalSize = const Size(1280, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: QuickFillScreen(
+            initialProfileData: mockProfilePreferences,
+            onSavePreferences: (_) async => true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final editIconButtons = find.byIcon(Icons.edit_outlined);
+      expect(editIconButtons, findsWidgets);
+
+      await tester.tap(editIconButtons.first);
+      await tester.pumpAndSettle();
+
+      expect(find.text("Cancel"), findsOneWidget);
+      expect(find.text("Save"), findsOneWidget);
+
+      final valueFieldFinder = find.widgetWithText(TextField, "Dhruv Sharma");
+      expect(valueFieldFinder, findsOneWidget);
+      await tester.enterText(valueFieldFinder, "Dhruv Sharma Senior");
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+      await tester.tap(find.text("Save"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Dhruv Sharma Senior"), findsWidgets);
+
+      final deleteIconButtons = find.byIcon(Icons.delete_outline);
+      expect(deleteIconButtons, findsWidgets);
+
+      await tester.tap(deleteIconButtons.first);
+      await tester.pumpAndSettle();
+
+      expect(find.text("Delete Field"), findsOneWidget);
+      await tester.tap(find.text("Delete"));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text("Dhruv Sharma Senior"), findsNothing);
+      expect(find.text("Undo"), findsOneWidget);
+
+      await tester.tap(find.text("Undo"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Dhruv Sharma"), findsWidgets);
     });
   });
 }

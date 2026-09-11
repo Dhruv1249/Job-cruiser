@@ -345,7 +345,7 @@ class _JobCruiserShellState extends State<JobCruiserShell> with WidgetsBindingOb
           const SizedBox(width: 8),
           _buildDesktopNavItem(1, 'CRM Tracker', Icons.work_history_outlined, Icons.work_history),
           const SizedBox(width: 8),
-          _buildDesktopNavItem(2, 'Quick Fill', Icons.content_paste_go_outlined, Icons.content_paste_go),
+          _buildDesktopNavItem(2, 'Quick Fill', Icons.bolt_outlined, Icons.bolt),
           const SizedBox(width: 8),
           _buildDesktopNavItem(3, 'Profile & Preferences', Icons.account_circle_outlined, Icons.account_circle),
           const Spacer(),
@@ -470,8 +470,8 @@ class _JobCruiserShellState extends State<JobCruiserShell> with WidgetsBindingOb
             label: 'Tracker',
           ),
           NavigationDestination(
-            icon: Icon(Icons.content_paste_go_outlined),
-            selectedIcon: Icon(Icons.content_paste_go),
+            icon: Icon(Icons.bolt_outlined),
+            selectedIcon: Icon(Icons.bolt),
             label: 'Quick Fill',
           ),
           NavigationDestination(

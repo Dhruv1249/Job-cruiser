@@ -8,10 +8,12 @@ import "../services/api_service.dart";
 /// Screen providing single-tap clipboard copy targets for job application forms and custom user answers.
 class QuickFillScreen extends StatefulWidget {
   final Map<String, dynamic>? initialProfileData;
+  final Future<bool> Function(Map<String, dynamic> payload)? onSavePreferences;
 
   const QuickFillScreen({
     super.key,
     this.initialProfileData,
+    this.onSavePreferences,
   });
 
   @override
@@ -30,6 +32,8 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
   Map<String, dynamic> _profileData = {};
   Map<String, dynamic> _customFormAnswers = {};
   List<Map<String, dynamic>> _customFields = [];
+  Map<String, dynamic> _fieldOverrides = {};
+  Set<String> _deletedFieldIds = {};
 
   final List<String> _categoryFilterOptions = const [
     "All",
@@ -54,8 +58,17 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
               .map((entry) => Map<String, dynamic>.from(entry))
               .toList()
           : <Map<String, dynamic>>[];
+      final rawOverrides = rawCustomAnswers["field_overrides"] is Map
+          ? Map<String, dynamic>.from(rawCustomAnswers["field_overrides"] as Map)
+          : <String, dynamic>{};
+      final rawDeletedIds = rawCustomAnswers["deleted_field_ids"] is List
+          ? Set<String>.from((rawCustomAnswers["deleted_field_ids"] as List).map((entry) => entry.toString()))
+          : <String>{};
+
       _customFormAnswers = rawCustomAnswers;
       _customFields = rawCustomFields;
+      _fieldOverrides = rawOverrides;
+      _deletedFieldIds = rawDeletedIds;
       _isLoading = false;
     } else {
       _loadPreferences();
@@ -95,10 +108,20 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
               .toList()
           : <Map<String, dynamic>>[];
 
+      final rawOverrides = rawCustomAnswers["field_overrides"] is Map
+          ? Map<String, dynamic>.from(rawCustomAnswers["field_overrides"] as Map)
+          : <String, dynamic>{};
+
+      final rawDeletedIds = rawCustomAnswers["deleted_field_ids"] is List
+          ? Set<String>.from((rawCustomAnswers["deleted_field_ids"] as List).map((entry) => entry.toString()))
+          : <String>{};
+
       setState(() {
         _profileData = data;
         _customFormAnswers = rawCustomAnswers;
         _customFields = rawCustomFields;
+        _fieldOverrides = rawOverrides;
+        _deletedFieldIds = rawDeletedIds;
         _isLoading = false;
       });
     } else {
@@ -111,19 +134,25 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
   Future<void> _persistCustomFormAnswers() async {
     final updatedPayload = Map<String, dynamic>.from(_customFormAnswers);
     updatedPayload["custom_fields"] = _customFields;
+    updatedPayload["field_overrides"] = _fieldOverrides;
+    updatedPayload["deleted_field_ids"] = _deletedFieldIds.toList();
 
     final Map<String, dynamic> payload = Map<String, dynamic>.from(_profileData);
     payload["custom_form_answers"] = updatedPayload;
 
-    await _apiService.savePreferences(payload);
+    if (widget.onSavePreferences != null) {
+      await widget.onSavePreferences!(payload);
+    } else {
+      await _apiService.savePreferences(payload);
+    }
   }
 
   List<QuickFillItem> _buildAllItems() {
-    final List<QuickFillItem> items = [];
+    final List<QuickFillItem> baseItems = [];
 
     final fullName = (_profileData["full_name"] ?? "").toString().trim();
     if (fullName.isNotEmpty && fullName != "User") {
-      items.add(QuickFillItem(
+      baseItems.add(QuickFillItem(
         id: "profile_full_name",
         label: "Full Name",
         value: fullName,
@@ -132,7 +161,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
       final nameTokens = fullName.split(" ").where((token) => token.trim().isNotEmpty).toList();
       if (nameTokens.isNotEmpty) {
-        items.add(QuickFillItem(
+        baseItems.add(QuickFillItem(
           id: "profile_first_name",
           label: "First Name",
           value: nameTokens.first,
@@ -140,7 +169,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
         ));
       }
       if (nameTokens.length > 1) {
-        items.add(QuickFillItem(
+        baseItems.add(QuickFillItem(
           id: "profile_last_name",
           label: "Last Name",
           value: nameTokens.sublist(1).join(" "),
@@ -151,7 +180,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
     final email = (_profileData["email"] ?? "").toString().trim();
     if (email.isNotEmpty) {
-      items.add(QuickFillItem(
+      baseItems.add(QuickFillItem(
         id: "profile_email",
         label: "Email Address",
         value: email,
@@ -161,7 +190,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
     final phone = (_profileData["phone"] ?? "").toString().trim();
     if (phone.isNotEmpty) {
-      items.add(QuickFillItem(
+      baseItems.add(QuickFillItem(
         id: "profile_phone",
         label: "Phone Number",
         value: phone,
@@ -171,7 +200,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
     final location = (_profileData["location"] ?? "").toString().trim();
     if (location.isNotEmpty) {
-      items.add(QuickFillItem(
+      baseItems.add(QuickFillItem(
         id: "profile_location",
         label: "Current Location",
         value: location,
@@ -181,7 +210,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
     final country = (_profileData["country"] ?? "").toString().trim();
     if (country.isNotEmpty) {
-      items.add(QuickFillItem(
+      baseItems.add(QuickFillItem(
         id: "profile_country",
         label: "Country",
         value: country,
@@ -191,7 +220,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
     final linkedIn = (_profileData["linkedin_url"] ?? "").toString().trim();
     if (linkedIn.isNotEmpty) {
-      items.add(QuickFillItem(
+      baseItems.add(QuickFillItem(
         id: "link_linkedin",
         label: "LinkedIn Profile URL",
         value: linkedIn,
@@ -201,7 +230,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
     final github = (_profileData["github_url"] ?? "").toString().trim();
     if (github.isNotEmpty) {
-      items.add(QuickFillItem(
+      baseItems.add(QuickFillItem(
         id: "link_github",
         label: "GitHub Profile URL",
         value: github,
@@ -211,7 +240,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
     final portfolio = (_profileData["portfolio_url"] ?? "").toString().trim();
     if (portfolio.isNotEmpty) {
-      items.add(QuickFillItem(
+      baseItems.add(QuickFillItem(
         id: "link_portfolio",
         label: "Portfolio / Website URL",
         value: portfolio,
@@ -221,14 +250,14 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
     if (_profileData["custom_links"] is List) {
       final customLinks = _profileData["custom_links"] as List;
-      for (int i = 0; i < customLinks.length; i++) {
-        final linkMap = customLinks[i];
+      for (int index = 0; index < customLinks.length; index++) {
+        final linkMap = customLinks[index];
         if (linkMap is Map) {
           final label = linkMap["label"]?.toString().trim() ?? "Custom Link";
           final url = linkMap["url"]?.toString().trim() ?? "";
           if (url.isNotEmpty) {
-            items.add(QuickFillItem(
-              id: "link_custom_$i",
+            baseItems.add(QuickFillItem(
+              id: "link_custom_$index",
               label: label,
               value: url,
               category: "Socials & Links",
@@ -245,7 +274,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
         final company = firstExperience["company"]?.toString().trim() ?? "";
         final duration = firstExperience["duration"]?.toString().trim() ?? "";
         if (role.isNotEmpty && company.isNotEmpty) {
-          items.add(QuickFillItem(
+          baseItems.add(QuickFillItem(
             id: "exp_current_role",
             label: "Current / Most Recent Role",
             value: "$role at $company",
@@ -253,7 +282,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
           ));
         }
         if (duration.isNotEmpty) {
-          items.add(QuickFillItem(
+          baseItems.add(QuickFillItem(
             id: "exp_current_duration",
             label: "Recent Role Duration",
             value: duration,
@@ -270,17 +299,16 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
         final institution = firstEducation["institution"]?.toString().trim() ?? "";
         final year = firstEducation["year"]?.toString().trim() ?? "";
         final grade = firstEducation["grade"]?.toString().trim() ?? "";
-
         if (degree.isNotEmpty) {
-          items.add(QuickFillItem(
+          baseItems.add(QuickFillItem(
             id: "edu_degree",
-            label: "Degree & Major",
+            label: "Highest Degree",
             value: degree,
             category: "Experience & Education",
           ));
         }
         if (institution.isNotEmpty) {
-          items.add(QuickFillItem(
+          baseItems.add(QuickFillItem(
             id: "edu_institution",
             label: "University / Institution",
             value: institution,
@@ -288,15 +316,15 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
           ));
         }
         if (year.isNotEmpty) {
-          items.add(QuickFillItem(
-            id: "edu_graduation_year",
-            label: "Graduation Year / Period",
+          baseItems.add(QuickFillItem(
+            id: "edu_year",
+            label: "Graduation Year",
             value: year,
             category: "Experience & Education",
           ));
         }
         if (grade.isNotEmpty) {
-          items.add(QuickFillItem(
+          baseItems.add(QuickFillItem(
             id: "edu_gpa_grade",
             label: "GPA / Grade",
             value: grade,
@@ -307,8 +335,8 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
     }
 
     if (_profileData["skills"] is List && (_profileData["skills"] as List).isNotEmpty) {
-      final skillsList = (_profileData["skills"] as List).map((sk) => sk.toString()).toList();
-      items.add(QuickFillItem(
+      final skillsList = (_profileData["skills"] as List).map((entry) => entry.toString()).toList();
+      baseItems.add(QuickFillItem(
         id: "skills_summary",
         label: "Technical Skills",
         value: skillsList.join(", "),
@@ -319,7 +347,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
     final bioSummary = (_profileData["bio_experience_text"] ?? _profileData["bio_summary"] ?? "").toString().trim();
     if (bioSummary.isNotEmpty && bioSummary != "bio") {
-      items.add(QuickFillItem(
+      baseItems.add(QuickFillItem(
         id: "bio_summary",
         label: "Bio / Elevator Pitch",
         value: bioSummary,
@@ -329,7 +357,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
     }
 
     final workAuthVal = _customFormAnswers["work_authorization"]?.toString() ?? "Legally authorized to work without sponsorship";
-    items.add(QuickFillItem(
+    baseItems.add(QuickFillItem(
       id: "qa_work_authorization",
       label: "Work Authorization",
       value: workAuthVal,
@@ -337,7 +365,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
     ));
 
     final visaSponsorshipVal = _customFormAnswers["visa_sponsorship"]?.toString() ?? "No, I do not require visa sponsorship";
-    items.add(QuickFillItem(
+    baseItems.add(QuickFillItem(
       id: "qa_visa_sponsorship",
       label: "Visa Sponsorship Requirement",
       value: visaSponsorshipVal,
@@ -345,7 +373,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
     ));
 
     final noticePeriodVal = _customFormAnswers["notice_period"]?.toString() ?? "Immediate (available within 1-2 weeks)";
-    items.add(QuickFillItem(
+    baseItems.add(QuickFillItem(
       id: "qa_notice_period",
       label: "Notice Period / Start Date",
       value: noticePeriodVal,
@@ -354,7 +382,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
     final expectedSalaryVal = _customFormAnswers["expected_salary"]?.toString() ?? "";
     if (expectedSalaryVal.isNotEmpty) {
-      items.add(QuickFillItem(
+      baseItems.add(QuickFillItem(
         id: "qa_expected_salary",
         label: "Expected Salary",
         value: expectedSalaryVal,
@@ -364,7 +392,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
     final currentSalaryVal = _customFormAnswers["current_salary"]?.toString() ?? "";
     if (currentSalaryVal.isNotEmpty) {
-      items.add(QuickFillItem(
+      baseItems.add(QuickFillItem(
         id: "qa_current_salary",
         label: "Current Salary",
         value: currentSalaryVal,
@@ -373,7 +401,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
     }
 
     final relocationVal = _customFormAnswers["willing_to_relocate"]?.toString() ?? "Yes, open to relocation";
-    items.add(QuickFillItem(
+    baseItems.add(QuickFillItem(
       id: "qa_willing_to_relocate",
       label: "Willingness to Relocate",
       value: relocationVal,
@@ -387,7 +415,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
       final category = customEntry["category"]?.toString() ?? "Custom Answers";
 
       if (label.isNotEmpty && value.isNotEmpty) {
-        items.add(QuickFillItem(
+        baseItems.add(QuickFillItem(
           id: id,
           label: label,
           value: value,
@@ -398,7 +426,32 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
       }
     }
 
-    return items;
+    final List<QuickFillItem> finalItems = [];
+    for (final item in baseItems) {
+      if (_deletedFieldIds.contains(item.id)) {
+        continue;
+      }
+
+      if (_fieldOverrides.containsKey(item.id)) {
+        final overrideMap = _fieldOverrides[item.id];
+        if (overrideMap is Map) {
+          final overriddenLabel = overrideMap["label"]?.toString().trim();
+          final overriddenValue = overrideMap["value"]?.toString().trim();
+          final overriddenCategory = overrideMap["category"]?.toString().trim();
+
+          finalItems.add(item.copyWith(
+            label: (overriddenLabel != null && overriddenLabel.isNotEmpty) ? overriddenLabel : item.label,
+            value: (overriddenValue != null && overriddenValue.isNotEmpty) ? overriddenValue : item.value,
+            category: (overriddenCategory != null && overriddenCategory.isNotEmpty) ? overriddenCategory : item.category,
+          ));
+          continue;
+        }
+      }
+
+      finalItems.add(item);
+    }
+
+    return finalItems;
   }
 
   List<QuickFillItem> _getFilteredItems() {
@@ -455,17 +508,17 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
     );
   }
 
-  Future<void> _showAddOrEditCustomFieldDialog({Map<String, dynamic>? existingField, int? editIndex}) async {
-    final labelController = TextEditingController(text: existingField?["label"]?.toString() ?? "");
-    final valueController = TextEditingController(text: existingField?["value"]?.toString() ?? "");
-    String selectedDialogCategory = existingField?["category"]?.toString() ?? "Custom Answers";
+  Future<void> _showAddOrEditFieldDialog({QuickFillItem? existingItem}) async {
+    final labelController = TextEditingController(text: existingItem?.label ?? "");
+    final valueController = TextEditingController(text: existingItem?.value ?? "");
+    String selectedDialogCategory = existingItem?.category ?? "Custom Answers";
 
     final result = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setModalState) {
           return AlertDialog(
-            title: Text(existingField != null ? "Edit Field" : "Add Custom Field"),
+            title: Text(existingItem != null ? "Edit ${existingItem.label}" : "Add Custom Field"),
             content: SingleChildScrollView(
               child: SizedBox(
                 width: 440,
@@ -535,18 +588,41 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
     );
 
     if (result == true && mounted) {
-      final updatedMap = <String, dynamic>{
-        "id": existingField?["id"]?.toString() ?? "custom_${DateTime.now().millisecondsSinceEpoch}",
-        "label": labelController.text.trim(),
-        "value": valueController.text.trim(),
-        "category": selectedDialogCategory,
-      };
+      final newLabel = labelController.text.trim();
+      final newValue = valueController.text.trim();
 
       setState(() {
-        if (editIndex != null && editIndex >= 0 && editIndex < _customFields.length) {
-          _customFields[editIndex] = updatedMap;
+        if (existingItem == null) {
+          final newCustomField = <String, dynamic>{
+            "id": "custom_${DateTime.now().millisecondsSinceEpoch}",
+            "label": newLabel,
+            "value": newValue,
+            "category": selectedDialogCategory,
+          };
+          _customFields.add(newCustomField);
+        } else if (existingItem.isCustom) {
+          final existingIndex = _customFields.indexWhere((entry) => entry["id"]?.toString() == existingItem.id);
+          final updatedCustomField = <String, dynamic>{
+            "id": existingItem.id,
+            "label": newLabel,
+            "value": newValue,
+            "category": selectedDialogCategory,
+          };
+          if (existingIndex >= 0) {
+            _customFields[existingIndex] = updatedCustomField;
+          } else {
+            _customFields.add(updatedCustomField);
+          }
         } else {
-          _customFields.add(updatedMap);
+          _fieldOverrides[existingItem.id] = {
+            "label": newLabel,
+            "value": newValue,
+            "category": selectedDialogCategory,
+          };
+          if (existingItem.id.startsWith("qa_")) {
+            final questionKey = existingItem.id.replaceFirst("qa_", "");
+            _customFormAnswers[questionKey] = newValue;
+          }
         }
       });
 
@@ -557,28 +633,13 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
     valueController.dispose();
   }
 
-  Future<void> _showEditStandardQuestionDialog(QuickFillItem item) async {
-    final valueController = TextEditingController(text: item.value);
-
-    final result = await showDialog<bool>(
+  Future<void> _confirmDeleteField(QuickFillItem item) async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text("Edit ${item.label}"),
-        content: SizedBox(
-          width: 440,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: valueController,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  labelText: item.label,
-                  hintText: "Enter your preferred response...",
-                ),
-              ),
-            ],
-          ),
+        title: const Text("Delete Field"),
+        content: Text(
+          "Are you sure you want to remove \"${item.label}\" from Quick Fill?\n\nThis will only remove it from your copy vault without affecting your underlying profile records.",
         ),
         actions: [
           TextButton(
@@ -586,40 +647,173 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
             child: const Text("Cancel"),
           ),
           ElevatedButton(
-            onPressed: () {
-              if (valueController.text.trim().isEmpty) return;
-              Navigator.of(dialogContext).pop(true);
-            },
-            child: const Text("Save"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text("Delete"),
           ),
         ],
       ),
     );
 
-    if (result == true && mounted) {
-      final questionKey = item.id.replaceFirst("qa_", "");
+    if (confirmed == true && mounted) {
       setState(() {
-        _customFormAnswers[questionKey] = valueController.text.trim();
+        if (item.isCustom) {
+          _customFields.removeWhere((entry) => entry["id"]?.toString() == item.id);
+        } else {
+          _deletedFieldIds.add(item.id);
+          _fieldOverrides.remove(item.id);
+        }
       });
+
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Removed "${item.label}" from Quick Fill'),
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          action: SnackBarAction(
+            label: "Undo",
+            onPressed: () async {
+              setState(() {
+                _deletedFieldIds.remove(item.id);
+              });
+              await _persistCustomFormAnswers();
+            },
+          ),
+        ),
+      );
 
       await _persistCustomFormAnswers();
     }
-
-    valueController.dispose();
   }
 
-  Future<void> _deleteCustomField(String fieldId) async {
-    setState(() {
-      _customFields.removeWhere((entry) => entry["id"]?.toString() == fieldId);
-    });
-    await _persistCustomFormAnswers();
+  Future<void> _showRestoreDefaultsDialog() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text("Restore Default Fields"),
+        content: const Text(
+          "This will restore all deleted pre-filled fields and reset field overrides back to their original values. Custom fields you created will not be touched.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text("Restore"),
+          ),
+        ],
+      ),
+    );
 
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Custom field removed"),
-        duration: Duration(seconds: 1),
-        behavior: SnackBarBehavior.floating,
+    if (confirmed == true && mounted) {
+      setState(() {
+        _deletedFieldIds.clear();
+        _fieldOverrides.clear();
+      });
+
+      await _persistCustomFormAnswers();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Default fields restored"),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _showViewFullContentDialog(QuickFillItem item) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              _getCategoryIcon(item.category),
+              size: 20,
+              color: AppColors.primary,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                item.label,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                item.category,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 520,
+          child: Container(
+            constraints: const BoxConstraints(maxHeight: 380),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.outlineVariant),
+            ),
+            child: SingleChildScrollView(
+              child: SelectableText(
+                item.value,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontFamily: "monospace",
+                  height: 1.5,
+                  color: AppColors.onSurface,
+                ),
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text("Close"),
+          ),
+          OutlinedButton.icon(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              _showAddOrEditFieldDialog(existingItem: item);
+            },
+            icon: const Icon(Icons.edit_outlined, size: 16),
+            label: const Text("Edit"),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              _copyToClipboard(item);
+              Navigator.of(dialogContext).pop();
+            },
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text("Copy Value"),
+          ),
+        ],
       ),
     );
   }
@@ -649,25 +843,43 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
                     const SizedBox(height: 12),
                     _buildCategoryFilterBar(),
                     const SizedBox(height: 20),
-                    _buildItemsListOrGrid(isWide),
+                    _buildItemsContent(isWide),
                   ],
                 ),
               ),
             ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showAddOrEditCustomFieldDialog(),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.add),
-        label: const Text("Add Field"),
-      ),
+      floatingActionButton: isWide
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => _showAddOrEditFieldDialog(),
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text("Add Field"),
+            ),
     );
   }
 
   Widget _buildHeader(bool isWide) {
+    final hasModifications = _deletedFieldIds.isNotEmpty || _fieldOverrides.isNotEmpty;
+
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: AppColors.primary.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(
+            Icons.bolt,
+            color: AppColors.primary,
+            size: 24,
+          ),
+        ),
+        const SizedBox(width: 14),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -691,12 +903,21 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
             ],
           ),
         ),
-        if (isWide)
+        if (isWide) ...[
+          if (hasModifications) ...[
+            TextButton.icon(
+              onPressed: _showRestoreDefaultsDialog,
+              icon: const Icon(Icons.restore, size: 16),
+              label: const Text("Restore Defaults"),
+            ),
+            const SizedBox(width: 8),
+          ],
           OutlinedButton.icon(
-            onPressed: () => _showAddOrEditCustomFieldDialog(),
+            onPressed: () => _showAddOrEditFieldDialog(),
             icon: const Icon(Icons.add_circle_outline, size: 18),
             label: const Text("Add Custom Field"),
           ),
+        ],
       ],
     );
   }
@@ -731,45 +952,58 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
   }
 
   Widget _buildCategoryFilterBar() {
+    final hasModifications = _deletedFieldIds.isNotEmpty || _fieldOverrides.isNotEmpty;
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
-        children: _categoryFilterOptions.map((category) {
-          final isSelected = _selectedCategory == category;
-          return Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: ChoiceChip(
-              label: Text(category),
-              selected: isSelected,
-              onSelected: (selected) {
-                if (selected) {
-                  setState(() {
-                    _selectedCategory = category;
-                  });
-                }
-              },
-              labelStyle: TextStyle(
-                fontSize: 12,
-                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                color: isSelected ? Colors.white : AppColors.onSurfaceVariant,
-              ),
-              selectedColor: AppColors.primary,
-              backgroundColor: AppColors.surfaceContainerLowest,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-                side: BorderSide(
-                  color: isSelected ? AppColors.primary : AppColors.outlineVariant,
+        children: [
+          ..._categoryFilterOptions.map((category) {
+            final isSelected = _selectedCategory == category;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: ChoiceChip(
+                label: Text(category),
+                selected: isSelected,
+                onSelected: (selected) {
+                  if (selected) {
+                    setState(() {
+                      _selectedCategory = category;
+                    });
+                  }
+                },
+                labelStyle: TextStyle(
+                  fontSize: 12,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  color: isSelected ? Colors.white : AppColors.onSurfaceVariant,
                 ),
+                selectedColor: AppColors.primary,
+                backgroundColor: AppColors.surfaceContainerLowest,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  side: BorderSide(
+                    color: isSelected ? AppColors.primary : AppColors.outlineVariant,
+                  ),
+                ),
+                showCheckmark: false,
               ),
-              showCheckmark: false,
+            );
+          }),
+          if (!MediaQuery.of(context).size.width.isNegative && MediaQuery.of(context).size.width < 960 && hasModifications)
+            Padding(
+              padding: const EdgeInsets.only(left: 4.0),
+              child: ActionChip(
+                avatar: const Icon(Icons.restore, size: 14),
+                label: const Text("Restore Defaults", style: TextStyle(fontSize: 12)),
+                onPressed: _showRestoreDefaultsDialog,
+              ),
             ),
-          );
-        }).toList(),
+        ],
       ),
     );
   }
 
-  Widget _buildItemsListOrGrid(bool isWide) {
+  Widget _buildItemsContent(bool isWide) {
     final items = _getFilteredItems();
 
     if (items.isEmpty) {
@@ -777,20 +1011,21 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 48.0),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(Icons.content_paste_off, size: 48, color: AppColors.outline),
               const SizedBox(height: 12),
               Text(
                 _searchController.text.isNotEmpty
-                    ? 'No fields match "${_searchController.text}"'
-                    : "No fields available in this category.",
+                    ? 'No fields matching "${_searchController.text}"'
+                    : "No fields available in this category",
                 style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
                   color: AppColors.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               const Text(
                 "Tap 'Add Field' to create a custom answer for forms.",
                 style: TextStyle(fontSize: 13, color: AppColors.outline),
@@ -832,7 +1067,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
   Widget _buildItemCard(QuickFillItem item) {
     final isCopied = _copiedItemId == item.id;
-    final isStandardQuestion = item.id.startsWith("qa_");
+    final hasMoreContent = item.value.length > 70 || item.value.contains("\n");
 
     return Container(
       decoration: BoxDecoration(
@@ -860,6 +1095,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
             padding: const EdgeInsets.all(14.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -890,40 +1126,22 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (item.isCustom) ...[
-                          IconButton(
-                            icon: const Icon(Icons.edit_outlined, size: 16, color: AppColors.onSurfaceVariant),
-                            tooltip: "Edit field",
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            onPressed: () {
-                              final editIndex = _customFields.indexWhere((entry) => entry["id"]?.toString() == item.id);
-                              final existingMap = editIndex >= 0 ? _customFields[editIndex] : null;
-                              _showAddOrEditCustomFieldDialog(
-                                existingField: existingMap,
-                                editIndex: editIndex >= 0 ? editIndex : null,
-                              );
-                            },
-                          ),
-                          const SizedBox(width: 8),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline, size: 16, color: AppColors.error),
-                            tooltip: "Delete field",
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            onPressed: () => _deleteCustomField(item.id),
-                          ),
-                          const SizedBox(width: 8),
-                        ] else if (isStandardQuestion) ...[
-                          IconButton(
-                            icon: const Icon(Icons.edit_outlined, size: 16, color: AppColors.onSurfaceVariant),
-                            tooltip: "Edit answer",
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            onPressed: () => _showEditStandardQuestionDialog(item),
-                          ),
-                          const SizedBox(width: 8),
-                        ],
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined, size: 16, color: AppColors.onSurfaceVariant),
+                          tooltip: "Edit field",
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: () => _showAddOrEditFieldDialog(existingItem: item),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 16, color: AppColors.error),
+                          tooltip: "Delete field",
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: () => _confirmDeleteField(item),
+                        ),
+                        const SizedBox(width: 8),
                         AnimatedContainer(
                           duration: const Duration(milliseconds: 200),
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -964,15 +1182,53 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: AppColors.outlineVariant.withValues(alpha: 0.6)),
                   ),
-                  child: Text(
-                    item.value,
-                    maxLines: item.isMultiLine ? 4 : 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontFamily: "monospace",
-                      color: AppColors.onSurface,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        item.value,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontFamily: "monospace",
+                          color: AppColors.onSurface,
+                        ),
+                      ),
+                      if (hasMoreContent) ...[
+                        const SizedBox(height: 6),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: InkWell(
+                            onTap: () => _showViewFullContentDialog(item),
+                            borderRadius: BorderRadius.circular(4),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: const [
+                                  Text(
+                                    "More",
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
+                                  SizedBox(width: 2),
+                                  Icon(
+                                    Icons.unfold_more,
+                                    size: 13,
+                                    color: AppColors.primary,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ],
@@ -995,7 +1251,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
         return Icons.school_outlined;
       case "Custom Answers":
       default:
-        return Icons.assignment_outlined;
+        return Icons.tune_outlined;
     }
   }
 }
