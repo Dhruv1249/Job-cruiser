@@ -88,7 +88,7 @@ func LoadUserOverleafCredentials(
 			if decryptError != nil {
 				return nil, fmt.Errorf("failed decrypting overleaf token: %w", decryptError)
 			}
-			customSecret = decrypted
+			customSecret = strings.Trim(strings.TrimSpace(decrypted), "\"'")
 		} else {
 			return nil, errors.New("unencrypted access token stored in configuration")
 		}
@@ -99,7 +99,7 @@ func LoadUserOverleafCredentials(
 	}
 
 	return &UserOverleafCredentials{
-		DeploymentURL:           strings.TrimSpace(*deploymentURL),
+		DeploymentURL:           strings.TrimRight(strings.Trim(strings.TrimSpace(*deploymentURL), "\"'"), "/"),
 		CustomSecret:            customSecret,
 		ProjectName:             cleanProject,
 		ResumeTemplatePath:      cleanResumeTemplate,

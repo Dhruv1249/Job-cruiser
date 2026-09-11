@@ -941,7 +941,8 @@ func (h *PreferencesHandler) UpdateOverleafConfig(c *gin.Context) {
 	var encryptedToken *string
 	tokenEncrypted := false
 
-	cleanSecret := strings.TrimSpace(req.MCPSecret)
+	cleanSecret := strings.Trim(strings.TrimSpace(req.MCPSecret), "\"'")
+	cleanDeploymentURL := strings.TrimRight(strings.Trim(strings.TrimSpace(req.DeploymentURL), "\"'"), "/")
 	if cleanSecret == "" {
 		var existingSecret *string
 		_ = h.DB.QueryRow(context.Background(), `SELECT encrypted_access_token FROM user_overleaf_config WHERE user_id = $1`, userID).Scan(&existingSecret)
@@ -979,7 +980,7 @@ func (h *PreferencesHandler) UpdateOverleafConfig(c *gin.Context) {
 			updated_at = CURRENT_TIMESTAMP;
 	`
 
-	_, err := h.DB.Exec(context.Background(), query, userID, strings.TrimSpace(req.DeploymentURL), projectName, encryptedToken, tokenEncrypted, resumeTemplatePath, coverLetterTemplatePath)
+	_, err := h.DB.Exec(context.Background(), query, userID, cleanDeploymentURL, projectName, encryptedToken, tokenEncrypted, resumeTemplatePath, coverLetterTemplatePath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save open-overleaf configuration"})
 		return
@@ -1029,18 +1030,20 @@ func (h *PreferencesHandler) GetOverleafConfig(c *gin.Context) {
 		if tokenEncrypted && len(h.AESKey) == 32 {
 			decrypted, decErr := utils.DecryptToken(encryptedToken, h.AESKey)
 			if decErr == nil {
-				secret = decrypted
+				secret = strings.Trim(strings.TrimSpace(decrypted), "\"'")
 			} else {
-				secret = encryptedToken
+				secret = strings.Trim(strings.TrimSpace(encryptedToken), "\"'")
 			}
 		} else {
-			secret = encryptedToken
+			secret = strings.Trim(strings.TrimSpace(encryptedToken), "\"'")
 		}
 	}
 
+	cleanURL := strings.TrimRight(strings.Trim(strings.TrimSpace(url), "\"'"), "/")
+
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"deployment_url":             url,
+			"deployment_url":             cleanURL,
 			"project_name":               projectName,
 			"has_secret":                 encryptedToken != "",
 			"mcp_secret":                 secret,

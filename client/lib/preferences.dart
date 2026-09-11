@@ -266,18 +266,21 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
 
     final overleaf = await ApiService().fetchOverleafConfig();
     if (overleaf != null && mounted) {
+      final Map<String, dynamic> config = (overleaf["data"] is Map<String, dynamic>)
+          ? Map<String, dynamic>.from(overleaf["data"] as Map)
+          : overleaf;
       setState(() {
-        _overleafUrlController.text = overleaf["deployment_url"] ?? "";
-        _overleafProjectController.text = overleaf["project_name"] ?? "job_applications";
-        if (overleaf["resume_template_path"] != null && (overleaf["resume_template_path"] as String).isNotEmpty) {
-          _resumeTemplateController.text = overleaf["resume_template_path"] as String;
+        _overleafUrlController.text = config["deployment_url"] ?? "";
+        _overleafProjectController.text = config["project_name"] ?? "job_applications";
+        if (config["resume_template_path"] != null && (config["resume_template_path"] as String).isNotEmpty) {
+          _resumeTemplateController.text = config["resume_template_path"] as String;
         }
-        if (overleaf["cover_letter_template_path"] != null && (overleaf["cover_letter_template_path"] as String).isNotEmpty) {
-          _coverLetterTemplateController.text = overleaf["cover_letter_template_path"] as String;
+        if (config["cover_letter_template_path"] != null && (config["cover_letter_template_path"] as String).isNotEmpty) {
+          _coverLetterTemplateController.text = config["cover_letter_template_path"] as String;
         }
-        _hasConfiguredSecret = overleaf["has_secret"] == true;
-        if (overleaf["mcp_secret"] != null && (overleaf["mcp_secret"] as String).isNotEmpty) {
-          _overleafSecretController.text = overleaf["mcp_secret"] as String;
+        _hasConfiguredSecret = config["has_secret"] == true;
+        if (config["mcp_secret"] != null && (config["mcp_secret"] as String).isNotEmpty) {
+          _overleafSecretController.text = config["mcp_secret"] as String;
         }
       });
     }
@@ -663,8 +666,10 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
 
                 if (!mounted) return;
                 if (ok && secret.isNotEmpty) {
-                  setState(() => _hasConfiguredSecret = true);
-                  _overleafSecretController.clear();
+                  setState(() {
+                    _hasConfiguredSecret = true;
+                    _overleafSecretController.text = secret;
+                  });
                 }
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(

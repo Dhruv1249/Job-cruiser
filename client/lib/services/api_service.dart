@@ -645,7 +645,11 @@ class ApiService {
     try {
       final response = await _dio.get('/overleaf/config');
       if (response.data is Map<String, dynamic>) {
-        return response.data as Map<String, dynamic>;
+        final Map<String, dynamic> rawMap = response.data as Map<String, dynamic>;
+        if (rawMap['data'] is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(rawMap['data'] as Map);
+        }
+        return rawMap;
       }
       return null;
     } catch (e) {
