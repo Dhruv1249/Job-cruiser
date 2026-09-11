@@ -32,6 +32,7 @@ func TestMatchedJobResponseSerialization(t *testing.T) {
 		IsViewed:          false,
 		ApplicationStatus: "unapplied",
 		IsNew:             true,
+		HasTailoredDocs:   true,
 	}
 
 	jsonBytes, err := json.Marshal(response)
@@ -51,6 +52,15 @@ func TestMatchedJobResponseSerialization(t *testing.T) {
 
 	if scrapedAtValue != "2026-08-12 10:00:00" {
 		t.Errorf("expected scraped_at '2026-08-12 10:00:00', got '%v'", scrapedAtValue)
+	}
+
+	hasTailoredValue, hasTailoredExists := parsed["has_tailored_docs"]
+	if !hasTailoredExists {
+		t.Fatalf("expected has_tailored_docs field in JSON output")
+	}
+
+	if hasTailoredValue != true {
+		t.Errorf("expected has_tailored_docs true, got '%v'", hasTailoredValue)
 	}
 }
 
@@ -80,7 +90,8 @@ func TestMatchedJobResponseUnmarshaling(t *testing.T) {
 		"currency": "USD",
 		"is_viewed": true,
 		"application_status": "applied",
-		"is_new": false
+		"is_new": false,
+		"has_tailored_docs": true
 	}`)
 
 	var parsedResponse handlers.MatchedJobResponse
@@ -97,6 +108,9 @@ func TestMatchedJobResponseUnmarshaling(t *testing.T) {
 	}
 	if !parsedResponse.IsViewed {
 		t.Errorf("expected IsViewed to be true")
+	}
+	if !parsedResponse.HasTailoredDocs {
+		t.Errorf("expected HasTailoredDocs to be true")
 	}
 	if len(parsedResponse.TechStack) != 3 {
 		t.Errorf("expected 3 items in TechStack, got %d", len(parsedResponse.TechStack))

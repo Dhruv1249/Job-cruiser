@@ -316,7 +316,7 @@ class _NotificationsSheetState extends State<NotificationsSheet> {
                                               title.toLowerCase().contains('failed')
                                                   ? Icons.error_outline
                                                   : (isTailoringItem
-                                                      ? Icons.description_outlined
+                                                      ? Icons.description
                                                       : (reasoningText.isNotEmpty
                                                           ? Icons.auto_awesome
                                                           : Icons.notifications_none)),

@@ -74,5 +74,49 @@ void main() {
       expect(find.text('Tailor Application'), findsOneWidget);
       expect(find.byType(IconButton), findsWidgets);
     });
+
+    testWidgets('renders Open Tailored Documents and banner when job has tailored docs on wide screens', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1024, 768));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final tailoredJob = sampleJob.copyWith(hasTailoredDocs: true);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: JobDetailPanel(
+              job: tailoredJob,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Tailored Documents Generated'), findsOneWidget);
+      expect(find.text('CV & Cover Letter Ready'), findsOneWidget);
+      expect(find.text('Open Tailored Documents'), findsOneWidget);
+      expect(find.text('Tailor Application'), findsNothing);
+    });
+
+    testWidgets('renders Open Tailored Documents button on narrow mobile screens when tailored', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(380, 700));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final tailoredJob = sampleJob.copyWith(hasTailoredDocs: true);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: JobDetailPanel(
+              job: tailoredJob,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Open Tailored Documents'), findsOneWidget);
+      expect(find.text('Tailor Application'), findsNothing);
+    });
   });
 }

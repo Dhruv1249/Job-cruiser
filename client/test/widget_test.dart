@@ -29,5 +29,21 @@ void main() {
     final job = MatchedJob.fromJson(json);
     expect(job.isViewed, isFalse);
     expect(job.applicationStatus, equals('unapplied'));
+    expect(job.hasTailoredDocs, isFalse);
+  });
+
+  test('MatchedJob model parses hasTailoredDocs from json and copyWith overrides', () {
+    final json = {
+      'job_id': 'job-789',
+      'title': 'Senior DevOps Engineer',
+      'company': 'Cloud Native Corp',
+      'has_tailored_docs': true,
+    };
+
+    final job = MatchedJob.fromJson(json);
+    expect(job.hasTailoredDocs, isTrue);
+
+    final modifiedJob = job.copyWith(hasTailoredDocs: false);
+    expect(modifiedJob.hasTailoredDocs, isFalse);
   });
 }

@@ -25,6 +25,7 @@ class MatchedJob {
     this.isViewed = false,
     this.applicationStatus = 'unapplied',
     this.isNew = false,
+    this.hasTailoredDocs = false,
   });
 
   final String jobId;
@@ -49,12 +50,14 @@ class MatchedJob {
   final bool isViewed;
   final String applicationStatus;
   final bool isNew;
+  final bool hasTailoredDocs;
 
   /// Creates a copy of [MatchedJob] with overridden fields.
   MatchedJob copyWith({
     bool? isViewed,
     String? applicationStatus,
     bool? isNew,
+    bool? hasTailoredDocs,
   }) {
     return MatchedJob(
       jobId: jobId,
@@ -79,6 +82,7 @@ class MatchedJob {
       isViewed: isViewed ?? this.isViewed,
       applicationStatus: applicationStatus ?? this.applicationStatus,
       isNew: isNew ?? this.isNew,
+      hasTailoredDocs: hasTailoredDocs ?? this.hasTailoredDocs,
     );
   }
 
@@ -127,6 +131,7 @@ class MatchedJob {
       isViewed: isViewedVal,
       applicationStatus: json['application_status'] as String? ?? 'unapplied',
       isNew: json['is_new'] as bool? ?? (!isViewedVal),
+      hasTailoredDocs: json['has_tailored_docs'] as bool? ?? false,
     );
   }
 

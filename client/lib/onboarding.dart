@@ -1676,7 +1676,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                 decoration: const InputDecoration(
                   labelText: 'Deployment / Live Link',
                   hintText: 'https://...',
-                  prefixIcon: Icon(Icons.launch, size: 20),
+                  prefixIcon: Icon(Icons.language, size: 20),
                 ),
               ),
             ],

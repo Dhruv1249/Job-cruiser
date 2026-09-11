@@ -519,6 +519,20 @@ func (handler *TailorHandler) TailorResume(ginContext *gin.Context) {
 		return
 	}
 
+	var existingResumeCount int
+	existingResumeError := handler.DB.QueryRow(
+		ginContext.Request.Context(),
+		`SELECT COUNT(1) FROM resume_versions WHERE user_id = $1 AND job_id = $2 AND status != 'failed'`,
+		userID, payload.JobID,
+	).Scan(&existingResumeCount)
+	if existingResumeError == nil && existingResumeCount > 0 {
+		ginContext.JSON(http.StatusConflict, gin.H{
+			"error":            "Resume has already been tailored for this job application.",
+			"already_tailored": true,
+		})
+		return
+	}
+
 	userBio := handler.fetchUserBio(ginContext, userIDValue)
 
 	mcpClient, credentials, mcpError := services.LoadUserMCPClient(
@@ -640,6 +654,20 @@ func (handler *TailorHandler) GenerateCoverLetter(ginContext *gin.Context) {
 	jobRecord, jobError := handler.fetchJobTailoringRecord(ginContext, payload.JobID)
 	if jobError != nil {
 		ginContext.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		return
+	}
+
+	var existingCoverLetterCount int
+	existingCoverError := handler.DB.QueryRow(
+		ginContext.Request.Context(),
+		`SELECT COUNT(1) FROM cover_letter_versions WHERE user_id = $1 AND job_id = $2 AND status != 'failed'`,
+		userID, payload.JobID,
+	).Scan(&existingCoverLetterCount)
+	if existingCoverError == nil && existingCoverLetterCount > 0 {
+		ginContext.JSON(http.StatusConflict, gin.H{
+			"error":            "Cover letter has already been generated for this job application.",
+			"already_tailored": true,
+		})
 		return
 	}
 
@@ -765,6 +793,24 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 	jobRecord, jobError := handler.fetchJobTailoringRecord(ginContext, payload.JobID)
 	if jobError != nil {
 		ginContext.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		return
+	}
+
+	var existingApplicationDocsCount int
+	existingDocsError := handler.DB.QueryRow(
+		ginContext.Request.Context(),
+		`SELECT COUNT(1) FROM (
+			SELECT id FROM resume_versions WHERE user_id = $1 AND job_id = $2 AND status != 'failed'
+			UNION ALL
+			SELECT id FROM cover_letter_versions WHERE user_id = $1 AND job_id = $2 AND status != 'failed'
+		) existing_documents`,
+		userID, payload.JobID,
+	).Scan(&existingApplicationDocsCount)
+	if existingDocsError == nil && existingApplicationDocsCount > 0 {
+		ginContext.JSON(http.StatusConflict, gin.H{
+			"error":            "Tailored documents have already been generated for this job application.",
+			"already_tailored": true,
+		})
 		return
 	}
 

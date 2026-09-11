@@ -233,6 +233,7 @@ func main() {
 		protected.GET("/cover-letters", versionsHandler.ListCoverLetterVersions)
 		protected.GET("/cover-letters/:id/pdf", versionsHandler.GetCoverLetterPDF)
 		protected.DELETE("/cover-letters/:id", versionsHandler.DeleteCoverLetterVersion)
+		protected.DELETE("/tailor/jobs/:jobId/documents", versionsHandler.DeleteJobDocuments)
 
 		protected.POST("/applications", appHandler.CreateApplication)
 		protected.GET("/applications", appHandler.GetUserApplications)

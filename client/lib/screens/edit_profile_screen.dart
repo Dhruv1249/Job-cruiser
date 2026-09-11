@@ -295,7 +295,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Deployment / Live Link",
                     hintText: "https://...",
-                    prefixIcon: Icon(Icons.launch, size: 20),
+                    prefixIcon: Icon(Icons.language, size: 20),
                   ),
                 ),
               ],
@@ -1746,7 +1746,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             const SizedBox(height: 4),
                             Row(
                               children: [
-                                const Icon(Icons.launch, size: 14, color: AppColors.secondary),
+                                const Icon(Icons.language, size: 14, color: AppColors.secondary),
                                 const SizedBox(width: 4),
                                 Expanded(
                                   child: Text(

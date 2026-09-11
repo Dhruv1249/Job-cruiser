@@ -122,3 +122,20 @@ func TestDeleteCoverLetterVersionUnauthorizedWithoutUserID(t *testing.T) {
 		t.Fatalf("expected 401 Unauthorized, got %d", recorder.Code)
 	}
 }
+
+func TestDeleteJobDocumentsUnauthorizedWithoutUserID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	versionsHandler := handlers.NewVersionsHandler(nil, make([]byte, 32), "test-secret")
+
+	router := gin.New()
+	router.DELETE("/api/tailor/jobs/:jobId/documents", versionsHandler.DeleteJobDocuments)
+
+	httpRequest, _ := http.NewRequest(http.MethodDelete, "/api/tailor/jobs/test-job-id/documents", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httpRequest)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized, got %d", recorder.Code)
+	}
+}
+

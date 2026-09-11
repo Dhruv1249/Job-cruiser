@@ -238,6 +238,56 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _handleDeleteBothTailoredDocuments(TailoredJobDocumentGroup group) async {
+    final hasBoth = group.resumeVersion != null && group.coverLetterVersion != null;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(hasBoth ? "Delete Both Documents" : "Delete Tailored Documents"),
+        content: Text(
+          "Remove ${hasBoth ? "both tailored CV and Cover Letter" : "tailored documents"} for ${group.company} from Job Cruiser? The files will remain preserved in your Open-Overleaf project.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final futures = <Future<bool>>[];
+    if (group.jobId != null && group.jobId!.isNotEmpty) {
+      futures.add(_apiService.deleteJobDocuments(group.jobId!));
+    }
+    final resumeId = group.resumeVersion?["id"] as String?;
+    if (resumeId != null && resumeId.isNotEmpty) {
+      futures.add(_apiService.deleteResumeVersion(resumeId));
+    }
+    final coverId = group.coverLetterVersion?["id"] as String?;
+    if (coverId != null && coverId.isNotEmpty) {
+      futures.add(_apiService.deleteCoverLetterVersion(coverId));
+    }
+
+    if (futures.isNotEmpty) {
+      await Future.wait(futures);
+    }
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Tailored documents for ${group.company} removed.")),
+    );
+    _loadTailoredDocuments();
+  }
+
   Future<void> _loadAppVersionDetails() async {
     const service = AppVersionService();
     final details = await service.getVersionDetails();
@@ -753,6 +803,7 @@ class _ProfilePageState extends State<ProfilePage> {
             onViewDocument: _handleViewTailoredDocument,
             onDeleteDocument: _handleDeleteTailoredDocument,
             onSetDefaultResume: _handleSetDefaultResume,
+            onDeleteBoth: _handleDeleteBothTailoredDocuments,
           );
         }),
         const SizedBox(height: 4),

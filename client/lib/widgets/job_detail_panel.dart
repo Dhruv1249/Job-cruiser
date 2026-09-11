@@ -4,6 +4,7 @@ import '../main.dart' show AppColors;
 import '../models/job.dart';
 import '../services/api_service.dart';
 import '../preferences.dart' as preferences_page;
+import '../screens/tailored_documents_screen.dart';
 import 'company_logo_avatar.dart';
 import 'job_description_renderer.dart';
 
@@ -33,11 +34,13 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
   bool _isSaving = false;
   bool _isTailoring = false;
   late String _currentStatus;
+  late bool _hasTailoredDocs;
 
   @override
   void initState() {
     super.initState();
     _currentStatus = widget.job.applicationStatus;
+    _hasTailoredDocs = widget.job.hasTailoredDocs;
     if (widget.job.jobId.isNotEmpty) {
       _apiService.markJobAsViewed(widget.job.jobId);
     }
@@ -48,10 +51,19 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.job.jobId != widget.job.jobId) {
       _currentStatus = widget.job.applicationStatus;
+      _hasTailoredDocs = widget.job.hasTailoredDocs;
       if (widget.job.jobId.isNotEmpty) {
         _apiService.markJobAsViewed(widget.job.jobId);
       }
     }
+  }
+
+  void _openTailoredDocuments() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TailoredDocumentsScreen(initialJobId: widget.job.jobId),
+      ),
+    );
   }
 
   Future<void> _handleSaveStatus(String status) async {
@@ -175,6 +187,20 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
   }
 
   Future<void> _handleTailorApplication() async {
+    if (_hasTailoredDocs) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Tailored CV and Cover Letter already exist for this job application.'),
+          action: SnackBarAction(
+            label: 'Open',
+            textColor: Colors.white,
+            onPressed: _openTailoredDocuments,
+          ),
+        ),
+      );
+      return;
+    }
+
     setState(() => _isTailoring = true);
     try {
       final result = await _apiService.tailorApplicationAsync(jobId: widget.job.jobId);
@@ -184,6 +210,7 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
           (result['status'] == 'processing' ||
               result['status_code'] == 202 ||
               result['message'] != null)) {
+        setState(() => _hasTailoredDocs = true);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Row(
@@ -204,8 +231,22 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
       } else {
         final errorMessage = result?['error'] as String? ?? '';
         final statusCode = result?['status_code'] as int? ?? 0;
+        final isAlreadyTailored = result?['already_tailored'] == true || statusCode == 409;
         final isUnconfigured = result?['unconfigured'] == true || statusCode == 422;
-        if (isUnconfigured ||
+
+        if (isAlreadyTailored) {
+          setState(() => _hasTailoredDocs = true);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Documents have already been generated for this application.'),
+              action: SnackBarAction(
+                label: 'Open',
+                textColor: Colors.white,
+                onPressed: _openTailoredDocuments,
+              ),
+            ),
+          );
+        } else if (isUnconfigured ||
             errorMessage.toLowerCase().contains('overleaf') ||
             errorMessage.toLowerCase().contains('preferences') ||
             errorMessage.toLowerCase().contains('unconfigured')) {
@@ -480,6 +521,59 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
                 _buildBadge(Icons.source_outlined, 'Source: ${widget.job.source}'),
             ],
           ),
+          if (_hasTailoredDocs) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.matchGreen.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.matchGreen.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle, size: 18, color: AppColors.matchGreen),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Tailored Documents Generated',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.matchGreen,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'CV and Cover Letter are available in your documents workspace.',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: AppColors.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: _openTailoredDocuments,
+                    icon: const Icon(Icons.open_in_new, size: 14),
+                    label: const Text('Open', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.matchGreen,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      minimumSize: const Size(0, 32),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -846,67 +940,118 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
                     ],
                     if (isWide) ...[
                       const Spacer(),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          ElevatedButton.icon(
+                      if (_hasTailoredDocs)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: _openTailoredDocuments,
+                              icon: const Icon(Icons.description, size: 15, color: Colors.white),
+                              label: const Text(
+                                'Open Tailored Documents',
+                                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.matchGreen,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            const Text(
+                              'CV & Cover Letter Ready',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: AppColors.matchGreen,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        )
+                      else
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: _isTailoring ? null : _handleTailorApplication,
+                              icon: _isTailoring
+                                  ? const SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                    )
+                                  : const Icon(Icons.auto_awesome, size: 15, color: Colors.white),
+                              label: Text(
+                                _isTailoring ? 'Starting Tailoring...' : 'Tailor Application',
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primary,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            const Text(
+                              'ATS CV & Cover Letter in Overleaf',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: AppColors.outline,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                    ] else ...[
+                      const SizedBox(width: 10),
+                      if (_hasTailoredDocs)
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _openTailoredDocuments,
+                            icon: const Icon(Icons.description, size: 16, color: Colors.white),
+                            label: const Text(
+                              'Open Tailored Documents',
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.matchGreen,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                          ),
+                        )
+                      else
+                        Expanded(
+                          child: ElevatedButton.icon(
                             onPressed: _isTailoring ? null : _handleTailorApplication,
                             icon: _isTailoring
                                 ? const SizedBox(
-                                    width: 14,
-                                    height: 14,
+                                    width: 15,
+                                    height: 15,
                                     child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                                   )
-                                : const Icon(Icons.auto_awesome, size: 15, color: Colors.white),
+                                : const Icon(Icons.auto_awesome, size: 16, color: Colors.white),
                             label: Text(
-                              _isTailoring ? 'Starting Tailoring...' : 'Tailor Application',
+                              _isTailoring ? 'Tailoring...' : 'Tailor Application',
                               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primary,
                               foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
-                          ),
-                          const SizedBox(height: 2),
-                          const Text(
-                            'ATS CV & Cover Letter in Overleaf',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: AppColors.outline,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ] else ...[
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: _isTailoring ? null : _handleTailorApplication,
-                          icon: _isTailoring
-                              ? const SizedBox(
-                                  width: 15,
-                                  height: 15,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                )
-                              : const Icon(Icons.auto_awesome, size: 16, color: Colors.white),
-                          label: Text(
-                            _isTailoring ? 'Tailoring...' : 'Tailor Application',
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primary,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
                         ),
-                      ),
                     ],
                   ],
                 );

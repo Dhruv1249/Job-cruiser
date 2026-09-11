@@ -1460,6 +1460,43 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                         ),
                       ),
                     ],
+                    if (job.hasTailoredDocs) ...[
+                      const SizedBox(width: 4),
+                      InkWell(
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => TailoredDocumentsScreen(initialJobId: job.jobId),
+                            ),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(4),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.matchGreen.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: AppColors.matchGreen.withValues(alpha: 0.4)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.description, size: 9, color: AppColors.matchGreen),
+                              SizedBox(width: 2),
+                              Text(
+                                'TAILORED',
+                                style: TextStyle(
+                                  fontSize: 8.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.matchGreen,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(width: 2),
                     SizedBox(
                       width: 26,
@@ -1471,6 +1508,12 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                         onSelected: (action) {
                           if (action == 'details') {
                             widget.onSelectJob(job);
+                          } else if (action == 'tailored_docs') {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => TailoredDocumentsScreen(initialJobId: job.jobId),
+                              ),
+                            );
                           } else if (action == 'dismiss') {
                             _dismissJobFromFeed(job);
                           }
@@ -1486,6 +1529,18 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                               ],
                             ),
                           ),
+                          if (job.hasTailoredDocs) ...[
+                            const PopupMenuItem(
+                              value: 'tailored_docs',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.description, size: 15, color: AppColors.matchGreen),
+                                  SizedBox(width: 8),
+                                  Text('Open Tailored Documents'),
+                                ],
+                              ),
+                            ),
+                          ],
                           const PopupMenuDivider(),
                           const PopupMenuItem(
                             value: 'dismiss',
@@ -1578,6 +1633,39 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
+              ),
+            ],
+            if (job.hasTailoredDocs) ...[
+              const SizedBox(height: 6),
+              InkWell(
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => TailoredDocumentsScreen(initialJobId: job.jobId),
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(4),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.description, size: 12, color: AppColors.matchGreen),
+                      SizedBox(width: 4),
+                      Text(
+                        'Tailored CV & Cover Letter Ready',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.matchGreen,
+                        ),
+                      ),
+                      SizedBox(width: 3),
+                      Icon(Icons.open_in_new, size: 11, color: AppColors.matchGreen),
+                    ],
+                  ),
+                ),
               ),
             ],
           ],

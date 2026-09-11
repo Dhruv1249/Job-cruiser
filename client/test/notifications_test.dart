@@ -108,7 +108,7 @@ void main() {
       expect(find.text('Application Ready: Stripe'), findsOneWidget);
       expect(find.text('View Documents'), findsOneWidget);
       expect(find.text('2h ago'), findsOneWidget);
-      expect(find.byIcon(Icons.description_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.description), findsOneWidget);
     });
   });
 }

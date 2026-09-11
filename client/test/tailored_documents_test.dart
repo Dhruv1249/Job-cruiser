@@ -113,5 +113,38 @@ void main() {
       expect(find.text('Generated Cover Letter'), findsOneWidget);
       expect(find.text('View PDF'), findsNWidgets(2));
     });
+
+    testWidgets('TailoredJobCard renders Delete Both Documents and invokes onDeleteBoth', (tester) async {
+      final groups = groupTailoredDocuments(mockResumes, mockCoverLetters);
+      final acmeGroup = groups.firstWhere((g) => g.company == 'Acme Corp');
+      TailoredJobDocumentGroup? deletedGroup;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: TailoredJobCard(
+                group: acmeGroup,
+                initialExpanded: true,
+                onViewDocument: (doc, type) {},
+                onDeleteDocument: (docId, type) {},
+                onSetDefaultResume: (docId) {},
+                onDeleteBoth: (group) {
+                  deletedGroup = group;
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Delete Both Documents'), findsOneWidget);
+
+      await tester.tap(find.text('Delete Both Documents'));
+      await tester.pumpAndSettle();
+
+      expect(deletedGroup, isNotNull);
+      expect(deletedGroup!.company, equals('Acme Corp'));
+    });
   });
 }

@@ -917,6 +917,20 @@ class ApiService {
     }
   }
 
+  /// Deletes both resume and cover letter versions for a job application from Postgres.
+  Future<bool> deleteJobDocuments(String jobId) async {
+    try {
+      final response = await _dio.delete('/tailor/jobs/$jobId/documents');
+      return response.statusCode == 200;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return false;
+    } catch (e) {
+      _logger.e(e);
+      return false;
+    }
+  }
+
   /// Triggers background asynchronous tailoring for both Resume and Cover Letter.
   /// Returns immediately with 202 Accepted acknowledgement.
   Future<Map<String, dynamic>?> tailorApplicationAsync({

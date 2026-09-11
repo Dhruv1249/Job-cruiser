@@ -167,6 +167,7 @@ class TailoredJobCard extends StatefulWidget {
     required this.onViewDocument,
     required this.onDeleteDocument,
     required this.onSetDefaultResume,
+    this.onDeleteBoth,
     this.initialExpanded = false,
   });
 
@@ -174,6 +175,7 @@ class TailoredJobCard extends StatefulWidget {
   final Function(Map<String, dynamic> doc, String type) onViewDocument;
   final Function(String docId, String type) onDeleteDocument;
   final Function(String docId) onSetDefaultResume;
+  final Function(TailoredJobDocumentGroup group)? onDeleteBoth;
   final bool initialExpanded;
 
   @override
@@ -311,6 +313,36 @@ class _TailoredJobCardState extends State<TailoredJobCard> {
                         ),
                       ),
                     ),
+                  if (widget.onDeleteBoth != null) ...[
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert, size: 20, color: AppColors.outline),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onSelected: (action) {
+                        if (action == 'delete_both') {
+                          widget.onDeleteBoth!(group);
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        PopupMenuItem(
+                          value: 'delete_both',
+                          child: Row(
+                            children: [
+                              const Icon(Icons.delete_sweep_outlined, color: AppColors.error, size: 16),
+                              const SizedBox(width: 8),
+                              Text(
+                                (group.resumeVersion != null && group.coverLetterVersion != null)
+                                    ? 'Delete Both Documents'
+                                    : 'Delete Documents',
+                                style: const TextStyle(color: AppColors.error, fontSize: 13),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 4),
+                  ],
                   Icon(
                     _isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
                     color: AppColors.outline,
@@ -350,6 +382,31 @@ class _TailoredJobCardState extends State<TailoredJobCard> {
                     )
                   else
                     _buildMissingDocumentTile('Cover Letter not generated for this application'),
+                  if (widget.onDeleteBoth != null &&
+                      (group.resumeVersion != null || group.coverLetterVersion != null)) ...[
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: () => widget.onDeleteBoth!(group),
+                        icon: const Icon(Icons.delete_sweep_outlined, size: 16, color: AppColors.error),
+                        label: Text(
+                          (group.resumeVersion != null && group.coverLetterVersion != null)
+                              ? 'Delete Both Documents'
+                              : 'Delete Documents',
+                          style: const TextStyle(
+                            color: AppColors.error,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -735,6 +792,56 @@ class _TailoredDocumentsScreenState extends State<TailoredDocumentsScreen> {
     }
   }
 
+  Future<void> _handleDeleteBoth(TailoredJobDocumentGroup group) async {
+    final hasBoth = group.resumeVersion != null && group.coverLetterVersion != null;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(hasBoth ? 'Delete Both Documents' : 'Delete Tailored Documents'),
+        content: Text(
+          'Remove ${hasBoth ? "both tailored CV and Cover Letter" : "tailored documents"} for ${group.company} from Job Cruiser? The files will remain preserved in your Open-Overleaf project.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final futures = <Future<bool>>[];
+    if (group.jobId != null && group.jobId!.isNotEmpty) {
+      futures.add(_apiService.deleteJobDocuments(group.jobId!));
+    }
+    final resumeId = group.resumeVersion?['id'] as String?;
+    if (resumeId != null && resumeId.isNotEmpty) {
+      futures.add(_apiService.deleteResumeVersion(resumeId));
+    }
+    final coverId = group.coverLetterVersion?['id'] as String?;
+    if (coverId != null && coverId.isNotEmpty) {
+      futures.add(_apiService.deleteCoverLetterVersion(coverId));
+    }
+
+    if (futures.isNotEmpty) {
+      await Future.wait(futures);
+    }
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Tailored documents for ${group.company} removed.')),
+    );
+    _loadDocuments();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -775,6 +882,7 @@ class _TailoredDocumentsScreenState extends State<TailoredDocumentsScreen> {
                         onViewDocument: _handleViewDocument,
                         onDeleteDocument: _handleDeleteDocument,
                         onSetDefaultResume: _handleSetDefault,
+                        onDeleteBoth: _handleDeleteBoth,
                       );
                     },
                   ),

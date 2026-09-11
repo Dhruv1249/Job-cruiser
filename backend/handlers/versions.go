@@ -329,3 +329,45 @@ func (handler *VersionsHandler) DeleteCoverLetterVersion(ginContext *gin.Context
 
 	ginContext.JSON(http.StatusOK, gin.H{"message": "Cover letter version deleted"})
 }
+
+/*
+DeleteJobDocuments removes both resume and cover letter versions associated with a job for the authenticated user.
+The LaTeX source in open-overleaf is retained.
+*/
+func (handler *VersionsHandler) DeleteJobDocuments(ginContext *gin.Context) {
+	userIDValue, exists := ginContext.Get("user_id")
+	if !exists {
+		ginContext.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	jobID := ginContext.Param("jobId")
+
+	resumeTag, resumeDeleteError := handler.DB.Exec(
+		ginContext.Request.Context(),
+		`DELETE FROM resume_versions WHERE user_id = $1 AND job_id = $2`,
+		userIDValue, jobID,
+	)
+	if resumeDeleteError != nil {
+		ginContext.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete resume versions: " + resumeDeleteError.Error()})
+		return
+	}
+
+	coverTag, coverDeleteError := handler.DB.Exec(
+		ginContext.Request.Context(),
+		`DELETE FROM cover_letter_versions WHERE user_id = $1 AND job_id = $2`,
+		userIDValue, jobID,
+	)
+	if coverDeleteError != nil {
+		ginContext.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete cover letter versions: " + coverDeleteError.Error()})
+		return
+	}
+
+	totalDeleted := resumeTag.RowsAffected() + coverTag.RowsAffected()
+	ginContext.JSON(http.StatusOK, gin.H{
+		"message":               "Tailored documents deleted successfully",
+		"deleted_resumes":       resumeTag.RowsAffected(),
+		"deleted_cover_letters": coverTag.RowsAffected(),
+		"total_deleted":         totalDeleted,
+	})
+}
+

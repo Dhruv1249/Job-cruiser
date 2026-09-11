@@ -52,6 +52,7 @@ type MatchedJobResponse struct {
 	ApplicationStatus string   `json:"application_status"`
 	ViewedAt          *string  `json:"viewed_at"`
 	IsNew             bool     `json:"is_new"`
+	HasTailoredDocs   bool     `json:"has_tailored_docs"`
 }
 
 /*
@@ -219,7 +220,8 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 			(ujv.viewed_at IS NOT NULL) AS is_viewed,
 			COALESCE(app.status, 'unapplied') AS application_status,
 			ujv.viewed_at::text AS viewed_at,
-			(j.scraped_at >= NOW() - INTERVAL '24 hours' AND ujv.viewed_at IS NULL) AS is_new
+			(j.scraped_at >= NOW() - INTERVAL '24 hours' AND ujv.viewed_at IS NULL) AS is_new,
+			(EXISTS (SELECT 1 FROM resume_versions rv WHERE rv.user_id = $1 AND rv.job_id = j.id AND rv.status != 'failed') OR EXISTS (SELECT 1 FROM cover_letter_versions clv WHERE clv.user_id = $1 AND clv.job_id = j.id AND clv.status != 'failed')) AS has_tailored_docs
 		FROM jobs j
 		LEFT JOIN user_job_matches ujm ON ujm.job_id = j.id AND ujm.user_id = $1
 		LEFT JOIN companies comp ON j.company_id = comp.id
@@ -264,6 +266,7 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 			&job.ApplicationStatus,
 			&job.ViewedAt,
 			&job.IsNew,
+			&job.HasTailoredDocs,
 		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan matched job row: " + err.Error()})
 			return
@@ -383,7 +386,8 @@ func (h *MatchedJobsHandler) GetMatchedJobByID(c *gin.Context) {
 			(ujv.viewed_at IS NOT NULL) AS is_viewed,
 			COALESCE(app.status, 'unapplied') AS application_status,
 			ujv.viewed_at::text AS viewed_at,
-			(j.scraped_at >= NOW() - INTERVAL '24 hours' AND ujv.viewed_at IS NULL) AS is_new
+			(j.scraped_at >= NOW() - INTERVAL '24 hours' AND ujv.viewed_at IS NULL) AS is_new,
+			(EXISTS (SELECT 1 FROM resume_versions rv WHERE rv.user_id = $1 AND rv.job_id = j.id AND rv.status != 'failed') OR EXISTS (SELECT 1 FROM cover_letter_versions clv WHERE clv.user_id = $1 AND clv.job_id = j.id AND clv.status != 'failed')) AS has_tailored_docs
 		FROM jobs j
 		LEFT JOIN user_job_matches ujm ON ujm.job_id = j.id AND ujm.user_id = $1
 		LEFT JOIN companies comp ON j.company_id = comp.id
@@ -419,6 +423,7 @@ func (h *MatchedJobsHandler) GetMatchedJobByID(c *gin.Context) {
 		&job.ApplicationStatus,
 		&job.ViewedAt,
 		&job.IsNew,
+		&job.HasTailoredDocs,
 	)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
