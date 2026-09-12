@@ -8,6 +8,11 @@ abstract class FileDownloadHelper {
   static Future<void> downloadAndOpenFile({
     required List<int> bytes,
     required String fileName,
+    String? mimeType,
   }) =>
-      downloadAndOpenFileImpl(bytes: bytes, fileName: fileName);
+      downloadAndOpenFileImpl(
+        bytes: bytes,
+        fileName: fileName,
+        mimeType: mimeType,
+      );
 }

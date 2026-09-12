@@ -6,9 +6,10 @@ import 'package:path_provider/path_provider.dart';
 Future<void> downloadAndOpenFileImpl({
   required List<int> bytes,
   required String fileName,
+  String? mimeType,
 }) async {
   final temporaryDirectory = await getTemporaryDirectory();
   final targetFile = File('${temporaryDirectory.path}/$fileName');
   await targetFile.writeAsBytes(bytes);
-  await OpenFile.open(targetFile.path);
+  await OpenFile.open(targetFile.path, type: mimeType);
 }

@@ -1,7 +1,10 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'main.dart' show AppColors;
 import 'models/scraper_telemetry_models.dart';
 import 'services/api_service.dart';
+import 'utils/file_download_helper.dart';
 import 'widgets/telemetry/ingestion_timeline_chart.dart';
 import 'widgets/telemetry/score_distribution_chart.dart';
 import 'widgets/telemetry/scraper_run_history_card.dart';
@@ -34,6 +37,8 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
   bool _isLoading = true;
   bool _isPipelineStopped = false;
   bool _isRestartingPipeline = false;
+  bool _isAddingKeyword = false;
+  bool _isExportingKeywords = false;
 
   @override
   void initState() {
@@ -106,23 +111,173 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
   }
 
   Future<void> _addManualMasterKeyword() async {
-    final kw = _manualKeywordController.text.trim();
-    if (kw.isEmpty) return;
+    final rawText = _manualKeywordController.text.trim();
+    if (rawText.isEmpty) return;
 
-    final success = await _apiService.addMasterKeyword(kw, 'scraper');
+    // Split by comma (and newlines)
+    final tokens = rawText
+        .split(RegExp(r'[,;\n]+'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
 
-    if (!mounted) return;
+    if (tokens.isEmpty) return;
 
-    if (success) {
-      _manualKeywordController.clear();
+    // Deduplicate within the input while preserving order
+    final seen = <String>{};
+    final uniqueTokens = <String>[];
+    for (final token in tokens) {
+      final lower = token.toLowerCase();
+      if (!seen.contains(lower)) {
+        seen.add(lower);
+        uniqueTokens.add(token);
+      }
+    }
+
+    setState(() {
+      _isAddingKeyword = true;
+    });
+
+    try {
+      final result = await _apiService.addMasterKeywords(uniqueTokens, category: 'scraper');
+
+      if (!mounted) return;
+
+      if (result.addedCount > 0) {
+        _manualKeywordController.clear();
+        String msg = 'Added ${result.addedCount} keyword${result.addedCount > 1 ? 's' : ''} to master dictionary';
+        if (result.skipped.isNotEmpty) {
+          msg += ' (${result.skipped.length} already existed: ${result.skipped.join(', ')})';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: AppColors.primary,
+          ),
+        );
+        _loadAdminData();
+      } else {
+        String msg = 'No new keywords added.';
+        if (result.skipped.isNotEmpty) {
+          msg += ' Already exists: ${result.skipped.join(', ')}';
+        } else {
+          msg += ' Failed to add keyword(s).';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isAddingKeyword = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _exportKeywords(String type) async {
+    if (_masterKeywords.isEmpty && type != 'pending_json') {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Added keyword "$kw" to master dictionary')),
+        const SnackBar(content: Text('No active master keywords to export.')),
       );
-      _loadAdminData();
-    } else {
+      return;
+    }
+
+    setState(() {
+      _isExportingKeywords = true;
+    });
+
+    try {
+      final List<String> keywordStrings = _masterKeywords
+          .map((item) => (item['keyword'] as String? ?? '').trim())
+          .where((k) => k.isNotEmpty)
+          .toList();
+
+      String content = '';
+      String fileName = '';
+      String mimeType = '';
+      String successLabel = '';
+
+      switch (type) {
+        case 'json_list':
+          content = const JsonEncoder.withIndent('  ').convert(keywordStrings);
+          fileName = 'master_keywords.json';
+          mimeType = 'application/json';
+          successLabel = '${keywordStrings.length} keywords as JSON list';
+          break;
+        case 'json_full':
+          content = const JsonEncoder.withIndent('  ').convert(_masterKeywords);
+          fileName = 'master_keywords_full.json';
+          mimeType = 'application/json';
+          successLabel = '${_masterKeywords.length} master keywords with metadata';
+          break;
+        case 'txt_comma':
+          content = keywordStrings.join(', ');
+          fileName = 'master_keywords.txt';
+          mimeType = 'text/plain;charset=utf-8';
+          successLabel = '${keywordStrings.length} keywords as comma-separated text';
+          break;
+        case 'txt_lines':
+          content = keywordStrings.join('\n');
+          fileName = 'master_keywords.txt';
+          mimeType = 'text/plain;charset=utf-8';
+          successLabel = '${keywordStrings.length} keywords as newline list';
+          break;
+        case 'pending_json':
+          content = const JsonEncoder.withIndent('  ').convert(_pendingKeywords);
+          fileName = 'pending_keywords.json';
+          mimeType = 'application/json';
+          successLabel = '${_pendingKeywords.length} pending keywords';
+          break;
+        default:
+          return;
+      }
+
+      final bytes = utf8.encode(content);
+      await FileDownloadHelper.downloadAndOpenFile(
+        bytes: bytes,
+        fileName: fileName,
+        mimeType: mimeType,
+      );
+
+      if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to add keyword (it may already exist)')),
+        SnackBar(
+          content: Text('Exported $successLabel ($fileName)'),
+          action: SnackBarAction(
+            label: 'Copy text',
+            textColor: Colors.white,
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: content));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Exported content copied to clipboard!'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+          ),
+        ),
       );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Export failed: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isExportingKeywords = false;
+        });
+      }
     }
   }
 
@@ -393,8 +548,12 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
                 const SizedBox(height: 12),
                 TextField(
                   controller: _manualKeywordController,
+                  minLines: 1,
+                  maxLines: 3,
                   decoration: const InputDecoration(
-                    labelText: 'Keyword (e.g. rust, Kubernetes, fastapi)',
+                    labelText: 'Keyword(s) (comma-separated, e.g. rust, Kubernetes, fastapi)',
+                    hintText: 'Enter keyword(s) separated by commas',
+                    helperText: 'You can add multiple keywords at once using commas as separators',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -403,9 +562,18 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: _addManualMasterKeyword,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Master Keyword'),
+                    onPressed: _isAddingKeyword ? null : _addManualMasterKeyword,
+                    icon: _isAddingKeyword
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.add),
+                    label: Text(_isAddingKeyword ? 'Adding...' : 'Add Master Keyword(s)'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
@@ -493,6 +661,117 @@ class _MasterAdminScreenState extends State<MasterAdminScreen>
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                   color: AppColors.primary,
+                ),
+              ),
+              PopupMenuButton<String>(
+                tooltip: 'Export current keywords',
+                enabled: _masterKeywords.isNotEmpty && !_isExportingKeywords,
+                onSelected: (type) => _exportKeywords(type),
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'json_list',
+                    child: Row(
+                      children: [
+                        Icon(Icons.data_object, size: 18, color: AppColors.primary),
+                        SizedBox(width: 8),
+                        Text('Export as JSON (Keywords List)'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'json_full',
+                    child: Row(
+                      children: [
+                        Icon(Icons.code, size: 18, color: AppColors.primary),
+                        SizedBox(width: 8),
+                        Text('Export as JSON (Full Metadata)'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
+                    value: 'txt_comma',
+                    child: Row(
+                      children: [
+                        Icon(Icons.short_text, size: 18, color: AppColors.primary),
+                        SizedBox(width: 8),
+                        Text('Export as TXT (Comma-separated)'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'txt_lines',
+                    child: Row(
+                      children: [
+                        Icon(Icons.format_list_bulleted, size: 18, color: AppColors.primary),
+                        SizedBox(width: 8),
+                        Text('Export as TXT (One per line)'),
+                      ],
+                    ),
+                  ),
+                  if (_pendingKeywords.isNotEmpty) ...[
+                    const PopupMenuDivider(),
+                    const PopupMenuItem(
+                      value: 'pending_json',
+                      child: Row(
+                        children: [
+                          Icon(Icons.auto_awesome, size: 18, color: AppColors.primary),
+                          SizedBox(width: 8),
+                          Text('Export Pending Recommendations (JSON)'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceContainerLowest,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _masterKeywords.isEmpty
+                          ? AppColors.outlineVariant.withValues(alpha: 0.5)
+                          : AppColors.outlineVariant,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_isExportingKeywords)
+                        const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      else
+                        Icon(
+                          Icons.file_download_outlined,
+                          size: 16,
+                          color: _masterKeywords.isEmpty
+                              ? Colors.grey
+                              : AppColors.primary,
+                        ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Export',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: _masterKeywords.isEmpty
+                              ? Colors.grey
+                              : AppColors.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      Icon(
+                        Icons.arrow_drop_down,
+                        size: 18,
+                        color: _masterKeywords.isEmpty
+                            ? Colors.grey
+                            : AppColors.primary,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],

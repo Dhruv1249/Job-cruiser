@@ -572,6 +572,73 @@ class ApiService {
     }
   }
 
+  /// Manually adds multiple keywords to the master dictionary.
+  Future<({int addedCount, List<String> added, List<String> skipped})> addMasterKeywords(
+    List<String> keywords, {
+    String category = 'scraper',
+  }) async {
+    final cleanKeywords = keywords
+        .map((k) => k.trim())
+        .where((k) => k.isNotEmpty)
+        .toList();
+
+    if (cleanKeywords.isEmpty) {
+      return (addedCount: 0, added: <String>[], skipped: <String>[]);
+    }
+
+    // Try batch request first by sending comma-separated keywords to backend
+    try {
+      final response = await _dio.post('/admin/keywords/manual', data: {
+        'keyword': cleanKeywords.join(', '),
+        'category': category,
+      });
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        final data = response.data;
+        if (data is Map) {
+          final added = data['added'] is List
+              ? List<String>.from(data['added'] as List)
+              : cleanKeywords;
+          final duplicates = data['duplicates'] is List
+              ? List<String>.from(data['duplicates'] as List)
+              : <String>[];
+          final count = (data['added_count'] as num?)?.toInt() ?? added.length;
+          return (
+            addedCount: count,
+            added: added,
+            skipped: duplicates,
+          );
+        }
+        return (
+          addedCount: cleanKeywords.length,
+          added: cleanKeywords,
+          skipped: <String>[],
+        );
+      }
+    } catch (e) {
+      _logger.w('Batch keyword addition failed or unhandled, trying individually: $e');
+    }
+
+    // Fallback: Add individually to accurately track successes and existing items
+    final added = <String>[];
+    final skipped = <String>[];
+
+    for (final kw in cleanKeywords) {
+      final success = await addMasterKeyword(kw, category);
+      if (success) {
+        added.add(kw);
+      } else {
+        skipped.add(kw);
+      }
+    }
+
+    return (
+      addedCount: added.length,
+      added: added,
+      skipped: skipped,
+    );
+  }
+
   /// Deletes a master keyword by ID.
   Future<bool> deleteMasterKeyword(int id) async {
     try {

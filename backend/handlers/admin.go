@@ -263,6 +263,7 @@ func (h *AdminHandler) GetMasterKeywordsForAdmin(c *gin.Context) {
 
 /*
 AddMasterKeyword manually inserts a new keyword into the master dictionary.
+Supports single keywords or multiple keywords separated by commas.
 */
 func (h *AdminHandler) AddMasterKeyword(c *gin.Context) {
 	if !h.EnsureMasterAdmin(c) {
@@ -275,8 +276,8 @@ func (h *AdminHandler) AddMasterKeyword(c *gin.Context) {
 		return
 	}
 
-	cleanKeyword := strings.ToLower(strings.TrimSpace(req.Keyword))
-	if cleanKeyword == "" {
+	rawKeyword := strings.TrimSpace(req.Keyword)
+	if rawKeyword == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Keyword cannot be empty"})
 		return
 	}
@@ -286,30 +287,55 @@ func (h *AdminHandler) AddMasterKeyword(c *gin.Context) {
 		cat = "scraper"
 	}
 
-	var existingID int
-	checkErr := h.DB.QueryRow(c.Request.Context(), "SELECT id FROM master_keywords WHERE LOWER(keyword) = $1 LIMIT 1;", cleanKeyword).Scan(&existingID)
-	if checkErr == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "Keyword already exists in master dictionary"})
-		return
+	tokens := strings.Split(rawKeyword, ",")
+	var added []string
+	var duplicates []string
+	var lastID int
+
+	for _, token := range tokens {
+		cleanKeyword := strings.ToLower(strings.TrimSpace(token))
+		if cleanKeyword == "" {
+			continue
+		}
+
+		var existingID int
+		checkErr := h.DB.QueryRow(c.Request.Context(), "SELECT id FROM master_keywords WHERE LOWER(keyword) = $1 LIMIT 1;", cleanKeyword).Scan(&existingID)
+		if checkErr == nil {
+			duplicates = append(duplicates, cleanKeyword)
+			continue
+		}
+
+		query := `
+			INSERT INTO master_keywords (keyword, category)
+			VALUES ($1, $2)
+			ON CONFLICT (keyword) DO NOTHING
+			RETURNING id;
+		`
+		var id int
+		err := h.DB.QueryRow(c.Request.Context(), query, cleanKeyword, cat).Scan(&id)
+		if err != nil {
+			duplicates = append(duplicates, cleanKeyword)
+			continue
+		}
+		lastID = id
+		added = append(added, cleanKeyword)
 	}
 
-	query := `
-		INSERT INTO master_keywords (keyword, category)
-		VALUES ($1, $2)
-		ON CONFLICT (keyword) DO NOTHING
-		RETURNING id;
-	`
-	var id int
-	err := h.DB.QueryRow(c.Request.Context(), query, cleanKeyword, cat).Scan(&id)
-	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "Keyword already exists in master dictionary"})
+	if len(added) == 0 {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":      "Keyword(s) already exist in master dictionary",
+			"duplicates": duplicates,
+		})
 		return
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "Master keyword added successfully",
-		"id":      id,
-		"keyword": cleanKeyword,
+		"message":     "Master keyword(s) added successfully",
+		"id":          lastID,
+		"keyword":     strings.Join(added, ", "),
+		"added":       added,
+		"duplicates":  duplicates,
+		"added_count": len(added),
 	})
 }
 
