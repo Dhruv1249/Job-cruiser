@@ -207,12 +207,24 @@ PROXY_REQUIRED_SITES = {
 LINKEDIN_QUERY_LOCK = threading.Lock()
 
 ATS_DETECTION_PATTERNS = [
-    (re.compile(r"(?:boards|job-boards|boards\.eu)\.greenhouse\.io/([^/?#]+)"), "greenhouse"),
-    (re.compile(r"jobs\.lever\.co/([^/?#]+)"), "lever"),
-    (re.compile(r"jobs\.ashbyhq\.com/([^/?#]+)"), "ashby"),
-    (re.compile(r"jobs\.smartrecruiters\.com/([^/?#]+)"), "smartrecruiters"),
+    (re.compile(r"(?:boards|job-boards|boards\.eu)\.greenhouse\.io/([a-zA-Z0-9_\-\.]+)"), "greenhouse"),
+    (re.compile(r"jobs\.lever\.co/([a-zA-Z0-9_\-\.]+)"), "lever"),
+    (re.compile(r"jobs\.ashbyhq\.com/([a-zA-Z0-9_\-\.]+)"), "ashby"),
+    (re.compile(r"jobs\.smartrecruiters\.com/([a-zA-Z0-9_\-\.]+)"), "smartrecruiters"),
     (re.compile(r"([a-z0-9-]+)\.wd\d+\.myworkdaysite\.com"), "workday"),
 ]
+
+VALID_ATS_SLUG_REGEX = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\-\.]{0,98}[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
+
+
+def is_valid_ats_slug(slug_candidate: str) -> bool:
+    """
+    Validates that candidate ATS slug contains only allowable alphanumeric and separator characters.
+    """
+    if not slug_candidate or len(slug_candidate) > 100:
+        return False
+    return bool(VALID_ATS_SLUG_REGEX.match(slug_candidate))
+
 
 CAREER_PATH_PATTERNS = ["/jobs", "/careers", "/career", "/work-with-us", "/join-us", "/openings"]
 CAREER_SUBDOMAIN_PATTERNS = ["careers", "jobs"]
@@ -252,7 +264,7 @@ def register_discovered_ats_slug(platform_name: str, company_slug: str) -> None:
     """
     Registers a newly discovered ATS company slug with the backend API.
     """
-    if not company_slug:
+    if not company_slug or not is_valid_ats_slug(company_slug):
         return
     request_headers = {
         "X-Ingest-Key": INGEST_API_KEY,
@@ -318,10 +330,17 @@ def probe_single_career_page(company_name: str, company_domain: str = "") -> tup
         try:
             response = HTTP_PROBE_SESSION.get(candidate_url, timeout=8, allow_redirects=True)
             for pattern, platform_name in ATS_DETECTION_PATTERNS:
-                if pattern.search(response.url):
-                    return platform_name, pattern.search(response.url).group(1).lower().strip("/"), response.url
-                if response.status_code == 200 and pattern.search(response.text):
-                    return platform_name, pattern.search(response.text).group(1).lower().strip("/"), response.url
+                url_match = pattern.search(response.url)
+                if url_match:
+                    slug_candidate = url_match.group(1).lower().strip("/")
+                    if is_valid_ats_slug(slug_candidate):
+                        return platform_name, slug_candidate, response.url
+                if response.status_code == 200:
+                    text_match = pattern.search(response.text)
+                    if text_match:
+                        slug_candidate = text_match.group(1).lower().strip("/")
+                        if is_valid_ats_slug(slug_candidate):
+                            return platform_name, slug_candidate, response.url
         except Exception as probe_error:
             logger.debug(f"[ats-discovery] Probe failed for {candidate_url}: {type(probe_error).__name__}: {probe_error}")
             continue
@@ -471,30 +490,40 @@ def extract_ats_slug(job_url: str) -> tuple[str, str] | None:
         url_components = [component for component in job_url.split("/") if component]
         for index, component in enumerate(url_components):
             if "greenhouse.io" in component and index + 1 < len(url_components):
-                return "greenhouse", url_components[index + 1].split("?")[0].split("#")[0].strip().lower()
+                slug = url_components[index + 1].split("?")[0].split("#")[0].strip().lower()
+                if is_valid_ats_slug(slug):
+                    return "greenhouse", slug
 
     if "jobs.lever.co/" in normalized_url:
         url_components = [component for component in job_url.split("/") if component]
         for index, component in enumerate(url_components):
             if "lever.co" in component and index + 1 < len(url_components):
-                return "lever", url_components[index + 1].split("?")[0].split("#")[0].strip().lower()
+                slug = url_components[index + 1].split("?")[0].split("#")[0].strip().lower()
+                if is_valid_ats_slug(slug):
+                    return "lever", slug
 
     if "jobs.ashbyhq.com/" in normalized_url:
         url_components = [component for component in job_url.split("/") if component]
         for index, component in enumerate(url_components):
             if "ashbyhq.com" in component and index + 1 < len(url_components):
-                return "ashby", url_components[index + 1].split("?")[0].split("#")[0].strip().lower()
+                slug = url_components[index + 1].split("?")[0].split("#")[0].strip().lower()
+                if is_valid_ats_slug(slug):
+                    return "ashby", slug
 
     if "jobs.smartrecruiters.com/" in normalized_url:
         url_components = [component for component in job_url.split("/") if component]
         for index, component in enumerate(url_components):
             if "smartrecruiters.com" in component and index + 1 < len(url_components):
-                return "smartrecruiters", url_components[index + 1].split("?")[0].split("#")[0].strip().lower()
+                slug = url_components[index + 1].split("?")[0].split("#")[0].strip().lower()
+                if is_valid_ats_slug(slug):
+                    return "smartrecruiters", slug
 
     if ".myworkdaysite.com/" in normalized_url:
         host_domain = job_url.split("://")[-1].split("/")[0]
         if "myworkdaysite.com" in host_domain:
-            return "workday", host_domain.split(".")[0].strip().lower()
+            slug = host_domain.split(".")[0].strip().lower()
+            if is_valid_ats_slug(slug):
+                return "workday", slug
 
     return None
 
@@ -922,9 +951,14 @@ def parse_linkedin_detail_response(
         class_=lambda class_name: class_name and "show-more-less-html__markup" in class_name,
     )
     if description_element is None:
-        description_element = detail_soup.select_one(
-            ".description__text"
-        ) or detail_soup.select_one(".show-more-less-html")
+        description_element = (
+            detail_soup.select_one(".description__text")
+            or detail_soup.select_one(".show-more-less-html")
+            or detail_soup.select_one(".decoratedJobPosting__details")
+            or detail_soup.select_one(".core-section-container__content")
+            or detail_soup.select_one("section.description")
+            or detail_soup.select_one(".jobs-box__html-content")
+        )
 
     if description_element is not None:
         for button_element in description_element.find_all(
@@ -1011,14 +1045,15 @@ def fetch_single_linkedin_description(
 
 
 def enrich_linkedin_descriptions(
-    cooldown_seconds: int = 15,
+    cooldown_seconds: int = 5,
     batch_size: int = 50,
     max_jobs: int | None = None,
     since_minutes: int = 1440,
     max_workers: int | None = None,
+    max_retries_per_job: int = 3,
 ) -> int:
     """
-    Fetches job descriptions for LinkedIn jobs with empty descriptions using paced execution, dynamic proxy routing, and backoff.
+    Fetches job descriptions for LinkedIn jobs with empty descriptions using paced execution, dynamic proxy routing, and retry requeueing.
     """
     if max_jobs is not None and max_jobs <= 0:
         return 0
@@ -1051,7 +1086,8 @@ def enrich_linkedin_descriptions(
     )
 
     total_enriched_count = 0
-    attempted_job_identifiers = set()
+    resolved_job_identifiers = set()
+    job_attempt_counts: dict[str, int] = {}
     consecutive_rate_limits = 0
     halt_event = threading.Event()
 
@@ -1088,41 +1124,47 @@ def enrich_linkedin_descriptions(
             logger.error(f"[enrichment] Failed to fetch pending LinkedIn jobs from backend: {type(fetch_error).__name__}: {fetch_error}")
             break
 
-        unattempted_jobs = [
-            job_record for job_record in pending_jobs if job_record.get("id") not in attempted_job_identifiers
+        eligible_jobs = [
+            job_record for job_record in pending_jobs
+            if job_record.get("id") not in resolved_job_identifiers
+            and job_attempt_counts.get(job_record.get("id", ""), 0) < max_retries_per_job
         ]
-        if not unattempted_jobs:
+        if not eligible_jobs:
             break
 
-        logger.info(f"[enrichment] Fetched batch of {len(unattempted_jobs)} pending LinkedIn jobs")
+        logger.info(f"[enrichment] Fetched batch of {len(eligible_jobs)} pending LinkedIn jobs")
 
-        jobs_to_process = unattempted_jobs
+        jobs_to_process = eligible_jobs
         if max_jobs is not None:
             remaining_quota = max_jobs - total_enriched_count
-            jobs_to_process = unattempted_jobs[:remaining_quota]
+            jobs_to_process = eligible_jobs[:remaining_quota]
 
         for job_record in jobs_to_process:
-            job_identifier = job_record.get("id")
-            if job_identifier:
-                attempted_job_identifiers.add(job_identifier)
+            record_id = job_record.get("id")
+            if record_id:
+                job_attempt_counts[record_id] = job_attempt_counts.get(record_id, 0) + 1
 
         batch_enriched_updates = []
         effective_workers = len(active_routes) if max_workers is None else min(max_workers, len(active_routes))
         actual_workers = max(1, min(effective_workers, len(jobs_to_process)))
+        rate_limit_occurred_in_batch = False
+
         with ThreadPoolExecutor(max_workers=actual_workers) as pool_executor:
-            future_to_route = {
+            future_to_job_and_route = {
                 pool_executor.submit(
                     fetch_single_linkedin_description,
                     job_record,
                     enrichment_session,
                     halt_event,
                     active_routes[job_index % len(active_routes)],
-                ): active_routes[job_index % len(active_routes)]
+                ): (job_record, active_routes[job_index % len(active_routes)])
                 for job_index, job_record in enumerate(jobs_to_process)
             }
-            for future in future_to_route:
-                route_used = future_to_route[future]
+            for future in future_to_job_and_route:
+                job_record, route_used = future_to_job_and_route[future]
+                job_identifier = job_record.get("id", "")
                 update_payload, status_code, proxy_failed = future.result()
+
                 if route_used is not None:
                     if proxy_failed:
                         consecutive_proxy_failures[route_used] = (
@@ -1139,24 +1181,36 @@ def enrich_linkedin_descriptions(
                         consecutive_proxy_failures[route_used] = 0
 
                 if status_code == 429:
+                    rate_limit_occurred_in_batch = True
                     consecutive_rate_limits += 1
                     logger.warning(
-                        f"[enrichment] Rate limited (429), consecutive={consecutive_rate_limits}"
+                        f"[enrichment] Rate limited (429) on job {job_identifier}, consecutive={consecutive_rate_limits}. Requeuing."
                     )
-                    if consecutive_rate_limits >= 2 * len(active_routes):
-                        logger.info(
-                            f"[enrichment] Encountered 429 rate limit repeatedly ({consecutive_rate_limits} times), halting enrichment pass."
+                    if route_used is not None and route_used in active_routes:
+                        active_routes.remove(route_used)
+                        proxy_cooldown_expiry[route_used] = time.time() + 120
+                        logger.warning(
+                            f"[enrichment] Putting rate-limited proxy {route_used} into cooldown. Remaining active: {len(active_routes)}"
                         )
-                        halt_event.set()
-                        for pending_future in future_to_route:
-                            pending_future.cancel()
-                        break
-                    time.sleep(15)
                     continue
 
-                consecutive_rate_limits = 0
                 if update_payload is not None:
                     batch_enriched_updates.append(update_payload)
+                    resolved_job_identifiers.add(job_identifier)
+                elif status_code == 200:
+                    resolved_job_identifiers.add(job_identifier)
+                elif job_attempt_counts.get(job_identifier, 0) >= max_retries_per_job:
+                    resolved_job_identifiers.add(job_identifier)
+
+        if rate_limit_occurred_in_batch:
+            backoff_delay = min(60.0, 10.0 * (1.5 ** min(consecutive_rate_limits, 4)) + random.uniform(1.0, 4.0))
+            if consecutive_rate_limits >= 3 * max(1, len(active_routes)):
+                logger.info(
+                    f"[enrichment] Encountered persistent 429 rate limit ({consecutive_rate_limits} consecutive), backing off for {backoff_delay:.1f}s before resuming."
+                )
+            time.sleep(backoff_delay)
+        else:
+            consecutive_rate_limits = 0
 
         if batch_enriched_updates:
             enrich_endpoint = f"{BACKEND_API_URL}/scraper/enrich-descriptions"
@@ -1401,7 +1455,7 @@ def run_orchestration(target_platform: str | None = None) -> dict:
             if target_platform is None or target_platform == Site.LINKEDIN.value:
                 try:
                     logger.info("[orchestrator] Board searches finished. Triggering LinkedIn description enrichment pass...")
-                    enrich_linkedin_descriptions(cooldown_seconds=5, max_jobs=500, since_minutes=1440, max_workers=None)
+                    enrich_linkedin_descriptions(cooldown_seconds=5, max_jobs=None, since_minutes=1440, max_workers=None)
                 except Exception as enrichment_err:
                     logger.error(f"[enrichment] Enrichment pass failed: {enrichment_err}")
 

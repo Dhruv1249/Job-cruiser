@@ -715,6 +715,8 @@ func (handler *IngestHandler) GetATSSlugs(contextInstance *gin.Context) {
 	contextInstance.JSON(http.StatusOK, gin.H{"data": platformSlugMap})
 }
 
+var atsSlugValidationRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,98}[a-zA-Z0-9]$|^[a-zA-Z0-9]$`)
+
 // RegisterATSSlug registers or reactivates an ATS board slug.
 func (handler *IngestHandler) RegisterATSSlug(contextInstance *gin.Context) {
 	var requestPayload struct {
@@ -726,6 +728,12 @@ func (handler *IngestHandler) RegisterATSSlug(contextInstance *gin.Context) {
 		return
 	}
 
+	cleanSlug := strings.TrimSpace(requestPayload.Slug)
+	if !atsSlugValidationRegex.MatchString(cleanSlug) {
+		contextInstance.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ATS slug format"})
+		return
+	}
+
 	_, executionError := handler.DB.Exec(
 		context.Background(),
 		`INSERT INTO company_ats_boards (platform, slug)
@@ -733,7 +741,7 @@ func (handler *IngestHandler) RegisterATSSlug(contextInstance *gin.Context) {
 		 ON CONFLICT (platform, slug) DO UPDATE
 		     SET is_active = true, last_seen_at = CURRENT_TIMESTAMP`,
 		requestPayload.Platform,
-		requestPayload.Slug,
+		cleanSlug,
 	)
 	if executionError != nil {
 		contextInstance.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register ATS slug"})
@@ -751,17 +759,24 @@ type CompanyProbeTarget struct {
 
 // GetAllCompanyNames retrieves distinct unmapped companies from the database for career page probing.
 func (handler *IngestHandler) GetAllCompanyNames(contextInstance *gin.Context) {
-	rows, queryError := handler.DB.Query(
-		context.Background(),
-		`SELECT c.name, COALESCE(c.domain, '')
-		 FROM companies c
-		 WHERE c.name != ''
-		   AND NOT EXISTS (
-		       SELECT 1 FROM company_ats_boards b
-		       WHERE b.company_id = c.id OR LOWER(b.slug) = LOWER(c.name)
-		   )
-		 ORDER BY (c.domain IS NOT NULL AND c.domain != '') DESC, c.name`,
-	)
+	limitString := contextInstance.DefaultQuery("limit", "500")
+	queryLimit := 500
+	if parsedLimit, conversionError := strconv.Atoi(limitString); conversionError == nil && parsedLimit > 0 && parsedLimit <= 2000 {
+		queryLimit = parsedLimit
+	}
+
+	queryStatement := `
+		SELECT c.name, COALESCE(c.domain, '')
+		FROM companies c
+		WHERE c.name != ''
+		  AND NOT EXISTS (
+		      SELECT 1 FROM company_ats_boards b
+		      WHERE b.company_id = c.id OR LOWER(b.slug) = LOWER(c.name)
+		  )
+		ORDER BY (c.domain IS NOT NULL AND c.domain != '') DESC, c.name
+		LIMIT $1;
+	`
+	rows, queryError := handler.DB.Query(contextInstance.Request.Context(), queryStatement, queryLimit)
 	if queryError != nil {
 		contextInstance.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query companies"})
 		return

@@ -11,9 +11,11 @@ from scrape_all import (
     run_orchestration,
     is_location_in_scope,
     extract_ats_slug,
+    is_valid_ats_slug,
     sanitize_company_name,
     enrich_linkedin_descriptions,
     fetch_single_linkedin_description,
+    parse_linkedin_detail_response,
     process_direct_career_company,
     is_valid_direct_career_post,
     validate_proxy,
@@ -1156,6 +1158,136 @@ class TestDirectCareerProcessing(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(len(result["jobs"]), 1)
         self.assertEqual(result["jobs"][0]["title"], "Cloud Infrastructure Architect")
+
+    def test_is_valid_ats_slug(self):
+        """
+        Verify ATS slug validation permits clean identifiers and rejects malformed or malicious strings.
+        """
+        self.assertTrue(is_valid_ats_slug("airbnb"))
+        self.assertTrue(is_valid_ats_slug("stripe"))
+        self.assertTrue(is_valid_ats_slug("workday-1"))
+        self.assertTrue(is_valid_ats_slug("meta.jobs"))
+        self.assertTrue(is_valid_ats_slug("sub_domain"))
+        self.assertTrue(is_valid_ats_slug("a"))
+        self.assertFalse(is_valid_ats_slug(""))
+        self.assertFalse(is_valid_ats_slug(None))
+        self.assertFalse(is_valid_ats_slug('beaconsoftware" target="_blank"'))
+        self.assertFalse(is_valid_ats_slug('<script>alert(1)</script>'))
+        self.assertFalse(is_valid_ats_slug("deloitte','new_tab')"))
+        self.assertFalse(is_valid_ats_slug("company slug with spaces"))
+        self.assertFalse(is_valid_ats_slug("slug\nwith\nnewlines"))
+        self.assertFalse(is_valid_ats_slug("a" * 105))
+
+    def test_parse_linkedin_detail_response_success(self):
+        """
+        Verify LinkedIn detail parser extracts clean text from multiple standard HTML containers.
+        """
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.url = "https://www.linkedin.com/jobs/view/12345678"
+        mock_response.text = """
+        <html>
+            <body>
+                <div class="show-more-less-html__markup show-more-less-html__markup--clamp-after-5">
+                    <p>We are seeking a Senior Infrastructure Engineer to build high-scale distributed systems.</p>
+                    <button class="show-more-less-html__button">Show more</button>
+                </div>
+            </body>
+        </html>
+        """
+        payload, status_code = parse_linkedin_detail_response(mock_response, "job-uuid-1")
+        self.assertEqual(status_code, 200)
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["id"], "job-uuid-1")
+        self.assertIn("Senior Infrastructure Engineer", payload["description_text"])
+        self.assertNotIn("Show more", payload["description_text"])
+
+    def test_parse_linkedin_detail_response_fallback_selector(self):
+        """
+        Verify LinkedIn detail parser falls back to alternative description containers when markup class is absent.
+        """
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.url = "https://www.linkedin.com/jobs/view/12345678"
+        mock_response.text = """
+        <html>
+            <body>
+                <div class="core-section-container__content">
+                    <p>Alternative container description content for backend engineer role.</p>
+                </div>
+            </body>
+        </html>
+        """
+        payload, status_code = parse_linkedin_detail_response(mock_response, "job-uuid-2")
+        self.assertEqual(status_code, 200)
+        self.assertIsNotNone(payload)
+        self.assertIn("Alternative container description", payload["description_text"])
+
+    def test_parse_linkedin_detail_response_rate_limited(self):
+        """
+        Verify LinkedIn detail parser returns 429 status code when encountering HTTP 429 response.
+        """
+        mock_response = Mock()
+        mock_response.status_code = 429
+        mock_response.url = "https://www.linkedin.com/jobs/view/12345678"
+        mock_response.text = "Too Many Requests"
+
+        payload, status_code = parse_linkedin_detail_response(mock_response, "job-uuid-3")
+        self.assertEqual(status_code, 429)
+        self.assertIsNone(payload)
+
+    def test_parse_linkedin_detail_response_authwall_redirect(self):
+        """
+        Verify LinkedIn detail parser detects auth wall redirection and returns None without rate limit error.
+        """
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.url = "https://www.linkedin.com/authwall?trk=rip"
+        mock_response.text = "<html><body>Sign in to continue</body></html>"
+
+        payload, status_code = parse_linkedin_detail_response(mock_response, "job-uuid-4")
+        self.assertEqual(status_code, 200)
+        self.assertIsNone(payload)
+
+    @patch("scrape_all.requests.get")
+    @patch("scrape_all.requests.post")
+    @patch("scrape_all.fetch_single_linkedin_description")
+    def test_enrich_linkedin_descriptions_requeues_rate_limited_jobs(
+        self, mock_fetch_single, mock_requests_post, mock_requests_get
+    ):
+        """
+        Verify enrichment loop does not discard rate-limited jobs and retries them until resolved or max retries reached.
+        """
+        mock_get_response = Mock()
+        mock_get_response.status_code = 200
+        mock_get_response.json.return_value = {
+            "data": [
+                {"id": "job-retry-1", "url": "https://www.linkedin.com/jobs/view/111"},
+            ]
+        }
+        mock_requests_get.return_value = mock_get_response
+
+        mock_post_response = Mock()
+        mock_post_response.status_code = 200
+        mock_requests_post.return_value = mock_post_response
+
+        mock_fetch_single.side_effect = [
+            (None, 429, False),
+            ({"id": "job-retry-1", "description_text": "Resolved description text"}, 200, False),
+        ]
+
+        with patch("scrape_all.time.sleep", return_value=None):
+            total_enriched = enrich_linkedin_descriptions(
+                cooldown_seconds=0,
+                batch_size=10,
+                max_jobs=1,
+                since_minutes=60,
+                max_workers=1,
+                max_retries_per_job=3,
+            )
+
+        self.assertEqual(total_enriched, 1)
+        self.assertEqual(mock_fetch_single.call_count, 2)
 
 
 if __name__ == "__main__":
