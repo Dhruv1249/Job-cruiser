@@ -2,6 +2,7 @@ import "dart:convert";
 import "package:file_picker/file_picker.dart";
 import "package:flutter/material.dart";
 import "package:syncfusion_flutter_pdf/pdf.dart";
+import "package:url_launcher/url_launcher.dart";
 import "../main.dart" show AppColors;
 import "../services/api_service.dart";
 import "../widgets/month_year_picker_dialog.dart";
@@ -216,6 +217,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     });
   }
 
+  Future<void> _launchExternalUrl(String rawUrl) async {
+    final trimmed = rawUrl.trim();
+    if (trimmed.isEmpty) return;
+    final formattedUrl = (trimmed.startsWith("http://") || trimmed.startsWith("https://"))
+        ? trimmed
+        : "https://$trimmed";
+    final uri = Uri.tryParse(formattedUrl);
+    if (uri != null) {
+      try {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } catch (_) {}
+    }
+  }
+
   Future<void> _showProjectDialog({Map<String, dynamic>? existingProject, int? editIndex}) async {
     final titleController = TextEditingController(text: existingProject?["title"]?.toString() ?? "");
     final techStackController = TextEditingController(
@@ -274,7 +289,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: descriptionController,
-                  maxLines: 3,
+                  minLines: 1,
+                  maxLines: 4,
                   decoration: const InputDecoration(
                     labelText: "Description",
                     hintText: "Engineered a scalable queue handling 10k tasks/sec...",
@@ -401,6 +417,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: highlightsController,
+                  minLines: 1,
                   maxLines: 4,
                   decoration: const InputDecoration(
                     labelText: "Key Highlights (one per line)",
@@ -483,12 +500,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                TextField(
+                DateRangePickerField(
                   controller: yearController,
-                  decoration: const InputDecoration(
-                    labelText: "Graduation Year",
-                    hintText: "e.g. 2020 - 2024",
-                  ),
+                  labelText: "Graduation / Study Period",
+                  hintText: "e.g. Aug 2020 - May 2024",
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -545,6 +560,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Future<void> _showAchievementDialog({Map<String, dynamic>? existingAchievement, int? editIndex}) async {
     final titleController = TextEditingController(text: existingAchievement?["title"]?.toString() ?? "");
     final dateController = TextEditingController(text: existingAchievement?["date"]?.toString() ?? "");
+    final linkController = TextEditingController(text: existingAchievement?["link"]?.toString() ?? "");
     final detailsController = TextEditingController(text: existingAchievement?["details"]?.toString() ?? "");
 
     final result = await showDialog<bool>(
@@ -573,8 +589,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  controller: linkController,
+                  decoration: const InputDecoration(
+                    labelText: "Link / Credential URL",
+                    hintText: "https://...",
+                    prefixIcon: Icon(Icons.link, size: 20),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
                   controller: detailsController,
-                  maxLines: 3,
+                  minLines: 1,
+                  maxLines: 4,
                   decoration: const InputDecoration(
                     labelText: "Details / Impact",
                     hintText: "Outperformed 120 teams; recognized for scalable architecture...",
@@ -605,6 +631,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final updatedItem = <String, dynamic>{
         "title": titleController.text.trim(),
         "date": dateController.text.trim(),
+        "link": linkController.text.trim(),
         "details": detailsController.text.trim(),
       };
 
@@ -619,6 +646,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     titleController.dispose();
     dateController.dispose();
+    linkController.dispose();
     detailsController.dispose();
   }
 
@@ -760,7 +788,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: descController,
-                  maxLines: 3,
+                  minLines: 1,
+                  maxLines: 4,
                   decoration: const InputDecoration(
                     labelText: "Abstract / Summary",
                     hintText: "Key contributions, methodology, and theoretical findings...",
@@ -876,7 +905,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: descController,
-                  maxLines: 3,
+                  minLines: 1,
+                  maxLines: 4,
                   decoration: const InputDecoration(
                     labelText: "Contribution Highlights",
                     hintText: "Authored custom scheduler plugin; reviewed 40+ PRs...",
@@ -1670,6 +1700,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 final techStack = project["tech_stack"] is List
                     ? List<String>.from(project["tech_stack"])
                     : <String>[];
+                final formattedDuration = formatDisplayDuration(duration);
 
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1678,25 +1709,21 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  title,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                                ),
-                              ),
-                              if (duration.isNotEmpty)
-                                Text(
-                                  duration,
-                                  style: const TextStyle(
-                                    color: AppColors.onSurfaceVariant,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                            ],
+                          Text(
+                            title,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                           ),
+                          if (formattedDuration.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              formattedDuration,
+                              style: const TextStyle(
+                                color: AppColors.onSurfaceVariant,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
                           if (description.isNotEmpty) ...[
                             const SizedBox(height: 4),
                             Text(
@@ -1728,50 +1755,71 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           ],
                           if (githubUrl.isNotEmpty) ...[
                             const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                const Icon(Icons.code, size: 14, color: AppColors.primary),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  child: Text(
-                                    githubUrl,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(color: AppColors.primary, fontSize: 12),
+                            InkWell(
+                              onTap: () => _launchExternalUrl(githubUrl),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.code, size: 14, color: AppColors.primary),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      githubUrl,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontSize: 12,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ],
                           if (deploymentUrl.isNotEmpty) ...[
                             const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                const Icon(Icons.language, size: 14, color: AppColors.secondary),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  child: Text(
-                                    deploymentUrl,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(color: AppColors.secondary, fontSize: 12),
+                            InkWell(
+                              onTap: () => _launchExternalUrl(deploymentUrl),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.language, size: 14, color: AppColors.secondary),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      deploymentUrl,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: AppColors.secondary,
+                                        fontSize: 12,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ],
                           if (githubUrl.isEmpty && deploymentUrl.isEmpty && link.isNotEmpty) ...[
                             const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                const Icon(Icons.link, size: 14, color: AppColors.primary),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  child: Text(
-                                    link,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(color: AppColors.primary, fontSize: 12),
+                            InkWell(
+                              onTap: () => _launchExternalUrl(link),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.link, size: 14, color: AppColors.primary),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      link,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontSize: 12,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ],
                         ],
@@ -1821,6 +1869,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 final role = exp["role"]?.toString() ?? "Role";
                 final duration = exp["duration"]?.toString() ?? "";
                 final highlights = exp["highlights"]?.toString() ?? "";
+                final formattedDuration = formatDisplayDuration(duration);
 
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1835,7 +1884,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            duration.isNotEmpty ? "$company • $duration" : company,
+                            formattedDuration.isNotEmpty ? "$company • $formattedDuration" : company,
                             style: const TextStyle(
                               color: AppColors.onSurfaceVariant,
                               fontSize: 13,
@@ -1896,6 +1945,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 final degree = edu["degree"]?.toString() ?? "";
                 final year = edu["year"]?.toString() ?? "";
                 final grade = edu["grade"]?.toString() ?? "";
+                final formattedYear = formatDisplayDuration(year);
+
+                final subtitleParts = [
+                  institution,
+                  if (formattedYear.isNotEmpty) formattedYear,
+                  if (grade.isNotEmpty) grade,
+                ].where((part) => part.isNotEmpty).join(" • ");
 
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1908,16 +1964,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             degree,
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            institution,
-                            style: const TextStyle(color: AppColors.onSurfaceVariant, fontSize: 13),
-                          ),
-                          if (year.isNotEmpty || grade.isNotEmpty) ...[
+                          if (subtitleParts.isNotEmpty) ...[
                             const SizedBox(height: 2),
                             Text(
-                              [if (year.isNotEmpty) year, if (grade.isNotEmpty) grade].join(" • "),
-                              style: const TextStyle(color: AppColors.outline, fontSize: 12),
+                              subtitleParts,
+                              style: const TextStyle(
+                                color: AppColors.onSurfaceVariant,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ],
                         ],
@@ -1966,6 +2021,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 final title = achievement["title"]?.toString() ?? "";
                 final date = achievement["date"]?.toString() ?? "";
                 final details = achievement["details"]?.toString() ?? "";
+                final link = achievement["link"]?.toString() ?? "";
+                final formattedDate = formatDisplayDuration(date);
 
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1974,30 +2031,49 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  title,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                                ),
-                              ),
-                              if (date.isNotEmpty)
-                                Text(
-                                  date,
-                                  style: const TextStyle(
-                                    color: AppColors.onSurfaceVariant,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                            ],
+                          Text(
+                            title,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                           ),
+                          if (formattedDate.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              formattedDate,
+                              style: const TextStyle(
+                                color: AppColors.onSurfaceVariant,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
                           if (details.isNotEmpty) ...[
                             const SizedBox(height: 4),
                             Text(
                               details,
                               style: const TextStyle(color: AppColors.onSurfaceVariant, fontSize: 13),
+                            ),
+                          ],
+                          if (link.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            InkWell(
+                              onTap: () => _launchExternalUrl(link),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.link, size: 14, color: AppColors.primary),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      link,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontSize: 12,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ],
@@ -2046,6 +2122,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 final name = cert["name"]?.toString() ?? "";
                 final issuer = cert["issuer"]?.toString() ?? "";
                 final date = cert["date"]?.toString() ?? "";
+                final formattedDate = formatDisplayDuration(date);
+
+                final subtitle = [
+                  if (issuer.isNotEmpty) issuer,
+                  if (formattedDate.isNotEmpty) formattedDate,
+                ].join(" • ");
 
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2054,30 +2136,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  name,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                                ),
-                              ),
-                              if (date.isNotEmpty)
-                                Text(
-                                  date,
-                                  style: const TextStyle(
-                                    color: AppColors.onSurfaceVariant,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                            ],
+                          Text(
+                            name,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                           ),
-                          if (issuer.isNotEmpty) ...[
+                          if (subtitle.isNotEmpty) ...[
                             const SizedBox(height: 2),
                             Text(
-                              issuer,
-                              style: const TextStyle(color: AppColors.onSurfaceVariant, fontSize: 13),
+                              subtitle,
+                              style: const TextStyle(
+                                color: AppColors.onSurfaceVariant,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ],
                         ],
@@ -2129,11 +2200,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 final date = item["date"]?.toString() ?? "";
                 final link = item["link"]?.toString() ?? "";
                 final desc = item["description"]?.toString() ?? "";
+                final formattedDate = formatDisplayDuration(date);
 
                 final metaList = [
                   if (authors.isNotEmpty) authors,
                   if (pub.isNotEmpty) pub,
-                  if (date.isNotEmpty) date,
+                  if (formattedDate.isNotEmpty) formattedDate,
                 ];
 
                 return Row(
@@ -2153,7 +2225,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               metaList.join(" • "),
                               style: const TextStyle(
                                 color: AppColors.onSurfaceVariant,
-                                fontSize: 12,
+                                fontSize: 13,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -2167,9 +2239,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           ],
                           if (link.isNotEmpty) ...[
                             const SizedBox(height: 4),
-                            Text(
-                              link,
-                              style: const TextStyle(color: AppColors.primary, fontSize: 12),
+                            InkWell(
+                              onTap: () => _launchExternalUrl(link),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.link, size: 14, color: AppColors.primary),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      link,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontSize: 12,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ],
@@ -2223,10 +2311,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 final techStack = item["tech_stack"] is List
                     ? List<String>.from(item["tech_stack"])
                     : <String>[];
+                final formattedDuration = formatDisplayDuration(duration);
 
                 final headerSubtitle = [
                   if (role.isNotEmpty) role,
-                  if (duration.isNotEmpty) duration,
+                  if (formattedDuration.isNotEmpty) formattedDuration,
                 ].join(" • ");
 
                 return Row(
@@ -2282,9 +2371,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           ],
                           if (link.isNotEmpty) ...[
                             const SizedBox(height: 4),
-                            Text(
-                              link,
-                              style: const TextStyle(color: AppColors.primary, fontSize: 12),
+                            InkWell(
+                              onTap: () => _launchExternalUrl(link),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.link, size: 14, color: AppColors.primary),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      link,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontSize: 12,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ],

@@ -1591,7 +1591,11 @@ func scanCandidateProfileRecord(rowScanner interface{ Scan(dest ...any) error })
 			if ach.Date != "" {
 				dateInfo = fmt.Sprintf(" (%s)", ach.Date)
 			}
-			achievementDescriptions = append(achievementDescriptions, fmt.Sprintf("- %s%s: %s", ach.Title, dateInfo, ach.Details))
+			linkInfo := ""
+			if ach.Link != "" {
+				linkInfo = fmt.Sprintf(" [Link: %s]", ach.Link)
+			}
+			achievementDescriptions = append(achievementDescriptions, fmt.Sprintf("- %s%s: %s%s", ach.Title, dateInfo, ach.Details, linkInfo))
 		}
 		item.AchievementsSummary = strings.Join(achievementDescriptions, "\n")
 	}
@@ -1628,6 +1632,9 @@ func scanCandidateProfileRecord(rowScanner interface{ Scan(dest ...any) error })
 			}
 			if rp.Date != "" {
 				details = append(details, rp.Date)
+			}
+			if rp.Link != "" {
+				details = append(details, fmt.Sprintf("Link: %s", rp.Link))
 			}
 			detailText := ""
 			if len(details) > 0 {
@@ -2062,6 +2069,7 @@ type candidateAchievementItem struct {
 	Title   string `json:"title"`
 	Details string `json:"details"`
 	Date    string `json:"date"`
+	Link    string `json:"link"`
 }
 
 type candidateCertificationItem struct {

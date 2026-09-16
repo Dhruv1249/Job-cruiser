@@ -557,6 +557,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
                     const SizedBox(height: 12),
                     TextField(
                       controller: valueController,
+                      minLines: 1,
                       maxLines: 4,
                       decoration: const InputDecoration(
                         labelText: "Value to Copy *",

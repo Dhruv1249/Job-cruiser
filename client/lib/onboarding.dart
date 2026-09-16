@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'auth.dart';
 import 'main.dart' show AppColors, JobCruiserShell;
 import 'services/api_service.dart';
@@ -261,6 +262,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                 'title': item['title']?.toString() ?? '',
                 'details': item['details']?.toString() ?? '',
                 'date': item['date']?.toString() ?? '',
+                'link': item['link']?.toString() ?? '',
               });
             }
           }
@@ -459,6 +461,19 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
       MaterialPageRoute(builder: (_) => const AuthScreen()),
       (route) => false,
     );
+  }
+
+  Future<void> _launchExternalUrl(String rawUrl) async {
+    final trimmedUrl = rawUrl.trim();
+    if (trimmedUrl.isEmpty) return;
+    final parsedUri = Uri.tryParse(
+      trimmedUrl.startsWith('http://') || trimmedUrl.startsWith('https://')
+          ? trimmedUrl
+          : 'https://$trimmedUrl',
+    );
+    if (parsedUri != null) {
+      await launchUrl(parsedUri, mode: LaunchMode.externalApplication);
+    }
   }
 
   @override
@@ -881,6 +896,16 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                   itemCount: _experiences.length,
                   itemBuilder: (context, index) {
                     final item = _experiences[index];
+                    final company = item['company'] ?? '';
+                    final role = item['role'] ?? '';
+                    final duration = item['duration'] ?? '';
+                    final highlights = item['highlights'] ?? '';
+                    final formattedDuration = formatDisplayDuration(duration);
+                    final subtitleParts = [
+                      if (company.isNotEmpty) company,
+                      if (formattedDuration.isNotEmpty) formattedDuration,
+                    ].join(' • ');
+
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       shape: RoundedRectangleBorder(
@@ -889,13 +914,36 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                       ),
                       child: ListTile(
                         title: Text(
-                          '${item['role']} @ ${item['company']}',
+                          role.isNotEmpty ? role : company,
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: Text(
-                          '${item['duration']}\n${item['highlights']}',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (subtitleParts.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                subtitleParts,
+                                style: const TextStyle(
+                                  color: AppColors.onSurfaceVariant,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                            if (highlights.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                highlights,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppColors.onSurfaceVariant,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -951,6 +999,14 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                   itemCount: _projects.length,
                   itemBuilder: (context, index) {
                     final item = _projects[index];
+                    final title = item['title'] ?? '';
+                    final formattedDuration = formatDisplayDuration(item['duration'] ?? '');
+                    final techStack = item['tech_stack'] ?? '';
+                    final description = item['description'] ?? '';
+                    final githubUrl = item['github_url'] ?? '';
+                    final deploymentUrl = item['deployment_url'] ?? '';
+                    final link = item['link'] ?? '';
+
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       shape: RoundedRectangleBorder(
@@ -959,20 +1015,115 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                       ),
                       child: ListTile(
                         title: Text(
-                          item['title'] ?? '',
+                          title,
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: Text(
-                          [
-                            if (item['duration'] != null && (item['duration'] as String).isNotEmpty) item['duration'] as String,
-                            if (item['tech_stack'] != null && (item['tech_stack'] as String).isNotEmpty) 'Tech: ${item['tech_stack']}',
-                            if (item['description'] != null && (item['description'] as String).isNotEmpty) item['description'] as String,
-                            if (item['github_url'] != null && (item['github_url'] as String).isNotEmpty) 'GitHub: ${item['github_url']}',
-                            if (item['deployment_url'] != null && (item['deployment_url'] as String).isNotEmpty) 'Live: ${item['deployment_url']}',
-                            if ((item['github_url'] == null || (item['github_url'] as String).isEmpty) && (item['deployment_url'] == null || (item['deployment_url'] as String).isEmpty) && item['link'] != null && (item['link'] as String).isNotEmpty) 'Link: ${item['link']}',
-                          ].join('\n'),
-                          maxLines: 4,
-                          overflow: TextOverflow.ellipsis,
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (formattedDuration.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                formattedDuration,
+                                style: const TextStyle(
+                                  color: AppColors.onSurfaceVariant,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                            if (techStack.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Tech: $techStack',
+                                style: const TextStyle(
+                                  color: AppColors.onSurfaceVariant,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                            if (description.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                description,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppColors.onSurfaceVariant,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                            if (githubUrl.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              InkWell(
+                                onTap: () => _launchExternalUrl(githubUrl),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.code, size: 14, color: AppColors.primary),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        githubUrl,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: AppColors.primary,
+                                          fontSize: 12,
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            if (deploymentUrl.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              InkWell(
+                                onTap: () => _launchExternalUrl(deploymentUrl),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.language, size: 14, color: AppColors.secondary),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        deploymentUrl,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: AppColors.secondary,
+                                          fontSize: 12,
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            if (githubUrl.isEmpty && deploymentUrl.isEmpty && link.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              InkWell(
+                                onTap: () => _launchExternalUrl(link),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.link, size: 14, color: AppColors.primary),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        link,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: AppColors.primary,
+                                          fontSize: 12,
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -1028,6 +1179,16 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                   itemCount: _education.length,
                   itemBuilder: (context, index) {
                     final item = _education[index];
+                    final institution = item['institution'] ?? '';
+                    final degree = item['degree'] ?? '';
+                    final formattedYear = formatDisplayDuration(item['year'] ?? '');
+                    final grade = item['grade'] ?? '';
+                    final subtitleParts = [
+                      institution,
+                      if (formattedYear.isNotEmpty) formattedYear,
+                      if (grade.isNotEmpty) grade,
+                    ].where((part) => part.isNotEmpty).join(' • ');
+
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       shape: RoundedRectangleBorder(
@@ -1036,10 +1197,19 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                       ),
                       child: ListTile(
                         title: Text(
-                          '${item['degree']} - ${item['institution']}',
+                          degree.isNotEmpty ? degree : institution,
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: Text('Dates: ${item['year']} | Grade: ${item['grade']}'),
+                        subtitle: subtitleParts.isNotEmpty
+                            ? Text(
+                                subtitleParts,
+                                style: const TextStyle(
+                                  color: AppColors.onSurfaceVariant,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              )
+                            : null,
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -1140,6 +1310,11 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                   itemCount: _achievements.length,
                   itemBuilder: (context, index) {
                     final item = _achievements[index];
+                    final title = item['title'] ?? '';
+                    final formattedDate = formatDisplayDuration(item['date'] ?? '');
+                    final details = item['details'] ?? '';
+                    final link = item['link'] ?? '';
+
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       shape: RoundedRectangleBorder(
@@ -1148,16 +1323,59 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                       ),
                       child: ListTile(
                         title: Text(
-                          item['title'] ?? '',
+                          title,
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: Text(
-                          [
-                            if (item['date'] != null && (item['date'] as String).isNotEmpty) item['date'] as String,
-                            if (item['details'] != null && (item['details'] as String).isNotEmpty) item['details'] as String,
-                          ].join('\n'),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (formattedDate.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                formattedDate,
+                                style: const TextStyle(
+                                  color: AppColors.onSurfaceVariant,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                            if (details.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                details,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppColors.onSurfaceVariant,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                            if (link.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              InkWell(
+                                onTap: () => _launchExternalUrl(link),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.link, size: 14, color: AppColors.primary),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        link,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: AppColors.primary,
+                                          fontSize: 12,
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -1213,6 +1431,14 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                   itemCount: _certifications.length,
                   itemBuilder: (context, index) {
                     final item = _certifications[index];
+                    final name = item['name'] ?? '';
+                    final issuer = item['issuer'] ?? '';
+                    final formattedDate = formatDisplayDuration(item['date'] ?? '');
+                    final subtitleParts = [
+                      if (issuer.isNotEmpty) issuer,
+                      if (formattedDate.isNotEmpty) formattedDate,
+                    ].join(' • ');
+
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       shape: RoundedRectangleBorder(
@@ -1221,17 +1447,19 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                       ),
                       child: ListTile(
                         title: Text(
-                          item['name'] ?? '',
+                          name,
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: Text(
-                          [
-                            if (item['date'] != null && (item['date'] as String).isNotEmpty) item['date'] as String,
-                            if (item['issuer'] != null && (item['issuer'] as String).isNotEmpty) 'Issuer: ${item['issuer']}',
-                          ].join('\n'),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        subtitle: subtitleParts.isNotEmpty
+                            ? Text(
+                                subtitleParts,
+                                style: const TextStyle(
+                                  color: AppColors.onSurfaceVariant,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              )
+                            : null,
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -1286,6 +1514,18 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                   itemCount: _researchPatents.length,
                   itemBuilder: (context, index) {
                     final item = _researchPatents[index];
+                    final title = item['title'] ?? '';
+                    final authors = item['authors'] ?? '';
+                    final pub = item['publication_or_patent_number'] ?? '';
+                    final formattedDate = formatDisplayDuration(item['date'] ?? '');
+                    final link = item['link'] ?? '';
+                    final desc = item['description'] ?? '';
+                    final metaList = [
+                      if (authors.isNotEmpty) authors,
+                      if (pub.isNotEmpty) pub,
+                      if (formattedDate.isNotEmpty) formattedDate,
+                    ];
+
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       shape: RoundedRectangleBorder(
@@ -1294,18 +1534,59 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                       ),
                       child: ListTile(
                         title: Text(
-                          item['title'] ?? '',
+                          title,
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: Text(
-                          [
-                            if (item['date'] != null && (item['date'] as String).isNotEmpty) item['date'] as String,
-                            if (item['authors'] != null && (item['authors'] as String).isNotEmpty) 'By: ${item['authors']}',
-                            if (item['publication_or_patent_number'] != null && (item['publication_or_patent_number'] as String).isNotEmpty) item['publication_or_patent_number'] as String,
-                            if (item['description'] != null && (item['description'] as String).isNotEmpty) item['description'] as String,
-                          ].join('\n'),
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (metaList.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                metaList.join(' • '),
+                                style: const TextStyle(
+                                  color: AppColors.onSurfaceVariant,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                            if (desc.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                desc,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppColors.onSurfaceVariant,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                            if (link.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              InkWell(
+                                onTap: () => _launchExternalUrl(link),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.link, size: 14, color: AppColors.primary),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        link,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: AppColors.primary,
+                                          fontSize: 12,
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -1361,6 +1642,16 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                   itemCount: _openSourceContributions.length,
                   itemBuilder: (context, index) {
                     final item = _openSourceContributions[index];
+                    final projectName = item['project_name']?.toString() ?? '';
+                    final role = item['contribution_role']?.toString() ?? '';
+                    final formattedDuration = formatDisplayDuration(item['duration']?.toString() ?? '');
+                    final link = item['link']?.toString() ?? '';
+                    final desc = item['description']?.toString() ?? '';
+                    final metaParts = [
+                      if (role.isNotEmpty) role,
+                      if (formattedDuration.isNotEmpty) formattedDuration,
+                    ].join(' • ');
+
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       shape: RoundedRectangleBorder(
@@ -1369,17 +1660,59 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                       ),
                       child: ListTile(
                         title: Text(
-                          item['project_name'] ?? '',
+                          projectName,
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: Text(
-                          [
-                            if (item['duration'] != null && (item['duration'] as String).isNotEmpty) item['duration'] as String,
-                            if (item['contribution_role'] != null && (item['contribution_role'] as String).isNotEmpty) item['contribution_role'] as String,
-                            if (item['description'] != null && (item['description'] as String).isNotEmpty) item['description'] as String,
-                          ].join('\n'),
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (metaParts.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                metaParts,
+                                style: const TextStyle(
+                                  color: AppColors.onSurfaceVariant,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                            if (desc.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                desc,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppColors.onSurfaceVariant,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                            if (link.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              InkWell(
+                                onTap: () => _launchExternalUrl(link),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.link, size: 14, color: AppColors.primary),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        link,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: AppColors.primary,
+                                          fontSize: 12,
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -1446,120 +1779,6 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
     );
   }
 
-  Future<String?> _showMonthYearPicker({
-    required BuildContext context,
-    required String title,
-    String? initialMonthYear,
-    bool allowPresent = false,
-  }) async {
-    final months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-    ];
-    final currentYear = DateTime.now().year;
-    final years = List<int>.generate(35, (i) => currentYear - 25 + i);
-
-    String selectedMonth = 'Jan';
-    int selectedYear = currentYear;
-    bool isPresent = false;
-
-    if (initialMonthYear != null && initialMonthYear.trim().isNotEmpty) {
-      if (initialMonthYear.trim().toLowerCase() == 'present') {
-        isPresent = true;
-      } else {
-        final parts = initialMonthYear.trim().split(' ');
-        if (parts.length >= 2) {
-          if (months.contains(parts[0])) selectedMonth = parts[0];
-          final y = int.tryParse(parts[1]);
-          if (y != null) selectedYear = y;
-        }
-      }
-    }
-
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setDlgState) {
-            return AlertDialog(
-              title: Text(title),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (allowPresent) ...[
-                    CheckboxListTile(
-                      title: const Text('Currently Work / Enrolled Here (Present)'),
-                      value: isPresent,
-                      onChanged: (val) {
-                        setDlgState(() {
-                          isPresent = val ?? false;
-                        });
-                      },
-                      controlAffinity: ListTileControlAffinity.leading,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    const Divider(),
-                  ],
-                  if (!isPresent) ...[
-                    Row(
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            initialValue: selectedMonth,
-                            decoration: const InputDecoration(labelText: 'Month', border: OutlineInputBorder()),
-                            items: months.map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
-                            onChanged: (val) {
-                              if (val != null) {
-                                setDlgState(() {
-                                  selectedMonth = val;
-                                });
-                              }
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: DropdownButtonFormField<int>(
-                            initialValue: selectedYear,
-                            decoration: const InputDecoration(labelText: 'Year', border: OutlineInputBorder()),
-                            items: years.map((y) => DropdownMenuItem(value: y, child: Text('$y'))).toList(),
-                            onChanged: (val) {
-                              if (val != null) {
-                                setDlgState(() {
-                                  selectedYear = val;
-                                });
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    if (isPresent) {
-                      Navigator.pop(ctx, 'Present');
-                    } else {
-                      Navigator.pop(ctx, '$selectedMonth $selectedYear');
-                    }
-                  },
-                  child: const Text('Select'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
   void _showAddExperienceDialog({int? editIndex}) {
     final isEditing = editIndex != null;
     final companyCtrl = TextEditingController(text: isEditing ? _experiences[editIndex]['company'] : '');
@@ -1587,7 +1806,8 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
               const SizedBox(height: 8),
               TextField(
                 controller: highlightsCtrl,
-                maxLines: 3,
+                minLines: 1,
+                maxLines: 4,
                 decoration: const InputDecoration(labelText: 'Highlights & Responsibilities'),
               ),
             ],
@@ -1660,7 +1880,12 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
               const SizedBox(height: 12),
               TextField(controller: techCtrl, decoration: const InputDecoration(labelText: 'Tech Stack (e.g. Go, React)')),
               const SizedBox(height: 12),
-              TextField(controller: descCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Description')),
+              TextField(
+                controller: descCtrl,
+                minLines: 1,
+                maxLines: 4,
+                decoration: const InputDecoration(labelText: 'Description'),
+              ),
               const SizedBox(height: 12),
               TextField(
                 controller: githubCtrl,
@@ -1725,95 +1950,50 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
 
     showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlgState) {
-          return AlertDialog(
-            title: Text(isEditing ? 'Edit Education' : 'Add Education'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(controller: instCtrl, decoration: const InputDecoration(labelText: 'School / Institution')),
-                  const SizedBox(height: 8),
-                  TextField(controller: degreeCtrl, decoration: const InputDecoration(labelText: 'Degree / Program')),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            final res = await _showMonthYearPicker(
-                              context: context,
-                              title: 'Select Start Month & Year',
-                            );
-                            if (res != null) {
-                              setDlgState(() {
-                                final parts = yearCtrl.text.split(' - ');
-                                final endPart = parts.length > 1 ? parts[1] : 'Present';
-                                yearCtrl.text = '$res - $endPart';
-                              });
-                            }
-                          },
-                          icon: const Icon(Icons.calendar_month, size: 16),
-                          label: const Text('Start Date'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            final res = await _showMonthYearPicker(
-                              context: context,
-                              title: 'Select End Month & Year',
-                              allowPresent: true,
-                            );
-                            if (res != null) {
-                              setDlgState(() {
-                                final parts = yearCtrl.text.split(' - ');
-                                final startPart = parts.isNotEmpty && parts[0].trim().isNotEmpty ? parts[0] : 'Apr 2023';
-                                yearCtrl.text = '$startPart - $res';
-                              });
-                            }
-                          },
-                          icon: const Icon(Icons.event_available, size: 16),
-                          label: const Text('End Date'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(controller: yearCtrl, decoration: const InputDecoration(labelText: 'Dates / Year Range')),
-                  const SizedBox(height: 8),
-                  TextField(controller: gradeCtrl, decoration: const InputDecoration(labelText: 'Grade / CGPA')),
-                ],
+      builder: (ctx) => AlertDialog(
+        title: Text(isEditing ? 'Edit Education' : 'Add Education'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: instCtrl, decoration: const InputDecoration(labelText: 'School / Institution')),
+              const SizedBox(height: 8),
+              TextField(controller: degreeCtrl, decoration: const InputDecoration(labelText: 'Degree / Program')),
+              const SizedBox(height: 12),
+              DateRangePickerField(
+                controller: yearCtrl,
+                labelText: 'Graduation / Study Period',
+                hintText: 'e.g. Aug 2020 - May 2024',
               ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-              ElevatedButton(
-                onPressed: () {
-                  if (instCtrl.text.trim().isNotEmpty || degreeCtrl.text.trim().isNotEmpty) {
-                    setState(() {
-                      final data = {
-                        'institution': instCtrl.text.trim(),
-                        'degree': degreeCtrl.text.trim(),
-                        'year': yearCtrl.text.trim(),
-                        'grade': gradeCtrl.text.trim(),
-                      };
-                      if (isEditing) {
-                        _education[editIndex] = data;
-                      } else {
-                        _education.add(data);
-                      }
-                    });
-                  }
-                  Navigator.pop(ctx);
-                },
-                child: Text(isEditing ? 'Save' : 'Add'),
-              ),
+              const SizedBox(height: 8),
+              TextField(controller: gradeCtrl, decoration: const InputDecoration(labelText: 'Grade / CGPA')),
             ],
-          );
-        },
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              if (instCtrl.text.trim().isNotEmpty || degreeCtrl.text.trim().isNotEmpty) {
+                setState(() {
+                  final data = {
+                    'institution': instCtrl.text.trim(),
+                    'degree': degreeCtrl.text.trim(),
+                    'year': yearCtrl.text.trim(),
+                    'grade': gradeCtrl.text.trim(),
+                  };
+                  if (isEditing) {
+                    _education[editIndex] = data;
+                  } else {
+                    _education.add(data);
+                  }
+                });
+              }
+              Navigator.pop(ctx);
+            },
+            child: Text(isEditing ? 'Save' : 'Add'),
+          ),
+        ],
       ),
     );
   }
@@ -1852,6 +2032,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
     final isEditing = editIndex != null;
     final titleCtrl = TextEditingController(text: isEditing ? _achievements[editIndex]['title'] : '');
     final dateCtrl = TextEditingController(text: isEditing ? _achievements[editIndex]['date'] : '');
+    final linkCtrl = TextEditingController(text: isEditing ? (_achievements[editIndex]['link'] ?? '') : '');
     final detailsCtrl = TextEditingController(text: isEditing ? _achievements[editIndex]['details'] : '');
 
     showDialog(
@@ -1871,7 +2052,21 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                 allowPresent: true,
               ),
               const SizedBox(height: 12),
-              TextField(controller: detailsCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Details')),
+              TextField(
+                controller: linkCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Link / Credential URL (Optional)',
+                  hintText: 'https://...',
+                  prefixIcon: Icon(Icons.link, size: 20),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: detailsCtrl,
+                minLines: 1,
+                maxLines: 4,
+                decoration: const InputDecoration(labelText: 'Details'),
+              ),
             ],
           ),
         ),
@@ -1885,6 +2080,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                     'title': titleCtrl.text.trim(),
                     'date': dateCtrl.text.trim(),
                     'details': detailsCtrl.text.trim(),
+                    'link': linkCtrl.text.trim(),
                   };
                   if (isEditing) {
                     _achievements[editIndex] = data;
@@ -1986,9 +2182,21 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                 allowPresent: true,
               ),
               const SizedBox(height: 12),
-              TextField(controller: linkCtrl, decoration: const InputDecoration(labelText: 'URL / DOI Link')),
+              TextField(
+                controller: linkCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'URL / DOI Link',
+                  hintText: 'https://...',
+                  prefixIcon: Icon(Icons.link, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
-              TextField(controller: descCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Abstract / Summary')),
+              TextField(
+                controller: descCtrl,
+                minLines: 1,
+                maxLines: 4,
+                decoration: const InputDecoration(labelText: 'Abstract / Summary'),
+              ),
             ],
           ),
         ),
@@ -2057,9 +2265,21 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
               const SizedBox(height: 12),
               TextField(controller: techCtrl, decoration: const InputDecoration(labelText: 'Tech Stack (comma separated)')),
               const SizedBox(height: 12),
-              TextField(controller: linkCtrl, decoration: const InputDecoration(labelText: 'Repository / PR Link')),
+              TextField(
+                controller: linkCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Repository / PR Link',
+                  hintText: 'https://...',
+                  prefixIcon: Icon(Icons.link, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
-              TextField(controller: descCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Description / Impact')),
+              TextField(
+                controller: descCtrl,
+                minLines: 1,
+                maxLines: 4,
+                decoration: const InputDecoration(labelText: 'Description / Impact'),
+              ),
             ],
           ),
         ),

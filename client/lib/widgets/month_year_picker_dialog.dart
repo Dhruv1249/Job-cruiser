@@ -1,5 +1,48 @@
 import "package:flutter/material.dart";
 
+/// Normalizes and formats a date range. If start and end are in the same month and year, formats as a single month.
+String formatCustomDateRange(String start, String end) {
+  final cleanStart = start.trim();
+  final cleanEnd = end.trim();
+  if (cleanStart.isEmpty && cleanEnd.isEmpty) {
+    return "";
+  }
+  if (cleanStart.isEmpty) {
+    return cleanEnd;
+  }
+  if (cleanEnd.isEmpty) {
+    return cleanStart;
+  }
+
+  final normalizedStart = cleanStart.replaceAll(",", "").replaceAll(RegExp(r"\s+"), " ").toLowerCase();
+  final normalizedEnd = cleanEnd.replaceAll(",", "").replaceAll(RegExp(r"\s+"), " ").toLowerCase();
+
+  if (normalizedStart == normalizedEnd) {
+    return cleanStart;
+  }
+  return "$cleanStart - $cleanEnd";
+}
+
+/// Normalizes any duration string so that duplicate ranges like 'Nov, 2025 - Nov, 2025' or 'Nov 2025 - Nov 2025' collapse to 'Nov 2025'.
+String formatDisplayDuration(String rawDuration) {
+  final trimmed = rawDuration.trim();
+  if (trimmed.isEmpty) {
+    return "";
+  }
+
+  final parts = trimmed.split(RegExp(r"\s*(?:-|–|—|to)\s*"));
+  if (parts.length == 2) {
+    final startPart = parts[0].trim();
+    final endPart = parts[1].trim();
+    final normalizedStart = startPart.replaceAll(",", "").replaceAll(RegExp(r"\s+"), " ").toLowerCase();
+    final normalizedEnd = endPart.replaceAll(",", "").replaceAll(RegExp(r"\s+"), " ").toLowerCase();
+    if (normalizedStart.isNotEmpty && normalizedStart == normalizedEnd) {
+      return startPart;
+    }
+  }
+  return trimmed;
+}
+
 /// Shows a dialog allowing the candidate to select a month and year or mark an entry as Present.
 Future<String?> showCustomMonthYearPicker({
   required BuildContext context,
@@ -29,15 +72,21 @@ Future<String?> showCustomMonthYearPicker({
   bool isMarkedPresent = false;
 
   if (initialMonthYear != null && initialMonthYear.trim().isNotEmpty) {
-    if (initialMonthYear.trim().toLowerCase() == "present") {
+    final cleanedInitial = initialMonthYear.trim().replaceAll(",", "");
+    if (cleanedInitial.toLowerCase() == "present") {
       isMarkedPresent = true;
     } else {
-      final textParts = initialMonthYear.trim().split(" ");
-      if (textParts.isNotEmpty && monthsList.contains(textParts[0])) {
-        selectedMonth = textParts[0];
+      final textParts = cleanedInitial.split(" ");
+      if (textParts.isNotEmpty) {
+        final candidateMonth = textParts[0].trim();
+        final matchedMonth = monthsList.firstWhere(
+          (month) => month.toLowerCase() == candidateMonth.toLowerCase() || candidateMonth.toLowerCase().startsWith(month.toLowerCase()),
+          orElse: () => "Jan",
+        );
+        selectedMonth = matchedMonth;
       }
       if (textParts.length >= 2) {
-        final parsedYear = int.tryParse(textParts[1]);
+        final parsedYear = int.tryParse(textParts.last.trim());
         if (parsedYear != null && yearsList.contains(parsedYear)) {
           selectedYear = parsedYear;
         }
@@ -170,8 +219,8 @@ class DateRangePickerField extends StatelessWidget {
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: () async {
-                  final textParts = controller.text.split(" - ");
-                  final initialStart = textParts.isNotEmpty ? textParts[0].trim() : null;
+                  final textParts = controller.text.split(RegExp(r"\s*(?:-|–|—|to)\s*"));
+                  final initialStart = textParts.isNotEmpty && textParts[0].trim().isNotEmpty ? textParts[0].trim() : null;
                   final selectedDate = await showCustomMonthYearPicker(
                     context: context,
                     title: "Select Start Date",
@@ -181,8 +230,8 @@ class DateRangePickerField extends StatelessWidget {
                   if (selectedDate != null) {
                     final currentEnd = textParts.length > 1 && textParts[1].trim().isNotEmpty
                         ? textParts[1].trim()
-                        : "Present";
-                    controller.text = "$selectedDate - $currentEnd";
+                        : (textParts.isNotEmpty && textParts[0].trim().isNotEmpty && textParts[0].trim().toLowerCase() != "present" ? textParts[0].trim() : "Present");
+                    controller.text = formatCustomDateRange(selectedDate, currentEnd);
                   }
                 },
                 icon: const Icon(Icons.calendar_month, size: 16),
@@ -193,8 +242,10 @@ class DateRangePickerField extends StatelessWidget {
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: () async {
-                  final textParts = controller.text.split(" - ");
-                  final initialEnd = textParts.length > 1 ? textParts[1].trim() : null;
+                  final textParts = controller.text.split(RegExp(r"\s*(?:-|–|—|to)\s*"));
+                  final initialEnd = textParts.length > 1 && textParts[1].trim().isNotEmpty
+                      ? textParts[1].trim()
+                      : (textParts.isNotEmpty && textParts[0].trim().isNotEmpty ? textParts[0].trim() : null);
                   final selectedDate = await showCustomMonthYearPicker(
                     context: context,
                     title: "Select End Date",
@@ -205,7 +256,7 @@ class DateRangePickerField extends StatelessWidget {
                     final currentStart = textParts.isNotEmpty && textParts[0].trim().isNotEmpty
                         ? textParts[0].trim()
                         : "Jan 2023";
-                    controller.text = "$currentStart - $selectedDate";
+                    controller.text = formatCustomDateRange(currentStart, selectedDate);
                   }
                 },
                 icon: const Icon(Icons.event_available, size: 16),
@@ -217,6 +268,8 @@ class DateRangePickerField extends StatelessWidget {
         const SizedBox(height: 8),
         TextField(
           controller: controller,
+          minLines: 1,
+          maxLines: 1,
           decoration: InputDecoration(
             labelText: labelText,
             hintText: hintText,
@@ -259,6 +312,8 @@ class SingleDatePickerField extends StatelessWidget {
         Expanded(
           child: TextField(
             controller: controller,
+            minLines: 1,
+            maxLines: 1,
             decoration: InputDecoration(
               labelText: labelText,
               hintText: hintText,

@@ -183,6 +183,7 @@ type ParsedAchievementItem struct {
 	Title   string `json:"title"`
 	Details string `json:"details"`
 	Date    string `json:"date"`
+	Link    string `json:"link"`
 }
 
 type ParsedCertificationItem struct {
@@ -1083,6 +1084,7 @@ type flexAchievementItem struct {
 	Title   string      `json:"title"`
 	Details interface{} `json:"details"`
 	Date    string      `json:"date"`
+	Link    string      `json:"link"`
 }
 
 type flexCertificationItem struct {
@@ -1362,7 +1364,8 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 					"properties": {
 						"title": {"type": "string"},
 						"details": {"type": "string"},
-						"date": {"type": "string"}
+						"date": {"type": "string"},
+						"link": {"type": "string"}
 					},
 					"required": ["title"]
 				}
@@ -1523,6 +1526,7 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 			Title:   item.Title,
 			Details: stringifyFlex(item.Details),
 			Date:    item.Date,
+			Link:    item.Link,
 		})
 	}
 

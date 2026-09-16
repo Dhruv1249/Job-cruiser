@@ -320,6 +320,7 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 		Title   string `json:"title"`
 		Details string `json:"details"`
 		Date    string `json:"date"`
+		Link    string `json:"link"`
 	}
 	var rawAchievements []achievementRecord
 	if len(achievementsJSON) > 0 {
@@ -335,6 +336,9 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 			profile.WriteString(fmt.Sprintf("  %s%s", achievementItem.Title, dateText))
 			if achievementItem.Details != "" {
 				profile.WriteString(fmt.Sprintf(": %s", achievementItem.Details))
+			}
+			if achievementItem.Link != "" {
+				profile.WriteString(fmt.Sprintf(" (Link: %s)", achievementItem.Link))
 			}
 			profile.WriteString("\n")
 		}

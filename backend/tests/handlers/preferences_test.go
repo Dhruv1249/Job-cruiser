@@ -497,7 +497,7 @@ func TestProfileUpdateRequestBinding(t *testing.T) {
 }
 
 func TestExtractStructuredResumeDetails(t *testing.T) {
-	masterCVText := "Raw resume text here...\n\n--- STRUCTURED RESUME DETAILS ---\n{\"skills\":[\"Go\",\"Docker\"],\"projects\":[{\"title\":\"Test Project\",\"tech_stack\":[\"Go\"],\"description\":\"Desc\",\"link\":\"\",\"github_url\":\"https://github.com/example/test\",\"deployment_url\":\"https://test.example.com\",\"duration\":\"Jan 2023 - Present\"}],\"achievements\":[{\"title\":\"Hackathon Winner\",\"details\":\"1st place\",\"date\":\"Oct 2024\"}],\"certifications\":[{\"name\":\"AWS SAA\",\"issuer\":\"Amazon\",\"date\":\"May 2023\"}],\"research_patents\":[{\"title\":\"Distributed Consensus\",\"authors\":\"Jane Doe\",\"date\":\"2024\"}],\"open_source_contributions\":[{\"project_name\":\"Kubernetes\",\"contribution_role\":\"Maintainer\",\"tech_stack\":[\"Go\"],\"duration\":\"2022 - Present\"}]}"
+	masterCVText := "Raw resume text here...\n\n--- STRUCTURED RESUME DETAILS ---\n{\"skills\":[\"Go\",\"Docker\"],\"projects\":[{\"title\":\"Test Project\",\"tech_stack\":[\"Go\"],\"description\":\"Desc\",\"link\":\"\",\"github_url\":\"https://github.com/example/test\",\"deployment_url\":\"https://test.example.com\",\"duration\":\"Jan 2023 - Present\"}],\"achievements\":[{\"title\":\"Hackathon Winner\",\"details\":\"1st place\",\"date\":\"Oct 2024\",\"link\":\"https://hackathon.example.com\"}],\"certifications\":[{\"name\":\"AWS SAA\",\"issuer\":\"Amazon\",\"date\":\"May 2023\"}],\"research_patents\":[{\"title\":\"Distributed Consensus\",\"authors\":\"Jane Doe\",\"date\":\"2024\",\"link\":\"https://doi.org/10.1234/example\"}],\"open_source_contributions\":[{\"project_name\":\"Kubernetes\",\"contribution_role\":\"Maintainer\",\"tech_stack\":[\"Go\"],\"duration\":\"2022 - Present\"}]}"
 
 	exp, proj, edu, skills, ach, cert, research, openSource := handlers.ExtractStructuredResumeDetails(masterCVText)
 
@@ -507,14 +507,14 @@ func TestExtractStructuredResumeDetails(t *testing.T) {
 	if len(proj) != 1 || proj[0].Title != "Test Project" || proj[0].Duration != "Jan 2023 - Present" || proj[0].GithubURL != "https://github.com/example/test" || proj[0].DeploymentURL != "https://test.example.com" {
 		t.Errorf("expected 1 project with duration and URLs, got %v", proj)
 	}
-	if len(ach) != 1 || ach[0].Title != "Hackathon Winner" || ach[0].Date != "Oct 2024" {
-		t.Errorf("expected 1 achievement with date, got %v", ach)
+	if len(ach) != 1 || ach[0].Title != "Hackathon Winner" || ach[0].Date != "Oct 2024" || ach[0].Link != "https://hackathon.example.com" {
+		t.Errorf("expected 1 achievement with date and link, got %v", ach)
 	}
 	if len(cert) != 1 || cert[0].Name != "AWS SAA" || cert[0].Date != "May 2023" {
 		t.Errorf("expected 1 certification with date, got %v", cert)
 	}
-	if len(research) != 1 || research[0].Title != "Distributed Consensus" {
-		t.Errorf("expected 1 research item, got %v", research)
+	if len(research) != 1 || research[0].Title != "Distributed Consensus" || research[0].Link != "https://doi.org/10.1234/example" {
+		t.Errorf("expected 1 research item with link, got %v", research)
 	}
 	if len(openSource) != 1 || openSource[0].ProjectName != "Kubernetes" || openSource[0].Duration != "2022 - Present" {
 		t.Errorf("expected 1 open source item, got %v", openSource)

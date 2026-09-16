@@ -165,6 +165,110 @@ void main() {
       expect(find.text("https://cache.example.com"), findsOneWidget);
     });
 
+    testWidgets("opens achievement dialog and adds new achievement with link", (tester) async {
+      tester.view.physicalSize = const Size(1200, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: EditProfileScreen(
+            initialProfileData: mockInitialData,
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(OutlinedButton, "Add Achievement"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Add Achievement"), findsWidgets);
+
+      await tester.enterText(
+        find.widgetWithText(TextField, "Achievement / Award Title *"),
+        "1st Place Global Hackathon",
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, "Date Received / Completed"),
+        "Nov 2025 - Nov 2025",
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, "Link / Credential URL"),
+        "https://hackathon.example.com/winner",
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, "Details / Impact"),
+        "Built AI pipeline in 24 hours.",
+      );
+
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+      await tester.tap(find.widgetWithText(ElevatedButton, "Save"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("1st Place Global Hackathon"), findsOneWidget);
+      expect(find.text("Nov 2025"), findsOneWidget);
+      expect(find.text("Built AI pipeline in 24 hours."), findsOneWidget);
+      expect(find.text("https://hackathon.example.com/winner"), findsOneWidget);
+    });
+
+    testWidgets("opens research/patent dialog and adds new entry with link", (tester) async {
+      tester.view.physicalSize = const Size(1200, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: EditProfileScreen(
+            initialProfileData: mockInitialData,
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(OutlinedButton, "Add Paper / Patent"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Add Paper / Patent"), findsWidgets);
+
+      await tester.enterText(
+        find.widgetWithText(TextField, "Paper or Patent Title *"),
+        "Scalable AI Matching Engine",
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, "Authors"),
+        "Dhruv Dev",
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, "Publication Venue / Patent Number"),
+        "IEEE 2025",
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, "Date / Year"),
+        "Oct 2024",
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, "URL / DOI Link"),
+        "https://doi.org/10.1109/sample",
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, "Abstract / Summary"),
+        "Novel distributed matching algorithm.",
+      );
+
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+      await tester.tap(find.widgetWithText(ElevatedButton, "Save"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Scalable AI Matching Engine"), findsOneWidget);
+      expect(find.text("Dhruv Dev • IEEE 2025 • Oct 2024"), findsOneWidget);
+      expect(find.text("Novel distributed matching algorithm."), findsOneWidget);
+      expect(find.text("https://doi.org/10.1109/sample"), findsOneWidget);
+    });
+
     testWidgets("extracts bio from master_cv_text when bio_experience_text is omitted", (tester) async {
       tester.view.physicalSize = const Size(1200, 2400);
       tester.view.devicePixelRatio = 1.0;
