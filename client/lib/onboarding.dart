@@ -425,6 +425,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
       'target_cover_letter_pages': 1,
       'match_threshold_notification_enabled': _matchThresholdNotificationEnabled,
       'match_threshold_percentage': _matchThresholdPercentage,
+      'notification_evaluation_mode': 'both',
     });
 
     if (_overleafUrlController.text.trim().isNotEmpty) {

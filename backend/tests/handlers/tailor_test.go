@@ -14,7 +14,7 @@ import (
 
 func TestTailorResumeRequiresJobID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret", nil)
 
 	router := gin.New()
 	router.POST("/api/tailor/resume", func(ginContext *gin.Context) {
@@ -36,7 +36,7 @@ func TestTailorResumeRequiresJobID(t *testing.T) {
 
 func TestTailorResumeRequiresAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret", nil)
 
 	router := gin.New()
 	router.POST("/api/tailor/resume", tailorHandler.TailorResume)
@@ -57,7 +57,7 @@ func TestTailorResumeRequiresAuthentication(t *testing.T) {
 
 func TestGenerateCoverLetterRequiresJobID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret", nil)
 
 	router := gin.New()
 	router.POST("/api/tailor/cover-letter", func(ginContext *gin.Context) {
@@ -79,7 +79,7 @@ func TestGenerateCoverLetterRequiresJobID(t *testing.T) {
 
 func TestGenerateCoverLetterRequiresAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret", nil)
 
 	router := gin.New()
 	router.POST("/api/tailor/cover-letter", tailorHandler.GenerateCoverLetter)
@@ -104,7 +104,7 @@ func TestTailorHandlerNewConstructor(t *testing.T) {
 		aesKey[index] = byte(index + 1)
 	}
 	tailorService := services.NewResumeTailorService("http://gemini.test", "key", nil)
-	tailorHandler := handlers.NewTailorHandler(tailorService, nil, aesKey, "mcp-secret")
+	tailorHandler := handlers.NewTailorHandler(tailorService, nil, aesKey, "mcp-secret", nil)
 	if tailorHandler == nil {
 		t.Fatal("expected non-nil tailorHandler")
 	}
@@ -118,7 +118,7 @@ func TestTailorHandlerNewConstructor(t *testing.T) {
 
 func TestTailorApplicationAsyncRequiresJobID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret", nil)
 
 	router := gin.New()
 	router.POST("/api/tailor/application", func(ginContext *gin.Context) {
@@ -140,7 +140,7 @@ func TestTailorApplicationAsyncRequiresJobID(t *testing.T) {
 
 func TestTailorApplicationAsyncRequiresAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret", nil)
 
 	router := gin.New()
 	router.POST("/api/tailor/application", tailorHandler.TailorApplicationAsync)
@@ -161,7 +161,7 @@ func TestTailorApplicationAsyncRequiresAuthentication(t *testing.T) {
 
 func TestListTemplatesRequiresAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret", nil)
 
 	router := gin.New()
 	router.GET("/api/tailor/templates", tailorHandler.ListTemplates)
@@ -177,7 +177,7 @@ func TestListTemplatesRequiresAuthentication(t *testing.T) {
 
 func TestSeedDefaultTemplatesRequiresAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret")
+	tailorHandler := handlers.NewTailorHandler(nil, nil, make([]byte, 32), "test-secret", nil)
 
 	router := gin.New()
 	router.POST("/api/tailor/templates/seed", tailorHandler.SeedDefaultTemplates)

@@ -273,27 +273,55 @@ func TestPreferencesRequestBindingWithMatchNotification(t *testing.T) {
 		notificationEnabled         bool
 		thresholdPercentage         int
 		criteriaPrompt              string
+		evaluationMode              string
 		expectedNotificationEnabled bool
 		expectedThresholdPercentage int
 		expectedCriteriaPrompt      string
+		expectedEvaluationMode      string
 	}{
 		{
 			name:                        "default disabled notification with custom threshold",
 			notificationEnabled:         false,
 			thresholdPercentage:         85,
 			criteriaPrompt:              "",
+			evaluationMode:              "both",
 			expectedNotificationEnabled: false,
 			expectedThresholdPercentage: 85,
 			expectedCriteriaPrompt:      "",
+			expectedEvaluationMode:      "both",
 		},
 		{
-			name:                        "enabled notification with 80 percent threshold and custom criteria",
-			notificationEnabled:         true,
-			thresholdPercentage:         80,
-			criteriaPrompt:              "Must be 100% remote and Go or Kubernetes",
-			expectedNotificationEnabled: true,
-			expectedThresholdPercentage: 80,
-			expectedCriteriaPrompt:      "Must be 100% remote and Go or Kubernetes",
+			name:                                "enabled notification with 80 percent threshold and custom criteria",
+			notificationEnabled:                 true,
+			thresholdPercentage:                 80,
+			criteriaPrompt:                      "Must be 100% remote and Go or Kubernetes",
+			evaluationMode:                      "prompt_only",
+			expectedNotificationEnabled:         true,
+			expectedThresholdPercentage:         80,
+			expectedCriteriaPrompt:              "Must be 100% remote and Go or Kubernetes",
+			expectedEvaluationMode:              "prompt_only",
+		},
+		{
+			name:                                "notification with score_only mode",
+			notificationEnabled:                 true,
+			thresholdPercentage:                 90,
+			criteriaPrompt:                      "",
+			evaluationMode:                      "score_only",
+			expectedNotificationEnabled:         true,
+			expectedThresholdPercentage:         90,
+			expectedCriteriaPrompt:              "",
+			expectedEvaluationMode:              "score_only",
+		},
+		{
+			name:                                "notification with either mode",
+			notificationEnabled:                 true,
+			thresholdPercentage:                 75,
+			criteriaPrompt:                      "Intern + PPO only",
+			evaluationMode:                      "either",
+			expectedNotificationEnabled:         true,
+			expectedThresholdPercentage:         75,
+			expectedCriteriaPrompt:              "Intern + PPO only",
+			expectedEvaluationMode:              "either",
 		},
 	}
 
@@ -306,6 +334,7 @@ func TestPreferencesRequestBindingWithMatchNotification(t *testing.T) {
 				"match_threshold_notification_enabled": tc.notificationEnabled,
 				"match_threshold_percentage":          tc.thresholdPercentage,
 				"notification_prompt_criteria":        tc.criteriaPrompt,
+				"notification_evaluation_mode":        tc.evaluationMode,
 			}
 
 			jsonBytes, err := json.Marshal(testBody)
@@ -329,6 +358,9 @@ func TestPreferencesRequestBindingWithMatchNotification(t *testing.T) {
 				}
 				if req.NotificationPromptCriteria != tc.expectedCriteriaPrompt {
 					t.Errorf("expected notification prompt criteria %s, got %s", tc.expectedCriteriaPrompt, req.NotificationPromptCriteria)
+				}
+				if req.NotificationEvaluationMode != tc.expectedEvaluationMode {
+					t.Errorf("expected notification evaluation mode %s, got %s", tc.expectedEvaluationMode, req.NotificationEvaluationMode)
 				}
 
 				c.JSON(http.StatusOK, gin.H{"status": "ok"})

@@ -158,7 +158,7 @@ func main() {
 	mcpClient := services.NewMCPClient(overleafURL, mcpToken)
 
 	tailorService := services.NewResumeTailorService("https://generativelanguage.googleapis.com", geminiAPIKey, mcpClient)
-	tailorHandler := handlers.NewTailorHandler(tailorService, databasePool, overleafAESKey, overleafMCPSecret)
+	tailorHandler := handlers.NewTailorHandler(tailorService, databasePool, overleafAESKey, overleafMCPSecret, fcmService)
 	versionsHandler := handlers.NewVersionsHandler(databasePool, overleafAESKey, overleafMCPSecret)
 	notificationsHandler := handlers.NewNotificationsHandler(databasePool)
 

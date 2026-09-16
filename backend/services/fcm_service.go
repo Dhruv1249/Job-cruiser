@@ -33,9 +33,23 @@ type fcmMessage struct {
 }
 
 type fcmMessagePayload struct {
-	Token        string            `json:"token"`
-	Notification fcmNotification   `json:"notification"`
-	Data         map[string]string `json:"data,omitempty"`
+	Token        string                 `json:"token"`
+	Notification fcmNotification        `json:"notification"`
+	Data         map[string]string      `json:"data,omitempty"`
+	Android      *fcmAndroidConfig      `json:"android,omitempty"`
+}
+
+type fcmAndroidConfig struct {
+	Priority     string                  `json:"priority"`
+	Notification *fcmAndroidNotification `json:"notification,omitempty"`
+}
+
+type fcmAndroidNotification struct {
+	ChannelID             string `json:"channel_id,omitempty"`
+	Sound                 string `json:"sound,omitempty"`
+	DefaultSound          bool   `json:"default_sound"`
+	DefaultVibrateTimings bool   `json:"default_vibrate_timings"`
+	NotificationPriority  string `json:"notification_priority"`
 }
 
 type fcmNotification struct {
@@ -107,6 +121,16 @@ func (service *FCMService) SendPushNotification(ctx context.Context, deviceToken
 			Token:        deviceToken,
 			Notification: fcmNotification{Title: title, Body: body},
 			Data:         data,
+			Android: &fcmAndroidConfig{
+				Priority: "HIGH",
+				Notification: &fcmAndroidNotification{
+					ChannelID:             "job_cruiser_high_match",
+					Sound:                 "default",
+					DefaultSound:          true,
+					DefaultVibrateTimings: true,
+					NotificationPriority:  "PRIORITY_HIGH",
+				},
+			},
 		},
 	}
 

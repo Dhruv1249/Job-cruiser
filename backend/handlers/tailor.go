@@ -20,6 +20,7 @@ type TailorHandler struct {
 	DB            *pgxpool.Pool
 	AESKey        []byte
 	MCPSecret     string
+	FCMService    *services.FCMService
 }
 
 /*
@@ -40,12 +41,14 @@ func NewTailorHandler(
 	db *pgxpool.Pool,
 	aesKey []byte,
 	mcpSecret string,
+	fcmService *services.FCMService,
 ) *TailorHandler {
 	return &TailorHandler{
 		TailorService: tailorService,
 		DB:            db,
 		AESKey:        aesKey,
 		MCPSecret:     mcpSecret,
+		FCMService:    fcmService,
 	}
 }
 
@@ -911,6 +914,7 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 			failTitle := fmt.Sprintf("Tailoring Failed: %s", jRecord.Company)
 			failMessage := fmt.Sprintf("Failed connecting to Open-Overleaf for %s: %s", jRecord.Title, clientError.Error())
 			_, _ = handler.DB.Exec(backgroundCtx, `INSERT INTO notifications (user_id, job_id, title, message, is_read) VALUES ($1, $2, $3, $4, false)`, uID, jID, failTitle, failMessage)
+			handler.sendTailorFCMNotification(backgroundCtx, uID, jID, failTitle, failMessage)
 			return
 		}
 
@@ -944,6 +948,7 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 			failTitle := fmt.Sprintf("Tailoring Failed: %s", jRecord.Company)
 			failMessage := fmt.Sprintf("Failed generating resume for %s: %s", jRecord.Title, resumeError.Error())
 			_, _ = handler.DB.Exec(backgroundCtx, `INSERT INTO notifications (user_id, job_id, title, message, is_read) VALUES ($1, $2, $3, $4, false)`, uID, jID, failTitle, failMessage)
+			handler.sendTailorFCMNotification(backgroundCtx, uID, jID, failTitle, failMessage)
 			return
 		}
 
@@ -976,6 +981,7 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 			failTitle := fmt.Sprintf("Cover Letter Failed: %s", jRecord.Company)
 			failMessage := fmt.Sprintf("Resume succeeded but cover letter failed for %s: %s", jRecord.Title, coverError.Error())
 			_, _ = handler.DB.Exec(backgroundCtx, `INSERT INTO notifications (user_id, job_id, title, message, is_read) VALUES ($1, $2, $3, $4, false)`, uID, jID, failTitle, failMessage)
+			handler.sendTailorFCMNotification(backgroundCtx, uID, jID, failTitle, failMessage)
 			return
 		}
 
@@ -998,6 +1004,7 @@ func (handler *TailorHandler) TailorApplicationAsync(ginContext *gin.Context) {
 			`INSERT INTO notifications (user_id, job_id, title, message, is_read) VALUES ($1, $2, $3, $4, false)`,
 			uID, jID, successTitle, successMessage,
 		)
+		handler.sendTailorFCMNotification(backgroundCtx, uID, jID, successTitle, successMessage)
 	}(context.Background(), userID, payload.JobID, jobRecord, userBio, targetResumePages, targetCoverLetterPages, resumeVersionID, coverVersionID, folderPath, resumeTemplatePath, coverLetterTemplatePath)
 
 	ginContext.JSON(http.StatusAccepted, gin.H{
@@ -1123,4 +1130,29 @@ func (handler *TailorHandler) SeedDefaultTemplates(ginContext *gin.Context) {
 	ginContext.JSON(http.StatusOK, gin.H{
 		"message": "Default resume and cover letter templates successfully initialized in Open-Overleaf.",
 	})
+}
+
+func (handler *TailorHandler) sendTailorFCMNotification(ctx context.Context, userID string, jobID string, title string, body string) {
+	if handler.FCMService == nil || handler.DB == nil {
+		return
+	}
+	var fcmToken string
+	queryError := handler.DB.QueryRow(ctx, `SELECT COALESCE(fcm_token, '') FROM users WHERE id = $1`, userID).Scan(&fcmToken)
+	if queryError == nil && fcmToken != "" {
+		go func() {
+			pushError := handler.FCMService.SendPushNotification(
+				context.Background(),
+				fcmToken,
+				title,
+				body,
+				map[string]string{
+					"job_id": jobID,
+					"type":   "tailor_completed",
+				},
+			)
+			if pushError != nil {
+				log.Printf("[FCM] Tailoring push delivery failed for user %s: %v", userID, pushError)
+			}
+		}()
+	}
 }

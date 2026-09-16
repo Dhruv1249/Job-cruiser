@@ -151,6 +151,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   int _targetCoverLetterPages = 1;
   bool _matchThresholdNotificationEnabled = false;
   int _matchThresholdPercentage = 80;
+  String _notificationEvaluationMode = "both";
   late TextEditingController _notificationCriteriaController;
 
   @override
@@ -166,6 +167,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     _resumeTemplateController = TextEditingController(text: "templates/resume.tex");
     _coverLetterTemplateController = TextEditingController(text: "templates/cover_letter.tex");
     _notificationCriteriaController = TextEditingController();
+    _notificationCriteriaController.addListener(_onCriteriaPromptChanged);
     _baseSalary = 0.0;
     _equityExpectation = "";
 
@@ -261,6 +263,9 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
         if (apiPref["notification_prompt_criteria"] != null) {
           _notificationCriteriaController.text = apiPref["notification_prompt_criteria"].toString();
         }
+        if (apiPref["notification_evaluation_mode"] != null && (apiPref["notification_evaluation_mode"] as String).isNotEmpty) {
+          _notificationEvaluationMode = apiPref["notification_evaluation_mode"].toString();
+        }
       });
     }
 
@@ -286,6 +291,10 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     }
   }
 
+  void _onCriteriaPromptChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
     _roleController.dispose();
@@ -294,6 +303,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
     _overleafProjectController.dispose();
     _resumeTemplateController.dispose();
     _coverLetterTemplateController.dispose();
+    _notificationCriteriaController.removeListener(_onCriteriaPromptChanged);
     _notificationCriteriaController.dispose();
     super.dispose();
   }
@@ -1471,6 +1481,59 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             const Divider(),
             const SizedBox(height: 12),
             const Text(
+              "NOTIFICATION EVALUATION MODE",
+              style: TextStyle(
+                fontFamily: "Geist",
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                letterSpacing: 0.5,
+                color: AppColors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              "Choose whether alerts require the match score threshold, custom prompt, or both.",
+              style: TextStyle(
+                fontSize: 12,
+                color: AppColors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildModeChoiceChip("both", "Both (Score & Prompt)"),
+                _buildModeChoiceChip("score_only", "Match Score Only"),
+                _buildModeChoiceChip("prompt_only", "Custom Prompt Only"),
+                _buildModeChoiceChip("either", "Either (Score or Prompt)"),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: AppColors.outlineVariant.withValues(alpha: 0.5)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, size: 16, color: AppColors.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _getNotificationModeDescription(_notificationEvaluationMode),
+                      style: const TextStyle(fontSize: 12, color: AppColors.onSurfaceVariant),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 12),
+            const Text(
               "CUSTOM NOTIFICATION CRITERIA (PROMPT)",
               style: TextStyle(
                 fontFamily: "Geist",
@@ -1491,14 +1554,33 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             const SizedBox(height: 8),
             TextField(
               controller: _notificationCriteriaController,
-              maxLines: 2,
-              style: const TextStyle(fontSize: 13),
+              minLines: 4,
+              maxLines: 10,
+              keyboardType: TextInputType.multiline,
+              textInputAction: TextInputAction.newline,
+              style: const TextStyle(
+                fontSize: 13,
+                height: 1.45,
+                fontFamily: "Inter",
+                color: AppColors.onSurface,
+              ),
               decoration: InputDecoration(
-                hintText: "e.g. Only notify if 100% remote and mentions Kubernetes or Go",
+                hintText: "e.g. Only notify if role is direct Full-Time or Intern + PPO. Reject internships < 30k/mo or CTC < 10 LPA.",
                 hintStyle: const TextStyle(fontSize: 12, color: AppColors.outlineVariant),
                 filled: true,
                 fillColor: AppColors.surfaceContainerLow,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                suffixIcon: _notificationCriteriaController.text.trim().isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 16, color: AppColors.onSurfaceVariant),
+                        tooltip: "Clear prompt",
+                        onPressed: () {
+                          setState(() {
+                            _notificationCriteriaController.clear();
+                          });
+                        },
+                      )
+                    : null,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: AppColors.outlineVariant),
@@ -1517,6 +1599,35 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildModeChoiceChip(String modeKey, String label) {
+    final isSelected = _notificationEvaluationMode == modeKey;
+    return ChoiceChip(
+      label: Text(label, style: const TextStyle(fontSize: 12)),
+      selected: isSelected,
+      selectedColor: AppColors.primary.withValues(alpha: 0.15),
+      checkmarkColor: AppColors.primary,
+      onSelected: (selected) {
+        if (selected) {
+          setState(() => _notificationEvaluationMode = modeKey);
+        }
+      },
+    );
+  }
+
+  String _getNotificationModeDescription(String mode) {
+    switch (mode) {
+      case "score_only":
+        return "Alerts when match score meets threshold, completely ignoring custom prompt.";
+      case "prompt_only":
+        return "Alerts when custom prompt criteria is satisfied, ignoring numeric score threshold.";
+      case "either":
+        return "Alerts if match score meets threshold OR custom prompt criteria is satisfied.";
+      case "both":
+      default:
+        return "Alerts only when match score meets threshold AND custom prompt criteria is satisfied.";
+    }
   }
 
   Widget _buildSaveButton() {
@@ -1559,6 +1670,7 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
             "match_threshold_notification_enabled": _matchThresholdNotificationEnabled,
             "match_threshold_percentage": _matchThresholdPercentage,
             "notification_prompt_criteria": _notificationCriteriaController.text.trim(),
+            "notification_evaluation_mode": _notificationEvaluationMode,
           });
 
           if (!mounted) return;

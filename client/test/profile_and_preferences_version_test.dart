@@ -113,5 +113,46 @@ void main() {
       expect(find.text('USD (\$)'), findsOneWidget);
       expect(find.text('INR (₹)'), findsOneWidget);
     });
+
+    testWidgets('SetPreferencesScreen renders Notification Evaluation Mode chips when match notifications enabled', (tester) async {
+      tester.view.physicalSize = const Size(1200, 3600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: SetPreferencesScreen(),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      final notifSwitchFinder = find.descendant(
+        of: find.ancestor(
+          of: find.text('NOTIFY ON HIGH MATCHES'),
+          matching: find.byType(Row),
+        ),
+        matching: find.byType(Switch),
+      );
+      expect(notifSwitchFinder, findsOneWidget);
+
+      await tester.tap(notifSwitchFinder);
+      await tester.pumpAndSettle();
+
+      expect(find.text('NOTIFICATION EVALUATION MODE'), findsOneWidget);
+      expect(find.text('Both (Score & Prompt)'), findsOneWidget);
+      expect(find.text('Match Score Only'), findsOneWidget);
+      expect(find.text('Custom Prompt Only'), findsOneWidget);
+      expect(find.text('Either (Score or Prompt)'), findsOneWidget);
+
+      await tester.tap(find.text('Custom Prompt Only'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Alerts when custom prompt criteria is satisfied, ignoring numeric score threshold.'),
+        findsOneWidget,
+      );
+    });
   });
 }

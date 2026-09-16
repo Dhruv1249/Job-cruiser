@@ -75,6 +75,7 @@ type UserProfileData struct {
 	MatchThresholdNotificationEnabled bool     `json:"match_threshold_notification_enabled"`
 	MatchThresholdPercentage          int      `json:"match_threshold_percentage"`
 	NotificationPromptCriteria        string   `json:"notification_prompt_criteria"`
+	NotificationEvaluationMode        string   `json:"notification_evaluation_mode"`
 	SkillsSummary                     string   `json:"skills_summary"`
 	ProjectsSummary                   string   `json:"projects_summary"`
 	WorkHistory                       string   `json:"work_history"`
@@ -1495,6 +1496,7 @@ func scanCandidateProfileRecord(rowScanner interface{ Scan(dest ...any) error })
 		&item.MatchThresholdNotificationEnabled,
 		&item.MatchThresholdPercentage,
 		&item.NotificationPromptCriteria,
+		&item.NotificationEvaluationMode,
 		&skillsJSON,
 		&projectsJSON,
 		&experiencesJSON,
@@ -1710,6 +1712,7 @@ func fetchAllActiveUserProfiles(ctx context.Context, databasePool *pgxpool.Pool)
 			COALESCE(up.match_threshold_notification_enabled, false),
 			COALESCE(up.match_threshold_percentage, 80),
 			COALESCE(up.notification_prompt_criteria, ''),
+			COALESCE(up.notification_evaluation_mode, 'both'),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.skills, '[]'::jsonb)) > 0 THEN up.skills ELSE u.parsed_experience->'skills' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.projects, '[]'::jsonb)) > 0 THEN up.projects ELSE u.parsed_experience->'projects' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.experiences, '[]'::jsonb)) > 0 THEN up.experiences ELSE u.parsed_experience->'experience' END, '[]'::jsonb),
@@ -1758,6 +1761,7 @@ func fetchSingleUserProfileByID(ctx context.Context, databasePool *pgxpool.Pool,
 			COALESCE(up.match_threshold_notification_enabled, false),
 			COALESCE(up.match_threshold_percentage, 80),
 			COALESCE(up.notification_prompt_criteria, ''),
+			COALESCE(up.notification_evaluation_mode, 'both'),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.skills, '[]'::jsonb)) > 0 THEN up.skills ELSE u.parsed_experience->'skills' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.projects, '[]'::jsonb)) > 0 THEN up.projects ELSE u.parsed_experience->'projects' END, '[]'::jsonb),
 			COALESCE(CASE WHEN jsonb_array_length(COALESCE(up.experiences, '[]'::jsonb)) > 0 THEN up.experiences ELSE u.parsed_experience->'experience' END, '[]'::jsonb),
@@ -1911,6 +1915,43 @@ func updateJobStandardizedLocationAndWorkModel(ctx context.Context, databasePool
 	return errExec
 }
 
+/*
+EvaluateNotificationEligibility determines whether a candidate match is eligible for notification based on mode and criteria.
+*/
+func EvaluateNotificationEligibility(
+	evaluationMode string,
+	matchScore int,
+	targetThreshold int,
+	criteriaPrompt string,
+	notificationCriteriaMet bool,
+) bool {
+	hasCriteriaPrompt := strings.TrimSpace(criteriaPrompt) != ""
+	isScoreMet := matchScore >= targetThreshold
+	isPromptMet := hasCriteriaPrompt && notificationCriteriaMet
+
+	switch strings.ToLower(strings.TrimSpace(evaluationMode)) {
+	case "score_only":
+		return isScoreMet
+	case "prompt_only":
+		if !hasCriteriaPrompt {
+			return false
+		}
+		return isPromptMet
+	case "either":
+		if !hasCriteriaPrompt {
+			return isScoreMet
+		}
+		return isScoreMet || isPromptMet
+	case "both":
+		fallthrough
+	default:
+		if hasCriteriaPrompt {
+			return isScoreMet && isPromptMet
+		}
+		return isScoreMet
+	}
+}
+
 func notifyUserOnHighMatch(
 	ctx context.Context,
 	databasePool *pgxpool.Pool,
@@ -1928,10 +1969,7 @@ func notifyUserOnHighMatch(
 	if targetThreshold <= 0 {
 		targetThreshold = 80
 	}
-	if matchScore < targetThreshold {
-		return
-	}
-	if strings.TrimSpace(profile.NotificationPromptCriteria) != "" && !notificationCriteriaMet {
+	if !EvaluateNotificationEligibility(profile.NotificationEvaluationMode, matchScore, targetThreshold, profile.NotificationPromptCriteria, notificationCriteriaMet) {
 		return
 	}
 
