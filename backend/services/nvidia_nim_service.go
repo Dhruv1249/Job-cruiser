@@ -234,6 +234,7 @@ var CVParsingJSONSchema = map[string]any{
 					"name":   map[string]any{"type": "string"},
 					"issuer": map[string]any{"type": "string"},
 					"date":   map[string]any{"type": "string"},
+					"link":   map[string]any{"type": "string"},
 				},
 				"required": []string{"name"},
 			},
@@ -1611,7 +1612,11 @@ func scanCandidateProfileRecord(rowScanner interface{ Scan(dest ...any) error })
 			if cert.Date != "" {
 				dateInfo = fmt.Sprintf(" (%s)", cert.Date)
 			}
-			certDescriptions = append(certDescriptions, fmt.Sprintf("- %s by %s%s", cert.Name, cert.Issuer, dateInfo))
+			linkInfo := ""
+			if cert.Link != "" {
+				linkInfo = fmt.Sprintf(" [Link: %s]", cert.Link)
+			}
+			certDescriptions = append(certDescriptions, fmt.Sprintf("- %s by %s%s%s", cert.Name, cert.Issuer, dateInfo, linkInfo))
 		}
 		item.CertificationsSummary = strings.Join(certDescriptions, "\n")
 	}
@@ -2076,6 +2081,7 @@ type candidateCertificationItem struct {
 	Name   string `json:"name"`
 	Issuer string `json:"issuer"`
 	Date   string `json:"date"`
+	Link   string `json:"link"`
 }
 
 type candidateResearchPatentItem struct {

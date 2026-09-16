@@ -390,6 +390,7 @@ func TestPreferencesRequestBindingWithStructuredResumeDetails(t *testing.T) {
 			{
 				"name":   "AWS Certified Solutions Architect",
 				"issuer": "Amazon Web Services",
+				"link":   "https://aws.amazon.com/verify/123",
 			},
 		},
 	}
@@ -422,7 +423,7 @@ func TestPreferencesRequestBindingWithStructuredResumeDetails(t *testing.T) {
 		if len(req.Achievements) != 1 || req.Achievements[0].Title != "Hackathon Winner" {
 			t.Errorf("unexpected achievements binding: %+v", req.Achievements)
 		}
-		if len(req.Certifications) != 1 || req.Certifications[0].Name != "AWS Certified Solutions Architect" {
+		if len(req.Certifications) != 1 || req.Certifications[0].Name != "AWS Certified Solutions Architect" || req.Certifications[0].Link != "https://aws.amazon.com/verify/123" {
 			t.Errorf("unexpected certifications binding: %+v", req.Certifications)
 		}
 

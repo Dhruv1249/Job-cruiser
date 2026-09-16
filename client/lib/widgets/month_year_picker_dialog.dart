@@ -201,12 +201,14 @@ class DateRangePickerField extends StatelessWidget {
   final TextEditingController controller;
   final String labelText;
   final String hintText;
+  final Widget? prefixIcon;
 
   const DateRangePickerField({
     super.key,
     required this.controller,
     this.labelText = "Duration Range",
     this.hintText = "e.g. Nov 2021 - Present",
+    this.prefixIcon,
   });
 
   @override
@@ -273,6 +275,7 @@ class DateRangePickerField extends StatelessWidget {
           decoration: InputDecoration(
             labelText: labelText,
             hintText: hintText,
+            prefixIcon: prefixIcon,
             isDense: true,
             suffixIcon: controller.text.isNotEmpty
                 ? IconButton(
@@ -295,6 +298,7 @@ class SingleDatePickerField extends StatelessWidget {
   final String labelText;
   final String hintText;
   final bool allowPresent;
+  final Widget? prefixIcon;
 
   const SingleDatePickerField({
     super.key,
@@ -302,6 +306,7 @@ class SingleDatePickerField extends StatelessWidget {
     required this.labelText,
     this.hintText = "e.g. Oct 2024 or Present",
     this.allowPresent = false,
+    this.prefixIcon,
   });
 
   @override
@@ -317,6 +322,7 @@ class SingleDatePickerField extends StatelessWidget {
             decoration: InputDecoration(
               labelText: labelText,
               hintText: hintText,
+              prefixIcon: prefixIcon,
               isDense: true,
             ),
           ),

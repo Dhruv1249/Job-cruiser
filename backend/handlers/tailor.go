@@ -349,6 +349,7 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 		Name   string `json:"name"`
 		Issuer string `json:"issuer"`
 		Date   string `json:"date"`
+		Link   string `json:"link"`
 	}
 	var rawCertifications []certificationRecord
 	if len(certificationsJSON) > 0 {
@@ -366,6 +367,9 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 				profile.WriteString(fmt.Sprintf(" — %s", certItem.Issuer))
 			}
 			profile.WriteString(dateText)
+			if certItem.Link != "" {
+				profile.WriteString(fmt.Sprintf(" (Link: %s)", certItem.Link))
+			}
 			profile.WriteString("\n")
 		}
 		profile.WriteString("\n")

@@ -190,6 +190,7 @@ type ParsedCertificationItem struct {
 	Name   string `json:"name"`
 	Issuer string `json:"issuer"`
 	Date   string `json:"date"`
+	Link   string `json:"link"`
 }
 
 type ParsedEducationItem struct {
@@ -1091,6 +1092,7 @@ type flexCertificationItem struct {
 	Name   string `json:"name"`
 	Issuer string `json:"issuer"`
 	Date   string `json:"date"`
+	Link   string `json:"link"`
 }
 
 type flexResearchPatentItem struct {
@@ -1253,7 +1255,8 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
     {
       "name": "Certification Name",
       "issuer": "Issuing Org",
-      "date": "Jan 2024"
+      "date": "Jan 2024",
+      "link": "URL or empty"
     }
   ],
   "discovered_keywords": ["Golang", "Postgres", "Flutter", "Kubernetes"]
@@ -1377,7 +1380,8 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 					"properties": {
 						"name": {"type": "string"},
 						"issuer": {"type": "string"},
-						"date": {"type": "string"}
+						"date": {"type": "string"},
+						"link": {"type": "string"}
 					},
 					"required": ["name"]
 				}
@@ -1535,6 +1539,7 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 			Name:   item.Name,
 			Issuer: item.Issuer,
 			Date:   item.Date,
+			Link:   item.Link,
 		})
 	}
 

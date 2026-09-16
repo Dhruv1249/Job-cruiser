@@ -213,17 +213,17 @@ func (service *ResumeTailorService) TailorResumeToFolderWithTemplate(
 		"You are an expert LaTeX resume tailoring engine. Your task is to craft a dense, single-page, ATS-compliant LaTeX resume tailored specifically to the target job description, derived exclusively from the candidate's authentic background.\n\n"+
 			"CORE DIRECTIVES:\n"+
 			"1. OUTPUT FORMAT: Output ONLY valid compilable LaTeX code. Do NOT output markdown code fences (no ```latex or ```), no explanations, and no commentary. The output must start directly with \\documentclass and end with \\end{document}.\n"+
-			"2. BASELINE TEMPLATE USAGE: The baseline LaTeX template provided in user content is a FORMAT AND MACRO SKELETON ONLY. You MUST adopt its preamble, package imports, geometry margins, color definitions, and custom structural macros (\\resumeSubheading, \\resumeItem, \\resumeProjectHeading).\n"+
-			"3. PURGE ALL DUMMY TEMPLATE DATA: All text inside \\begin{document}...\\end{document} in the baseline template (such as 'Candidate Name', 'Acme Cloud Technologies', 'Nexus Systems', 'Distributed Task Queue Engine', dummy universities, sample bullet points, and dummy dates) is PLACEHOLDER MOCK DATA. You MUST COMPLETELY PURGE AND REPLACE all dummy template entries with the candidate's authentic information from the CANDIDATE EXPERIENCE BANK. NEVER retain any dummy companies, projects, or placeholder names from the template.\n"+
-			"4. CONTACT & PROFILE LINKS: Render the candidate's real name, email, phone, location, LinkedIn, GitHub, portfolio, and any other provided profile links prominently in the header. Never use 'Candidate Name' or placeholder links.\n"+
+			"2. BASELINE TEMPLATE FIDELITY & PREAMBLE PRESERVATION: You MUST PRESERVE the exact LaTeX preamble, document class, font configuration, package imports (including fontspec, fontawesome5, titlesec, hyperref, etc.), margin/geometry settings, color definitions, and custom macros from the BASELINE LATEX TEMPLATE. Do NOT remove, downgrade, or strip packages or macros defined in the baseline template.\n"+
+			"3. PURGE DUMMY DATA WHILE RETAINING STRUCTURE: All textual entries inside \\begin{document}...\\end{document} in the baseline template (such as 'Candidate Name', sample university names, dummy companies, dummy projects, sample bullets, dummy dates) are PLACEHOLDER MOCK DATA. You MUST COMPLETELY PURGE AND REPLACE all placeholder text with the candidate's authentic information from the CANDIDATE EXPERIENCE BANK, while strictly retaining the template's layout style, section structure, and macros.\n"+
+			"4. CONTACT & PROFILE LINKS: Render the candidate's real name, email, phone, location, LinkedIn, GitHub, portfolio, and any other provided profile links in the header matching the baseline template's styling and icon macros (e.g. preserving \\faPhone, \\faEnvelope, \\faLinkedin, \\faGithub, \\faGlobe, or other icons if used in the template). Never use 'Candidate Name' or placeholder links.\n"+
 			"5. PROFESSIONAL SUMMARY: Write an impactful 2-3 sentence summary tailored specifically for the %s role at %s, synthesizing the candidate's genuine technical strengths and domain expertise from their experience bank to address the core requirements in the JOB DESCRIPTION.\n"+
 			"6. TECHNICAL SKILLS: Populate the skills section exclusively with the candidate's actual languages, frameworks, cloud technologies, databases, and developer tools extracted from their experience bank. Group them cleanly and prioritize skills that match the target role (%s).\n"+
-			"7. WORK EXPERIENCE: Render the candidate's real work history (company names, titles, employment dates, locations) from the experience bank using \\resumeSubheading. Write strong, tailored \\resumeItem bullets starting with assertive action verbs that emphasize technical accomplishments, architecture, scalability, latency, database optimizations, and tooling matching the JD's requirements. NEVER retain placeholder companies or generic template bullets.\n"+
-			"8. PROJECTS: Highlight 2-3 of the candidate's real projects from their experience bank that best demonstrate relevant tech stack proficiencies and problem-solving. Render using \\resumeProjectHeading with real project names, technologies used, and GitHub/live links. Detail what the candidate actually built and the technical impact. NEVER copy dummy template projects.\n"+
-			"9. EDUCATION & CERTIFICATIONS: Render the candidate's real degree, university/institution, graduation year, and academic achievements using \\resumeSubheading. Do not use dummy universities.\n"+
+			"7. WORK EXPERIENCE: Render the candidate's real work history (company names, titles, employment dates, locations) from the experience bank using the template's subheading and item macros (such as \\resumeSubheading, \\resumeItem). Write strong, tailored bullets starting with assertive action verbs that emphasize technical accomplishments, architecture, scalability, latency, database optimizations, and tooling matching the JD's requirements. NEVER retain placeholder companies or generic template bullets.\n"+
+			"8. PROJECTS & OTHER SECTIONS: Render the candidate's real projects and other relevant sections (such as Open Source, Certifications, Achievements if present in the experience bank and template) using the template's project macros (such as \\resumeProjectHeading) and item bullets. Detail real project names, technologies used, GitHub/live links, and technical impact. NEVER copy dummy template projects.\n"+
+			"9. EDUCATION: Render the candidate's real degree, university/institution, graduation year, and academic achievements using the template's education macros. Do not use dummy universities.\n"+
 			"10. NO INVENTED EXPERIENCE: NEVER invent fake employers, fake job titles, or unearned degrees. However, deeply expand upon the technical execution of the candidate's genuine projects and responsibilities (architecture, concurrency, APIs, performance, data pipelines) to create a dense, impressive, fully-filled resume.\n"+
 			"11. PAGE BUDGET: Exactly %d page(s). Ensure the resume fills the target page budget completely from top to bottom with zero awkward whitespace gaps at the bottom, without spilling onto an extra page.\n"+
-			"12. STANDARD PACKAGES ONLY: Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
+			"12. COMPILER COMPATIBILITY: The document is compiled with XeLaTeX in Open-Overleaf (TeX Live environment). Retain all packages and macros declared in the baseline template. Ensure all LaTeX syntax and commands are valid for XeLaTeX compilation.\n"+
 			"13. ESCAPE SPECIAL CHARACTERS: ALWAYS properly escape special characters in text, company names, titles, and links: use \\& for &, \\%% for %%, \\_ for _, \\# for #, \\$ for $.\n"+
 			"14. Output MUST begin with \\documentclass and end with \\end{document}.",
 		jobContext.Title,
@@ -284,9 +284,9 @@ func (service *ResumeTailorService) TailorResumeToFolderWithTemplate(
 				"--- COMPILER ERROR LOG ---\n%s\n--- END ERROR LOG ---\n\n"+
 				"--- FAILED LATEX SOURCE ---\n%s\n--- END LATEX SOURCE ---\n\n"+
 				"DEBUGGING & FIXING INSTRUCTIONS:\n"+
-				"1. Correct all syntax errors, undefined macros, and environment mismatches shown in the log while strictly preserving the template's design.\n"+
+				"1. Correct all syntax errors, undefined macros, and environment mismatches shown in the log while strictly preserving the template's design and preamble.\n"+
 				"2. Escape all special characters in text: use \\& for &, \\%% for %%, \\_ for _, \\# for #, and \\$ for $.\n"+
-				"3. Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
+				"3. Preserve all packages and macro definitions from the document preamble (including fontspec, fontawesome5, titlesec, etc.) necessary for XeLaTeX compilation.\n"+
 				"4. Output ONLY the complete, corrected, compilable LaTeX code with no markdown fences or commentary.",
 			errorLog,
 			tailoredTeX,
@@ -424,9 +424,9 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolderWithTemplate(
 	systemInstruction := fmt.Sprintf(
 		"You are an expert LaTeX cover letter writer. Output ONLY valid compilable LaTeX code without markdown fences, commentary, or conversational filler. Output MUST begin with \\documentclass and end with \\end{document}.\n\n"+
 			"CORE DIRECTIVES:\n"+
-			"1. SKELETON BLUEPRINT ONLY: The baseline template provided in user content is ONLY a styling blueprint (preamble, geometry, and layout). The text in the template (such as 'Candidate Name', 'Target Company', 'Software Engineer role at Target Company', and the generic sample paragraphs) is DUMMY PLACEHOLDER TEXT. You MUST COMPLETELY REPLACE all dummy text with a fully customized, professional cover letter tailored specifically to the candidate and the target role.\n"+
+			"1. SKELETON BLUEPRINT & STYLING PRESERVATION: The baseline cover letter template provided in user content is a styling and layout blueprint (preamble, geometry, fonts, packages, and header layout). Preserve its exact preamble, package imports, and styling definitions. All text in the template is DUMMY PLACEHOLDER TEXT that MUST be completely replaced with a fully customized, professional cover letter tailored specifically to the candidate and target role.\n"+
 			"2. RECIPIENT & COMPANY: Address the letter specifically to '%s' (Company) and reference the '%s' (Title) role. NEVER output 'Target Company' or placeholder names.\n"+
-			"3. HEADER & SIGNATURE: Render the candidate's real name, email, phone, location, and links from the candidate profile in both the top header and closing signature. Never use 'Candidate Name' or placeholder links.\n"+
+			"3. HEADER & SIGNATURE: Render the candidate's real name, email, phone, location, and links from the candidate profile in both the top header and closing signature, adopting the template's header styling and icons. Never use 'Candidate Name' or placeholder links.\n"+
 			"4. ORIGINAL PERSUASIVE LETTER BODY: Write 3-4 cohesive, compelling, beautifully phrased paragraphs:\n"+
 			"   - Opening: State enthusiastic interest in the %s position at %s. Summarize who the candidate is and why their unique background makes them an exceptional match.\n"+
 			"   - Technical Alignment: Detail 2-3 specific real projects, technologies, and achievements from the candidate's background that directly solve the requirements and tech stack (%s) described in the JOB DESCRIPTION. Explain what the candidate built and the tangible technical impact.\n"+
@@ -434,7 +434,7 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolderWithTemplate(
 			"   - Professional Closing: Reiterate value proposition, express eagerness to discuss technical contributions, and provide a polite call to action.\n"+
 			"5. TRUTHFULNESS: Every technical claim and project must be grounded in the candidate's actual background. Do not invent companies or fake credentials.\n"+
 			"6. PAGE BUDGET: Exactly %d page(s). Neatly balanced and full without overflowing onto a second page.\n"+
-			"7. STANDARD PACKAGES & ESCAPING: Use standard TeX Live packages only. ALWAYS properly escape special characters (\\&, \\%%, \\_, \\#, \\$).",
+			"7. COMPILER COMPATIBILITY & ESCAPING: The document is compiled with XeLaTeX in Open-Overleaf. Retain all packages and macros declared in the template. ALWAYS properly escape special characters (\\&, \\%%, \\_, \\#, \\$).",
 		jobContext.Company,
 		jobContext.Title,
 		jobContext.Title,
@@ -496,9 +496,9 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolderWithTemplate(
 				"--- COMPILER ERROR LOG ---\n%s\n--- END ERROR LOG ---\n\n"+
 				"--- FAILED LATEX SOURCE ---\n%s\n--- END LATEX SOURCE ---\n\n"+
 				"DEBUGGING & FIXING INSTRUCTIONS:\n"+
-				"1. Correct all syntax errors, undefined macros, and environment mismatches shown in the log while preserving the template layout.\n"+
+				"1. Correct all syntax errors, undefined macros, and environment mismatches shown in the log while preserving the template layout and preamble.\n"+
 				"2. Escape all special characters in text: use \\& for &, \\%% for %%, \\_ for _, \\# for #, and \\$ for $.\n"+
-				"3. Use standard TeX Live packages only: geometry, hyperref, titlesec, enumitem, tabularx, array, xcolor.\n"+
+				"3. Preserve all packages and macro definitions from the document preamble necessary for XeLaTeX compilation.\n"+
 				"4. Output ONLY the complete, corrected, compilable LaTeX code with no markdown fences or commentary.",
 			errorLog,
 			coverLetterTeX,

@@ -274,6 +274,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                 'name': item['name']?.toString() ?? '',
                 'issuer': item['issuer']?.toString() ?? '',
                 'date': item['date']?.toString() ?? '',
+                'link': item['link']?.toString() ?? '',
               });
             }
           }
@@ -1439,6 +1440,8 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                       if (formattedDate.isNotEmpty) formattedDate,
                     ].join(' • ');
 
+                    final link = item['link']?.toString() ?? '';
+
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
                       shape: RoundedRectangleBorder(
@@ -1450,14 +1453,43 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                           name,
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: subtitleParts.isNotEmpty
-                            ? Text(
-                                subtitleParts,
-                                style: const TextStyle(
-                                  color: AppColors.onSurfaceVariant,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
+                        subtitle: (subtitleParts.isNotEmpty || link.isNotEmpty)
+                            ? Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (subtitleParts.isNotEmpty)
+                                    Text(
+                                      subtitleParts,
+                                      style: const TextStyle(
+                                        color: AppColors.onSurfaceVariant,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  if (link.isNotEmpty) ...[
+                                    const SizedBox(height: 4),
+                                    InkWell(
+                                      onTap: () => _launchExternalUrl(link),
+                                      child: Row(
+                                        children: [
+                                          const Icon(Icons.link, size: 14, color: AppColors.primary),
+                                          const SizedBox(width: 4),
+                                          Expanded(
+                                            child: Text(
+                                              link,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: AppColors.primary,
+                                                fontSize: 12,
+                                                decoration: TextDecoration.underline,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               )
                             : null,
                         trailing: Row(
@@ -1794,21 +1826,37 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: companyCtrl, decoration: const InputDecoration(labelText: 'Company')),
+              TextField(
+                controller: companyCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Company',
+                  prefixIcon: Icon(Icons.business, size: 20),
+                ),
+              ),
               const SizedBox(height: 8),
-              TextField(controller: roleCtrl, decoration: const InputDecoration(labelText: 'Role / Title')),
+              TextField(
+                controller: roleCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Role / Title',
+                  prefixIcon: Icon(Icons.badge_outlined, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
               DateRangePickerField(
                 controller: durationCtrl,
                 labelText: 'Duration Range',
                 hintText: 'e.g. Nov 2021 - Present',
+                prefixIcon: const Icon(Icons.date_range_outlined, size: 20),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: highlightsCtrl,
                 minLines: 1,
                 maxLines: 4,
-                decoration: const InputDecoration(labelText: 'Highlights & Responsibilities'),
+                decoration: const InputDecoration(
+                  labelText: 'Highlights & Responsibilities',
+                  prefixIcon: Icon(Icons.description_outlined, size: 20),
+                ),
               ),
             ],
           ),
@@ -1870,21 +1918,37 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Project Title')),
+              TextField(
+                controller: titleCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Project Title',
+                  prefixIcon: Icon(Icons.folder_outlined, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
               DateRangePickerField(
                 controller: durationCtrl,
                 labelText: 'Project Duration',
                 hintText: 'e.g. Jan 2023 - Present',
+                prefixIcon: const Icon(Icons.date_range_outlined, size: 20),
               ),
               const SizedBox(height: 12),
-              TextField(controller: techCtrl, decoration: const InputDecoration(labelText: 'Tech Stack (e.g. Go, React)')),
+              TextField(
+                controller: techCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Tech Stack (e.g. Go, React)',
+                  prefixIcon: Icon(Icons.layers_outlined, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
               TextField(
                 controller: descCtrl,
                 minLines: 1,
                 maxLines: 4,
-                decoration: const InputDecoration(labelText: 'Description'),
+                decoration: const InputDecoration(
+                  labelText: 'Description',
+                  prefixIcon: Icon(Icons.description_outlined, size: 20),
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -1956,17 +2020,36 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: instCtrl, decoration: const InputDecoration(labelText: 'School / Institution')),
+              TextField(
+                controller: instCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'School / Institution',
+                  prefixIcon: Icon(Icons.school_outlined, size: 20),
+                ),
+              ),
               const SizedBox(height: 8),
-              TextField(controller: degreeCtrl, decoration: const InputDecoration(labelText: 'Degree / Program')),
+              TextField(
+                controller: degreeCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Degree / Program',
+                  prefixIcon: Icon(Icons.workspace_premium_outlined, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
               DateRangePickerField(
                 controller: yearCtrl,
                 labelText: 'Graduation / Study Period',
                 hintText: 'e.g. Aug 2020 - May 2024',
+                prefixIcon: const Icon(Icons.date_range_outlined, size: 20),
               ),
               const SizedBox(height: 8),
-              TextField(controller: gradeCtrl, decoration: const InputDecoration(labelText: 'Grade / CGPA')),
+              TextField(
+                controller: gradeCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Grade / CGPA',
+                  prefixIcon: Icon(Icons.grade_outlined, size: 20),
+                ),
+              ),
             ],
           ),
         ),
@@ -2007,7 +2090,10 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
         title: const Text('Add Technical Skill'),
         content: TextField(
           controller: skillCtrl,
-          decoration: const InputDecoration(labelText: 'Skill / Tech Stack (e.g. Docker, Rust)'),
+          decoration: const InputDecoration(
+            labelText: 'Skill / Tech Stack (e.g. Docker, Rust)',
+            prefixIcon: Icon(Icons.layers_outlined, size: 20),
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
@@ -2043,13 +2129,20 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Achievement Title')),
+              TextField(
+                controller: titleCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Achievement Title',
+                  prefixIcon: Icon(Icons.emoji_events_outlined, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
               SingleDatePickerField(
                 controller: dateCtrl,
                 labelText: 'Date Received / Completed',
                 hintText: 'e.g. Oct 2024 or Present',
                 allowPresent: true,
+                prefixIcon: const Icon(Icons.date_range_outlined, size: 20),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -2065,7 +2158,10 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                 controller: detailsCtrl,
                 minLines: 1,
                 maxLines: 4,
-                decoration: const InputDecoration(labelText: 'Details'),
+                decoration: const InputDecoration(
+                  labelText: 'Details',
+                  prefixIcon: Icon(Icons.description_outlined, size: 20),
+                ),
               ),
             ],
           ),
@@ -2103,6 +2199,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
     final nameCtrl = TextEditingController(text: isEditing ? _certifications[editIndex]['name'] : '');
     final issuerCtrl = TextEditingController(text: isEditing ? _certifications[editIndex]['issuer'] : '');
     final dateCtrl = TextEditingController(text: isEditing ? _certifications[editIndex]['date'] : '');
+    final linkCtrl = TextEditingController(text: isEditing ? (_certifications[editIndex]['link'] ?? '') : '');
 
     showDialog(
       context: context,
@@ -2112,15 +2209,37 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Certification Name')),
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Certification Name',
+                  prefixIcon: Icon(Icons.verified_outlined, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
-              TextField(controller: issuerCtrl, decoration: const InputDecoration(labelText: 'Issuing Organization')),
+              TextField(
+                controller: issuerCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Issuing Organization',
+                  prefixIcon: Icon(Icons.business, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
               SingleDatePickerField(
                 controller: dateCtrl,
                 labelText: 'Date Issued / Completed',
                 hintText: 'e.g. Oct 2024 or Present',
                 allowPresent: true,
+                prefixIcon: const Icon(Icons.date_range_outlined, size: 20),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: linkCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Credential URL / Verification Link',
+                  hintText: 'https://...',
+                  prefixIcon: Icon(Icons.link, size: 20),
+                ),
               ),
             ],
           ),
@@ -2135,6 +2254,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                     'name': nameCtrl.text.trim(),
                     'issuer': issuerCtrl.text.trim(),
                     'date': dateCtrl.text.trim(),
+                    'link': linkCtrl.text.trim(),
                   };
                   if (isEditing) {
                     _certifications[editIndex] = data;
@@ -2169,17 +2289,36 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Title / Publication Name')),
+              TextField(
+                controller: titleCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Title / Publication Name',
+                  prefixIcon: Icon(Icons.article_outlined, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
-              TextField(controller: authorsCtrl, decoration: const InputDecoration(labelText: 'Authors / Inventors')),
+              TextField(
+                controller: authorsCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Authors / Inventors',
+                  prefixIcon: Icon(Icons.people_outline, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
-              TextField(controller: pubCtrl, decoration: const InputDecoration(labelText: 'Venue / Patent Number')),
+              TextField(
+                controller: pubCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Venue / Patent Number',
+                  prefixIcon: Icon(Icons.menu_book_outlined, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
               SingleDatePickerField(
                 controller: dateCtrl,
                 labelText: 'Date / Period',
                 hintText: 'e.g. Nov 2023 or Present',
                 allowPresent: true,
+                prefixIcon: const Icon(Icons.date_range_outlined, size: 20),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -2195,7 +2334,10 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                 controller: descCtrl,
                 minLines: 1,
                 maxLines: 4,
-                decoration: const InputDecoration(labelText: 'Abstract / Summary'),
+                decoration: const InputDecoration(
+                  labelText: 'Abstract / Summary',
+                  prefixIcon: Icon(Icons.description_outlined, size: 20),
+                ),
               ),
             ],
           ),
@@ -2253,17 +2395,36 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: projectCtrl, decoration: const InputDecoration(labelText: 'Project / Repository Name')),
+              TextField(
+                controller: projectCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Project / Repository Name',
+                  prefixIcon: Icon(Icons.code, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
-              TextField(controller: roleCtrl, decoration: const InputDecoration(labelText: 'Role / Contribution Type')),
+              TextField(
+                controller: roleCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Role / Contribution Type',
+                  prefixIcon: Icon(Icons.person_outline, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
               DateRangePickerField(
                 controller: durationCtrl,
                 labelText: 'Contribution Duration',
                 hintText: 'e.g. Jan 2022 - Present',
+                prefixIcon: const Icon(Icons.date_range_outlined, size: 20),
               ),
               const SizedBox(height: 12),
-              TextField(controller: techCtrl, decoration: const InputDecoration(labelText: 'Tech Stack (comma separated)')),
+              TextField(
+                controller: techCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Tech Stack (comma separated)',
+                  prefixIcon: Icon(Icons.layers_outlined, size: 20),
+                ),
+              ),
               const SizedBox(height: 12),
               TextField(
                 controller: linkCtrl,
@@ -2278,7 +2439,10 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                 controller: descCtrl,
                 minLines: 1,
                 maxLines: 4,
-                decoration: const InputDecoration(labelText: 'Description / Impact'),
+                decoration: const InputDecoration(
+                  labelText: 'Description / Impact',
+                  prefixIcon: Icon(Icons.description_outlined, size: 20),
+                ),
               ),
             ],
           ),

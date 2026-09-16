@@ -270,6 +270,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Project Title *",
                     hintText: "e.g. Distributed Task Queue",
+                    prefixIcon: Icon(Icons.folder_outlined, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -277,6 +278,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   controller: durationController,
                   labelText: "Project Duration",
                   hintText: "e.g. Jan 2023 - Present",
+                  prefixIcon: const Icon(Icons.date_range_outlined, size: 20),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -284,6 +286,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Tech Stack (comma separated)",
                     hintText: "Go, Docker, Redis, gRPC",
+                    prefixIcon: Icon(Icons.layers_outlined, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -294,6 +297,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Description",
                     hintText: "Engineered a scalable queue handling 10k tasks/sec...",
+                    prefixIcon: Icon(Icons.description_outlined, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -398,6 +402,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Company *",
                     hintText: "e.g. Google or Startup Inc.",
+                    prefixIcon: Icon(Icons.business, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -406,6 +411,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Role Title *",
                     hintText: "e.g. Senior Software Engineer",
+                    prefixIcon: Icon(Icons.badge_outlined, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -413,6 +419,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   controller: durationController,
                   labelText: "Duration Range",
                   hintText: "e.g. Jan 2023 - Present",
+                  prefixIcon: const Icon(Icons.date_range_outlined, size: 20),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -422,6 +429,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Key Highlights (one per line)",
                     hintText: "Architected microservices...\nImproved query latency by 45%...",
+                    prefixIcon: Icon(Icons.description_outlined, size: 20),
                   ),
                 ),
               ],
@@ -489,6 +497,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Institution / University *",
                     hintText: "e.g. Stanford University",
+                    prefixIcon: Icon(Icons.school_outlined, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -497,6 +506,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Degree / Major *",
                     hintText: "e.g. B.S. in Computer Science",
+                    prefixIcon: Icon(Icons.workspace_premium_outlined, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -504,6 +514,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   controller: yearController,
                   labelText: "Graduation / Study Period",
                   hintText: "e.g. Aug 2020 - May 2024",
+                  prefixIcon: const Icon(Icons.date_range_outlined, size: 20),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -511,6 +522,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "GPA / Grade",
                     hintText: "e.g. 3.9 / 4.0 or 8.8 CGPA",
+                    prefixIcon: Icon(Icons.grade_outlined, size: 20),
                   ),
                 ),
               ],
@@ -578,6 +590,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Achievement / Award Title *",
                     hintText: "e.g. 1st Place at Global Hackathon",
+                    prefixIcon: Icon(Icons.emoji_events_outlined, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -586,6 +599,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   labelText: "Date Received / Completed",
                   hintText: "e.g. Oct 2024 or Present",
                   allowPresent: true,
+                  prefixIcon: const Icon(Icons.date_range_outlined, size: 20),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -604,6 +618,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Details / Impact",
                     hintText: "Outperformed 120 teams; recognized for scalable architecture...",
+                    prefixIcon: Icon(Icons.description_outlined, size: 20),
                   ),
                 ),
               ],
@@ -654,6 +669,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final nameController = TextEditingController(text: existingCertification?["name"]?.toString() ?? "");
     final issuerController = TextEditingController(text: existingCertification?["issuer"]?.toString() ?? "");
     final dateController = TextEditingController(text: existingCertification?["date"]?.toString() ?? "");
+    final linkController = TextEditingController(text: existingCertification?["link"]?.toString() ?? "");
 
     final result = await showDialog<bool>(
       context: context,
@@ -670,6 +686,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Certification Name *",
                     hintText: "e.g. AWS Certified Solutions Architect",
+                    prefixIcon: Icon(Icons.verified_outlined, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -678,6 +695,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Issuing Organization",
                     hintText: "e.g. Amazon Web Services",
+                    prefixIcon: Icon(Icons.business, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -686,6 +704,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   labelText: "Date Issued / Completed",
                   hintText: "e.g. May 2023 or Present",
                   allowPresent: true,
+                  prefixIcon: const Icon(Icons.date_range_outlined, size: 20),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: linkController,
+                  decoration: const InputDecoration(
+                    labelText: "Credential URL / Verification Link",
+                    hintText: "https://...",
+                    prefixIcon: Icon(Icons.link, size: 20),
+                  ),
                 ),
               ],
             ),
@@ -713,6 +741,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         "name": nameController.text.trim(),
         "issuer": issuerController.text.trim(),
         "date": dateController.text.trim(),
+        "link": linkController.text.trim(),
       };
 
       setState(() {
@@ -727,6 +756,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     nameController.dispose();
     issuerController.dispose();
     dateController.dispose();
+    linkController.dispose();
   }
 
   Future<void> _showResearchPatentDialog({Map<String, dynamic>? existingItem, int? editIndex}) async {
@@ -752,6 +782,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Paper or Patent Title *",
                     hintText: "e.g. Distributed Consensus in Asynchronous Networks",
+                    prefixIcon: Icon(Icons.article_outlined, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -760,6 +791,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Authors",
                     hintText: "e.g. John Doe, Jane Smith",
+                    prefixIcon: Icon(Icons.people_outline, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -768,6 +800,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Publication Venue / Patent Number",
                     hintText: "e.g. IEEE Transactions on Cloud / US Patent #987654",
+                    prefixIcon: Icon(Icons.menu_book_outlined, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -776,6 +809,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   labelText: "Date / Year",
                   hintText: "e.g. Nov 2023",
                   allowPresent: false,
+                  prefixIcon: const Icon(Icons.date_range_outlined, size: 20),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -783,6 +817,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "URL / DOI Link",
                     hintText: "https://doi.org/...",
+                    prefixIcon: Icon(Icons.link, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -793,6 +828,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Abstract / Summary",
                     hintText: "Key contributions, methodology, and theoretical findings...",
+                    prefixIcon: Icon(Icons.description_outlined, size: 20),
                   ),
                 ),
               ],
@@ -870,6 +906,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Project / Repository Name *",
                     hintText: "e.g. kubernetes/kubernetes or golang/go",
+                    prefixIcon: Icon(Icons.code, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -878,6 +915,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Role / Contribution Type",
                     hintText: "e.g. Core Maintainer or Active Contributor",
+                    prefixIcon: Icon(Icons.person_outline, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -885,6 +923,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   controller: durationController,
                   labelText: "Contribution Duration",
                   hintText: "e.g. Jan 2022 - Present",
+                  prefixIcon: const Icon(Icons.date_range_outlined, size: 20),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -892,6 +931,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Tech Stack (comma separated)",
                     hintText: "Go, Kubernetes, Docker",
+                    prefixIcon: Icon(Icons.layers_outlined, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -900,6 +940,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Repository / PR Link",
                     hintText: "https://github.com/...",
+                    prefixIcon: Icon(Icons.link, size: 20),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -910,6 +951,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   decoration: const InputDecoration(
                     labelText: "Contribution Highlights",
                     hintText: "Authored custom scheduler plugin; reviewed 40+ PRs...",
+                    prefixIcon: Icon(Icons.description_outlined, size: 20),
                   ),
                 ),
               ],
@@ -2122,6 +2164,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 final name = cert["name"]?.toString() ?? "";
                 final issuer = cert["issuer"]?.toString() ?? "";
                 final date = cert["date"]?.toString() ?? "";
+                final link = cert["link"]?.toString() ?? "";
                 final formattedDate = formatDisplayDuration(date);
 
                 final subtitle = [
@@ -2148,6 +2191,29 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                 color: AppColors.onSurfaceVariant,
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                          if (link.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            InkWell(
+                              onTap: () => _launchExternalUrl(link),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.link, size: 14, color: AppColors.primary),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      link,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontSize: 12,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ],

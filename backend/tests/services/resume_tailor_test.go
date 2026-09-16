@@ -574,3 +574,114 @@ func TestTailorResumeToFolderWithTemplateIncludesBaselineInPrompt(t *testing.T) 
 		t.Fatalf("expected Gemini prompt to include custom macro from baseline template, prompt was: %s", capturedGeminiPrompt)
 	}
 }
+
+func TestTailorResumeToFolderWithTemplatePreservesFontAwesomeAndPreambleDirectives(t *testing.T) {
+	customTemplate := "\\documentclass{article}\n\\usepackage{fontspec}\n\\usepackage{fontawesome5}\n\\begin{document}\n\\faPhone\\ 123456\n\\end{document}"
+	var capturedSystemInstruction string
+
+	geminiServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var requestBody map[string]interface{}
+		json.NewDecoder(request.Body).Decode(&requestBody)
+		if sysInstruction, ok := requestBody["system_instruction"].(map[string]interface{}); ok {
+			if parts, ok := sysInstruction["parts"].([]interface{}); ok && len(parts) > 0 {
+				if firstPart, ok := parts[0].(map[string]interface{}); ok {
+					capturedSystemInstruction = firstPart["text"].(string)
+				}
+			}
+		}
+
+		responsePayload := map[string]interface{}{
+			"candidates": []map[string]interface{}{
+				{
+					"content": map[string]interface{}{
+						"parts": []map[string]string{
+							{"text": "\\documentclass{article}\n\\usepackage{fontspec}\n\\usepackage{fontawesome5}\n\\begin{document}\nTailored with fontawesome\n\\end{document}"},
+						},
+					},
+				},
+			},
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(writer).Encode(responsePayload)
+	}))
+	defer geminiServer.Close()
+
+	mcpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]interface{}
+		json.NewDecoder(request.Body).Decode(&body)
+		tool, _ := body["tool"].(string)
+		arguments, _ := body["arguments"].(map[string]interface{})
+
+		switch tool {
+		case "read_project_file":
+			filePath := arguments["filePath"].(string)
+			if filePath == "templates/resume.tex" {
+				json.NewEncoder(writer).Encode(map[string]interface{}{
+					"success": true,
+					"result":  map[string]interface{}{"content": customTemplate},
+				})
+				return
+			}
+			json.NewEncoder(writer).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "not found",
+			})
+		case "list_files":
+			json.NewEncoder(writer).Encode(map[string]interface{}{
+				"success": true,
+				"result":  map[string]interface{}{"files": []interface{}{}},
+			})
+		case "write_project_file":
+			json.NewEncoder(writer).Encode(map[string]interface{}{"success": true, "result": map[string]interface{}{"message": "written"}})
+		case "compile_project":
+			json.NewEncoder(writer).Encode(map[string]interface{}{
+				"success": true,
+				"result":  map[string]interface{}{"status": "compiled", "pageCount": 1, "outputLog": "OK"},
+			})
+		case "get_project_pdf":
+			json.NewEncoder(writer).Encode(map[string]interface{}{
+				"success": true,
+				"result":  map[string]interface{}{"fileName": "resume.pdf", "mimeType": "application/pdf", "pageCount": 1, "base64Data": "AAAA", "sizeBytes": 1024},
+			})
+		}
+	}))
+	defer mcpServer.Close()
+
+	mcpClient := services.NewMCPClient(mcpServer.URL, "test-token")
+	tailorService := services.NewResumeTailorService(geminiServer.URL, "test-key", mcpClient)
+	jobContext := services.JobTailoringContext{
+		Title:     "Platform Engineer",
+		Company:   "TechCorp",
+		Seniority: "Lead",
+		TechStack: []string{"Go", "Kubernetes"},
+		RawDesc:   "Design platforms",
+	}
+
+	result, err := tailorService.TailorResumeToFolderWithTemplate(
+		context.Background(),
+		mcpClient,
+		"10 years platform engineering",
+		jobContext,
+		"techcorp_platform",
+		"job_applications",
+		1,
+		"templates/resume.tex",
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error tailoring with template, got: %v", err)
+	}
+	if result.CompileResult.Status != "compiled" {
+		t.Fatalf("expected compiled status, got: %s", result.CompileResult.Status)
+	}
+	if !strings.Contains(capturedSystemInstruction, "BASELINE TEMPLATE FIDELITY") {
+		t.Fatalf("expected system instruction to enforce BASELINE TEMPLATE FIDELITY, got: %s", capturedSystemInstruction)
+	}
+	if !strings.Contains(capturedSystemInstruction, "fontawesome5") {
+		t.Fatalf("expected system instruction to mention fontawesome5/fontspec preservation, got: %s", capturedSystemInstruction)
+	}
+	if strings.Contains(capturedSystemInstruction, "STANDARD PACKAGES ONLY: Use standard TeX Live packages only") {
+		t.Fatalf("system instruction must not restrict packages to standard list, got: %s", capturedSystemInstruction)
+	}
+}
+

@@ -269,6 +269,53 @@ void main() {
       expect(find.text("https://doi.org/10.1109/sample"), findsOneWidget);
     });
 
+    testWidgets("opens certification dialog and adds new entry with credential link", (tester) async {
+      tester.view.physicalSize = const Size(1200, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: EditProfileScreen(
+            initialProfileData: mockInitialData,
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(OutlinedButton, "Add Certification"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Add Certification"), findsWidgets);
+
+      await tester.enterText(
+        find.widgetWithText(TextField, "Certification Name *"),
+        "AWS Certified Solutions Architect",
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, "Issuing Organization"),
+        "Amazon Web Services",
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, "Date Issued / Completed"),
+        "May 2023",
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, "Credential URL / Verification Link"),
+        "https://aws.amazon.com/verify/123",
+      );
+
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+      await tester.tap(find.widgetWithText(ElevatedButton, "Save"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("AWS Certified Solutions Architect"), findsOneWidget);
+      expect(find.text("Amazon Web Services • May 2023"), findsOneWidget);
+      expect(find.text("https://aws.amazon.com/verify/123"), findsOneWidget);
+    });
+
     testWidgets("extracts bio from master_cv_text when bio_experience_text is omitted", (tester) async {
       tester.view.physicalSize = const Size(1200, 2400);
       tester.view.devicePixelRatio = 1.0;
