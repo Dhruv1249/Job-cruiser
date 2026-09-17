@@ -50,6 +50,7 @@ type fcmAndroidNotification struct {
 	DefaultSound          bool   `json:"default_sound"`
 	DefaultVibrateTimings bool   `json:"default_vibrate_timings"`
 	NotificationPriority  string `json:"notification_priority"`
+	Visibility            string `json:"visibility,omitempty"`
 }
 
 type fcmNotification struct {
@@ -128,7 +129,8 @@ func (service *FCMService) SendPushNotification(ctx context.Context, deviceToken
 					Sound:                 "default",
 					DefaultSound:          true,
 					DefaultVibrateTimings: true,
-					NotificationPriority:  "PRIORITY_HIGH",
+					NotificationPriority:  "PRIORITY_MAX",
+					Visibility:            "PUBLIC",
 				},
 			},
 		},

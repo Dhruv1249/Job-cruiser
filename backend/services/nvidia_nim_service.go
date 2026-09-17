@@ -1998,10 +1998,6 @@ func notifyUserOnHighMatch(
 
 	notificationTitle := fmt.Sprintf("High Match Found (%d%%): %s", matchScore, jobTitle)
 	notificationMessage := fmt.Sprintf("New high match (%d%%) for %s at %s based on your profile preferences.", matchScore, jobTitle, companyName)
-	cleanCriteria := strings.TrimSpace(profile.NotificationPromptCriteria)
-	if cleanCriteria != "" {
-		notificationMessage = fmt.Sprintf("%s\n\nAlert Criteria Matched:\n%s", notificationMessage, cleanCriteria)
-	}
 	cleanReasoning := strings.TrimSpace(matchReasoning)
 	if cleanReasoning != "" {
 		notificationMessage = fmt.Sprintf("%s\n\nAI Reasoning:\n%s", notificationMessage, cleanReasoning)
@@ -2027,7 +2023,10 @@ func notifyUserOnHighMatch(
 					profile.FCMToken,
 					notificationTitle,
 					fmt.Sprintf("%d%% match for %s at %s", matchScore, jobTitle, companyName),
-					map[string]string{"job_id": jobID},
+					map[string]string{
+						"job_id": jobID,
+						"type":   "high_match",
+					},
 				)
 				if pushErr != nil {
 					log.Printf("[FCM] push delivery failed for user %s: %v", profile.UserID, pushErr)
