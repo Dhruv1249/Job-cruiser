@@ -1,11 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'api_service.dart';
+
+const String _notificationChannelId = 'job_cruiser_high_match';
+const String _notificationChannelName = 'High Match Alerts';
+const String _notificationChannelDescription =
+    'Push alerts when a job matches above your threshold score.';
 
 /// Handles FCM token registration, notification permission, and routing of
 /// incoming messages to the correct destination in the app.
@@ -22,10 +28,10 @@ class FCMService {
 
   static const AndroidNotificationChannel _highImportanceChannel =
       AndroidNotificationChannel(
-    'job_cruiser_high_match',
-    'High Match Alerts',
-    description: 'Push alerts when a job matches above your threshold score.',
-    importance: Importance.high,
+    _notificationChannelId,
+    _notificationChannelName,
+    description: _notificationChannelDescription,
+    importance: Importance.max,
   );
 
   final FlutterLocalNotificationsPlugin _localNotifications =
@@ -89,11 +95,14 @@ class FCMService {
       body: notification.body,
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
-          _highImportanceChannel.id,
-          _highImportanceChannel.name,
-          channelDescription: _highImportanceChannel.description,
-          importance: Importance.high,
-          priority: Priority.high,
+          _notificationChannelId,
+          _notificationChannelName,
+          channelDescription: _notificationChannelDescription,
+          importance: Importance.max,
+          priority: Priority.max,
+          playSound: true,
+          enableVibration: true,
+          visibility: NotificationVisibility.public,
         ),
       ),
       payload: jsonEncode(message.data),
@@ -127,8 +136,53 @@ class FCMService {
 }
 
 /// Background message handler — must be a top-level function, not a method.
-/// Flutter executes this in an isolate when a message arrives and the app
-/// is terminated.
+/// Flutter executes this in a separate isolate when the app is terminated or
+/// in the background. It must initialize its own FlutterLocalNotificationsPlugin
+/// instance since it cannot access the FCMService singleton from the main isolate.
 @pragma('vm:entry-point')
-Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {}
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
 
+  final RemoteNotification? notification = message.notification;
+  if (notification == null) return;
+
+  final FlutterLocalNotificationsPlugin localNotifications =
+      FlutterLocalNotificationsPlugin();
+
+  const AndroidInitializationSettings androidSettings =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+  await localNotifications.initialize(
+    settings: const InitializationSettings(android: androidSettings),
+  );
+
+  await localNotifications
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          _notificationChannelId,
+          _notificationChannelName,
+          description: _notificationChannelDescription,
+          importance: Importance.max,
+        ),
+      );
+
+  await localNotifications.show(
+    id: notification.hashCode,
+    title: notification.title,
+    body: notification.body,
+    notificationDetails: NotificationDetails(
+      android: AndroidNotificationDetails(
+        _notificationChannelId,
+        _notificationChannelName,
+        channelDescription: _notificationChannelDescription,
+        importance: Importance.max,
+        priority: Priority.max,
+        playSound: true,
+        enableVibration: true,
+        visibility: NotificationVisibility.public,
+      ),
+    ),
+    payload: jsonEncode(message.data),
+  );
+}
