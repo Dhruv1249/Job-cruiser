@@ -33,10 +33,9 @@ type fcmMessage struct {
 }
 
 type fcmMessagePayload struct {
-	Token        string                 `json:"token"`
-	Notification fcmNotification        `json:"notification"`
-	Data         map[string]string      `json:"data,omitempty"`
-	Android      *fcmAndroidConfig      `json:"android,omitempty"`
+	Token   string            `json:"token"`
+	Data    map[string]string `json:"data,omitempty"`
+	Android *fcmAndroidConfig `json:"android,omitempty"`
 }
 
 type fcmAndroidConfig struct {
@@ -53,10 +52,6 @@ type fcmAndroidNotification struct {
 	Visibility            string `json:"visibility,omitempty"`
 }
 
-type fcmNotification struct {
-	Title string `json:"title"`
-	Body  string `json:"body"`
-}
 
 /*
 NewFCMService constructs an FCMService by reading Firebase service account
@@ -117,11 +112,17 @@ func (service *FCMService) SendPushNotification(ctx context.Context, deviceToken
 		return fmt.Errorf("fcm: failed to obtain oauth token: %w", tokenErr)
 	}
 
+	enrichedData := make(map[string]string, len(data)+2)
+	for key, value := range data {
+		enrichedData[key] = value
+	}
+	enrichedData["title"] = title
+	enrichedData["body"] = body
+
 	payload := fcmMessage{
 		Message: fcmMessagePayload{
-			Token:        deviceToken,
-			Notification: fcmNotification{Title: title, Body: body},
-			Data:         data,
+			Token: deviceToken,
+			Data:  enrichedData,
 			Android: &fcmAndroidConfig{
 				Priority: "HIGH",
 				Notification: &fcmAndroidNotification{
