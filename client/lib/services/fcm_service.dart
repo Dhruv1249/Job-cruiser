@@ -86,8 +86,8 @@ class FCMService {
   }
 
   void _handleForegroundMessage(RemoteMessage message) {
-    final String? title = message.data['title'] as String?;
-    final String? body = message.data['body'] as String?;
+    final String? title = message.notification?.title ?? message.data['title'] as String?;
+    final String? body = message.notification?.body ?? message.data['body'] as String?;
     if (title == null && body == null) return;
 
     unawaited(_localNotifications.show(
@@ -144,8 +144,8 @@ class FCMService {
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
 
-  final String? title = message.data['title'] as String?;
-  final String? body = message.data['body'] as String?;
+  final String? title = message.notification?.title ?? message.data['title'] as String?;
+  final String? body = message.notification?.body ?? message.data['body'] as String?;
   if (title == null && body == null) return;
 
   final FlutterLocalNotificationsPlugin localNotifications =

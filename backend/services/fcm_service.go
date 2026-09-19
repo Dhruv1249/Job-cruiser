@@ -32,10 +32,16 @@ type fcmMessage struct {
 	Message fcmMessagePayload `json:"message"`
 }
 
+type fcmNotification struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
 type fcmMessagePayload struct {
-	Token   string            `json:"token"`
-	Data    map[string]string `json:"data,omitempty"`
-	Android *fcmAndroidConfig `json:"android,omitempty"`
+	Token        string                 `json:"token"`
+	Notification *fcmNotification       `json:"notification,omitempty"`
+	Data         map[string]string      `json:"data,omitempty"`
+	Android      *fcmAndroidConfig      `json:"android,omitempty"`
 }
 
 type fcmAndroidConfig struct {
@@ -52,7 +58,6 @@ type fcmAndroidNotification struct {
 	Visibility            string `json:"visibility,omitempty"`
 }
 
-
 /*
 NewFCMService constructs an FCMService by reading Firebase service account
 credentials from environment variables. Returns nil if any required variable is
@@ -67,6 +72,12 @@ func NewFCMService() *FCMService {
 		return nil
 	}
 
+	projectID = strings.Trim(strings.TrimSpace(projectID), "\"")
+	clientEmail = strings.Trim(strings.TrimSpace(clientEmail), "\"")
+	privateKey = strings.TrimSpace(privateKey)
+	privateKey = strings.Trim(privateKey, "\"")
+	privateKey = strings.Trim(privateKey, "'")
+	privateKey = strings.TrimSpace(privateKey)
 	privateKey = strings.ReplaceAll(privateKey, `\n`, "\n")
 
 	serviceAccountJSON, marshalErr := json.Marshal(map[string]string{
@@ -121,8 +132,9 @@ func (service *FCMService) SendPushNotification(ctx context.Context, deviceToken
 
 	payload := fcmMessage{
 		Message: fcmMessagePayload{
-			Token: deviceToken,
-			Data:  enrichedData,
+			Token:        deviceToken,
+			Notification: &fcmNotification{Title: title, Body: body},
+			Data:         enrichedData,
 			Android: &fcmAndroidConfig{
 				Priority: "HIGH",
 				Notification: &fcmAndroidNotification{
