@@ -326,5 +326,84 @@ void main() {
 
       expect(find.text("Dhruv Sharma"), findsWidgets);
     });
+
+    testWidgets("switches between categories dropdown view and all cards view", (tester) async {
+      tester.view.physicalSize = const Size(1280, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: QuickFillScreen(
+              initialProfileData: mockProfilePreferences,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text("Personal & Contact"), findsWidgets);
+      expect(find.text("Work Authorization"), findsWidgets);
+      expect(find.text("Socials & Links"), findsWidgets);
+
+      final allCardsViewIconButton = find.byTooltip("All Cards View");
+      expect(allCardsViewIconButton, findsOneWidget);
+      await tester.tap(allCardsViewIconButton);
+      await tester.pumpAndSettle();
+
+      expect(find.text("dhruv.sharma@example.com"), findsOneWidget);
+
+      final categoriesViewIconButton = find.byTooltip("Categories View");
+      expect(categoriesViewIconButton, findsOneWidget);
+      await tester.tap(categoriesViewIconButton);
+      await tester.pumpAndSettle();
+
+      expect(find.text("Personal & Contact"), findsWidgets);
+    });
+
+    testWidgets("allows creating custom fields under a brand new custom category", (tester) async {
+      tester.view.physicalSize = const Size(1280, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: QuickFillScreen(
+              initialProfileData: mockProfilePreferences,
+              onSavePreferences: (_) async => true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final addFieldButtonFinder = find.widgetWithText(OutlinedButton, "Add Custom Field");
+      await tester.tap(addFieldButtonFinder);
+      await tester.pumpAndSettle();
+
+      final newCategoryButtonFinder = find.text("+ New Category");
+      expect(newCategoryButtonFinder, findsOneWidget);
+      await tester.tap(newCategoryButtonFinder);
+      await tester.pumpAndSettle();
+
+      final labelField = find.widgetWithText(TextField, "e.g. Notice Period, Security Clearance, Why Us Pitch");
+      final categoryField = find.widgetWithText(TextField, "e.g. Security Clearances, Certifications, Pitches");
+      final valueField = find.widgetWithText(TextField, "Enter the exact answer or content to paste...");
+
+      await tester.enterText(labelField, "Security Clearance Level");
+      await tester.enterText(categoryField, "Government Clearances");
+      await tester.enterText(valueField, "Top Secret / SCI Eligible");
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+
+      await tester.tap(find.text("Save"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Government Clearances"), findsWidgets);
+      expect(find.text("Security Clearance Level"), findsOneWidget);
+      expect(find.text("Top Secret / SCI Eligible"), findsOneWidget);
+    });
   });
 }
