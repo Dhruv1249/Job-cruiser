@@ -213,7 +213,7 @@ func (service *ResumeTailorService) TailorResumeToFolderWithTemplate(
 		"You are an expert LaTeX resume tailoring engine. Your task is to craft a dense, single-page, ATS-compliant LaTeX resume tailored specifically to the target job description, derived exclusively from the candidate's authentic background.\n\n"+
 			"CORE DIRECTIVES:\n"+
 			"1. OUTPUT FORMAT: Output ONLY valid compilable LaTeX code. Do NOT output markdown code fences (no ```latex or ```), no explanations, and no commentary. The output must start directly with \\documentclass and end with \\end{document}.\n"+
-			"2. BASELINE TEMPLATE FIDELITY & PREAMBLE PRESERVATION: You MUST PRESERVE the exact LaTeX preamble, document class, font configuration, package imports (including fontspec, fontawesome5, titlesec, hyperref, etc.), margin/geometry settings, color definitions, and custom macros from the BASELINE LATEX TEMPLATE. Do NOT remove, downgrade, or strip packages or macros defined in the baseline template.\n"+
+			"2. BASELINE TEMPLATE FIDELITY & ZERO STYLING ALTERATION: You MUST PRESERVE the exact LaTeX preamble, document class, font configuration, package imports (including fontspec, fontawesome5, titlesec, hyperref, etc.), margin/geometry settings, line heights, color definitions, and custom macros from the BASELINE LATEX TEMPLATE. NEVER modify, override, add custom spacing hacks (like extra \\vspace overrides), or alter font sizes or margins. Retain the template's visual styling 100%% identically.\n"+
 			"3. PURGE DUMMY DATA WHILE RETAINING STRUCTURE: All textual entries inside \\begin{document}...\\end{document} in the baseline template (such as 'Candidate Name', sample university names, dummy companies, dummy projects, sample bullets, dummy dates) are PLACEHOLDER MOCK DATA. You MUST COMPLETELY PURGE AND REPLACE all placeholder text with the candidate's authentic information from the CANDIDATE EXPERIENCE BANK, while strictly retaining the template's layout style, section structure, and macros.\n"+
 			"4. CONTACT & PROFILE LINKS: Render the candidate's real name, email, phone, location, LinkedIn, GitHub, portfolio, and any other provided profile links in the header matching the baseline template's styling and icon macros (e.g. preserving \\faPhone, \\faEnvelope, \\faLinkedin, \\faGithub, \\faGlobe, or other icons if used in the template). Never use 'Candidate Name' or placeholder links.\n"+
 			"5. PROFESSIONAL SUMMARY: Write an impactful 2-3 sentence summary tailored specifically for the %s role at %s, synthesizing the candidate's genuine technical strengths and domain expertise from their experience bank to address the core requirements in the JOB DESCRIPTION.\n"+
@@ -222,9 +222,9 @@ func (service *ResumeTailorService) TailorResumeToFolderWithTemplate(
 			"8. PROJECTS & OTHER SECTIONS: Render the candidate's real projects and other relevant sections (such as Open Source, Certifications, Achievements if present in the experience bank and template) using the template's project macros (such as \\resumeProjectHeading) and item bullets. Detail real project names, technologies used, GitHub/live links, and technical impact. NEVER copy dummy template projects.\n"+
 			"9. EDUCATION: Render the candidate's real degree, university/institution, graduation year, and academic achievements using the template's education macros. Do not use dummy universities.\n"+
 			"10. NO INVENTED EXPERIENCE: NEVER invent fake employers, fake job titles, or unearned degrees. However, deeply expand upon the technical execution of the candidate's genuine projects and responsibilities (architecture, concurrency, APIs, performance, data pipelines) to create a dense, impressive, fully-filled resume.\n"+
-			"11. PAGE BUDGET: Exactly %d page(s). Ensure the resume fills the target page budget completely from top to bottom with zero awkward whitespace gaps at the bottom, without spilling onto an extra page.\n"+
+			"11. PAGE BUDGET & FULL-PAGE DENSITY: Target is exactly %d page(s). You MUST craft enough rich, authentic bullet points and detailed technical execution to fill the entire single page completely from top to bottom without awkward trailing empty space, while strictly ensuring it does NOT spill onto page 2. Adjust content depth and bullet phrasing exclusively to achieve this balance — NEVER touch template formatting, margins, or spacing.\n"+
 			"12. COMPILER COMPATIBILITY: The document is compiled with XeLaTeX in Open-Overleaf (TeX Live environment). Retain all packages and macros declared in the baseline template. Ensure all LaTeX syntax and commands are valid for XeLaTeX compilation.\n"+
-			"13. ESCAPE SPECIAL CHARACTERS: ALWAYS properly escape special characters in text, company names, titles, and links: use \\& for &, \\%% for %%, \\_ for _, \\# for #, \\$ for $.\n"+
+			"13. ESCAPE SPECIAL CHARACTERS: ALWAYS properly escape special characters in text, company names, titles, and links: use \\& for &, \\%%%% for %%%%, \\_ for _, \\# for #, \\$ for $.\n"+
 			"14. Output MUST begin with \\documentclass and end with \\end{document}.",
 		jobContext.Title,
 		jobContext.Company,
@@ -315,13 +315,17 @@ func (service *ResumeTailorService) TailorResumeToFolderWithTemplate(
 	for passIndex := 1; passIndex <= service.MaxTighteningPasses && compileResult.PageCount > targetPages; passIndex++ {
 		tighteningPrompt := fmt.Sprintf(
 			"The compiled LaTeX resume spans %d pages, exceeding the strict target of %d page(s).\n"+
-				"Tightening pass %d of %d — be progressively more aggressive: prune lower-impact bullets, reduce spacing, condense sections, while preserving custom macros and structural formatting.\n\n"+
+				"Tightening pass %d of %d — STRICT RULES:\n"+
+				"1. DO NOT modify, replace, or override ANY LaTeX styling, margins, geometries, font sizes, spacing macros, or custom macro definitions from the template.\n"+
+				"2. ONLY adjust and refine the textual content: prune lower-impact bullet points, condense verbose phrasing, and make descriptions tighter and punchier.\n"+
+				"3. Ensure the revised content fits completely within exactly %d page(s) while filling the full single page from top to bottom with high information density.\n\n"+
 				"Current LaTeX:\n%s\n\n"+
-				"Output ONLY the revised LaTeX — no markdown fences, no commentary.",
+				"Output ONLY the revised compilable LaTeX code with no markdown fences or commentary.",
 			compileResult.PageCount,
 			targetPages,
 			passIndex,
 			service.MaxTighteningPasses,
+			targetPages,
 			tailoredTeX,
 		)
 		refinedTeX, refinementError := service.generateContentWithGemini(ctx, tighteningPrompt)
@@ -527,9 +531,12 @@ func (service *ResumeTailorService) GenerateCoverLetterToFolderWithTemplate(
 	for passIndex := 1; passIndex <= service.MaxTighteningPasses && compileResult.PageCount > targetPages; passIndex++ {
 		tighteningPrompt := fmt.Sprintf(
 			"The compiled LaTeX cover letter spans %d pages, exceeding the strict target of %d page(s).\n"+
-				"Tightening pass %d of %d: reduce paragraph lengths, adjust spacing/margins to fit neatly on %d page(s) while preserving template structure.\n\n"+
+				"Tightening pass %d of %d — STRICT RULES:\n"+
+				"1. DO NOT modify, replace, or override ANY LaTeX styling, margins, geometries, font sizes, spacing macros, or custom macro definitions from the template.\n"+
+				"2. ONLY adjust and condense the textual content: tighten paragraph wording, remove redundant phrasing, and maintain compelling personal pitch.\n"+
+				"3. Ensure the cover letter fits neatly within exactly %d page(s) with balanced paragraph proportions.\n\n"+
 				"Current LaTeX:\n%s\n\n"+
-				"Output ONLY the revised LaTeX — no markdown fences, no commentary.",
+				"Output ONLY the revised compilable LaTeX code with no markdown fences or commentary.",
 			compileResult.PageCount,
 			targetPages,
 			passIndex,
