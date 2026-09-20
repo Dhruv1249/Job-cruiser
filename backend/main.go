@@ -125,6 +125,7 @@ func main() {
 		NimService:   nvidiaNimService,
 		AESKey:       overleafAESKey,
 		APIKey:       geminiAPIKey,
+		MCPSecret:    overleafMCPSecret,
 	}
 	appHandler := &handlers.ApplicationHandler{DB: databasePool}
 	ingestHandler := &handlers.IngestHandler{
@@ -213,6 +214,7 @@ func main() {
 		protected.POST("/user/parse-cv", prefHandler.ParseCV)
 		protected.POST("/overleaf/config", prefHandler.UpdateOverleafConfig)
 		protected.GET("/overleaf/config", prefHandler.GetOverleafConfig)
+		protected.POST("/overleaf/sync-profile", prefHandler.SyncProfileToOverleaf)
 
 		protected.POST("/tailor/resume", tailorHandler.TailorResume)
 		protected.POST("/tailor/cover-letter", tailorHandler.GenerateCoverLetter)

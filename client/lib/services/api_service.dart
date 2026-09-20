@@ -725,6 +725,20 @@ class ApiService {
     }
   }
 
+  /// Synchronizes candidate profile files (JSON, Markdown, LaTeX vars) to Open-Overleaf.
+  Future<Map<String, dynamic>?> syncProfileToOverleaf() async {
+    try {
+      final response = await _dio.post('/overleaf/sync-profile');
+      if (response.statusCode == 200 && response.data is Map<String, dynamic>) {
+        return Map<String, dynamic>.from(response.data as Map);
+      }
+      return null;
+    } catch (e) {
+      _logger.e(e);
+      return null;
+    }
+  }
+
   /// Fetches registered users for Master Admin management.
   Future<List<Map<String, dynamic>>> fetchUsersForAdmin() async {
     try {

@@ -2056,6 +2056,24 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                     _projects.add(data);
                   }
                 });
+
+                final techText = techCtrl.text.trim();
+                final techList = techText
+                    .split(',')
+                    .map((t) => t.trim())
+                    .where((t) => t.isNotEmpty)
+                    .toList();
+                final newSkills = techList.where((tech) {
+                  final lower = tech.toLowerCase();
+                  return !_skills.any((existing) => existing.toLowerCase() == lower);
+                }).toList();
+
+                Navigator.pop(ctx);
+
+                if (newSkills.isNotEmpty && mounted) {
+                  _promptAddSkillsToMainList(newSkills);
+                }
+                return;
               }
               Navigator.pop(ctx);
             },
@@ -2064,6 +2082,86 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _promptAddSkillsToMainList(List<String> newSkills) async {
+    final bool? shouldAdd = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.auto_awesome, color: Color(0xFF6366F1)),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                "Add Skills to Profile?",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Found ${newSkills.length} new ${newSkills.length == 1 ? "technology" : "technologies"} in this project:",
+              style: const TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: newSkills
+                  .map(
+                    (skill) => Chip(
+                      label: Text(skill, style: const TextStyle(fontSize: 12)),
+                      backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.08),
+                    ),
+                  )
+                  .toList(),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              "Would you like to automatically add them to your Core Skills list?",
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text("Skip"),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text("Add to Skills"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF6366F1),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldAdd == true && mounted) {
+      setState(() {
+        for (final skill in newSkills) {
+          if (!_skills.any((existing) => existing.toLowerCase() == skill.toLowerCase())) {
+            _skills.add(skill);
+          }
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Added ${newSkills.length} ${newSkills.length == 1 ? "skill" : "skills"} to Core Skills!"),
+          backgroundColor: const Color(0xFF10B981),
+        ),
+      );
+    }
   }
 
   void _showAddEducationDialog({int? editIndex}) {

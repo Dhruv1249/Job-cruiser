@@ -639,6 +639,33 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
               ),
             ],
           ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.cloud_sync_outlined, size: 18),
+              label: const Text("Sync Candidate Profile Files to Overleaf"),
+              onPressed: () async {
+                final result = await ApiService().syncProfileToOverleaf();
+                if (!mounted) return;
+                if (result != null && result["ok"] == true) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Candidate profile files (profile.json, PROFILE.md, profile_vars.tex) synced to Open-Overleaf!"),
+                      backgroundColor: AppColors.successGreen,
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(result?["error"]?.toString() ?? "Failed to sync profile. Check Open-Overleaf connection."),
+                      backgroundColor: AppColors.error,
+                    ),
+                  );
+                }
+              },
+            ),
+          ),
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,

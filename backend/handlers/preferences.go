@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Dhruv1249/Job-cruiser/backend/services"
 	"github.com/Dhruv1249/Job-cruiser/backend/utils"
@@ -24,6 +25,7 @@ type PreferencesHandler struct {
 	NimService   *services.NvidiaNimService
 	AESKey       []byte
 	APIKey       string
+	MCPSecret    string
 }
 
 type CustomLinkItem struct {
@@ -416,6 +418,16 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile: " + err.Error()})
 		return
+	}
+
+	userIdentifier, identifierOk := userID.(string)
+	if identifierOk && userIdentifier != "" {
+		go func() {
+			backgroundContext, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
+			syncService := services.NewProfileSyncService(h.DB, h.AESKey, h.MCPSecret)
+			_, _ = syncService.SyncUserProfileToOverleaf(backgroundContext, userIdentifier)
+		}()
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Profile updated successfully"})
@@ -1099,6 +1111,36 @@ func (h *PreferencesHandler) GetOverleafConfig(c *gin.Context) {
 			"resume_template_path":       resumeTemplatePath,
 			"cover_letter_template_path": coverLetterTemplatePath,
 		},
+	})
+}
+
+/*
+SyncProfileToOverleaf manually triggers candidate profile synchronization into Open-Overleaf.
+*/
+func (h *PreferencesHandler) SyncProfileToOverleaf(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	userIdentifier, identifierOk := userID.(string)
+	if !identifierOk || userIdentifier == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	syncService := services.NewProfileSyncService(h.DB, h.AESKey, h.MCPSecret)
+	syncedFiles, syncError := syncService.SyncUserProfileToOverleaf(c.Request.Context(), userIdentifier)
+	if syncError != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": syncError.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"ok":      true,
+		"message": "Profile synchronized to Open-Overleaf successfully",
+		"files":   syncedFiles,
 	})
 }
 

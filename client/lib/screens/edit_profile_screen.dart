@@ -50,6 +50,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   bool _isLoading = false;
   bool _isSaving = false;
   bool _isParsingCV = false;
+  bool _isSyncingToOverleaf = false;
 
   @override
   void initState() {
@@ -371,6 +372,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           _projects.add(updatedItem);
         }
       });
+
+      final newSkills = techStack.where((tech) {
+        final lower = tech.toLowerCase();
+        return !_skills.any((existing) => existing.toLowerCase() == lower);
+      }).toList();
+
+      if (newSkills.isNotEmpty && mounted) {
+        await _promptAddSkillsToMainList(newSkills, source: "project");
+      }
     }
 
     titleController.dispose();
@@ -493,6 +503,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           _experiences.add(updatedItem);
         }
       });
+
+      final newSkills = techList.where((tech) {
+        final lower = tech.toLowerCase();
+        return !_skills.any((existing) => existing.toLowerCase() == lower);
+      }).toList();
+
+      if (newSkills.isNotEmpty && mounted) {
+        await _promptAddSkillsToMainList(newSkills, source: "experience");
+      }
     }
 
     companyController.dispose();
@@ -1237,6 +1256,111 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
+  Future<void> _promptAddSkillsToMainList(List<String> newSkills, {String source = "project"}) async {
+    final bool? shouldAdd = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.auto_awesome, color: AppColors.primary),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text(
+                "Add Skills to Profile?",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Found ${newSkills.length} new ${newSkills.length == 1 ? "technology" : "technologies"} in this $source:",
+              style: const TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: newSkills
+                  .map(
+                    (skill) => Chip(
+                      label: Text(skill, style: const TextStyle(fontSize: 12)),
+                      backgroundColor: AppColors.primary.withValues(alpha: 0.08),
+                      side: BorderSide(color: AppColors.primary.withValues(alpha: 0.2)),
+                    ),
+                  )
+                  .toList(),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              "Would you like to automatically add them to your Core Skills list?",
+              style: TextStyle(fontSize: 13, color: AppColors.onSurfaceVariant),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text("Skip"),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text("Add to Skills"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldAdd == true && mounted) {
+      setState(() {
+        for (final skill in newSkills) {
+          if (!_skills.any((existing) => existing.toLowerCase() == skill.toLowerCase())) {
+            _skills.add(skill);
+          }
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Added ${newSkills.length} ${newSkills.length == 1 ? "skill" : "skills"} to Core Skills!"),
+          backgroundColor: AppColors.successGreen,
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleSyncToOverleaf() async {
+    setState(() => _isSyncingToOverleaf = true);
+    final result = await _apiService.syncProfileToOverleaf();
+    if (!mounted) return;
+    setState(() => _isSyncingToOverleaf = false);
+
+    if (result != null && result["ok"] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Candidate profile files (profile.json, PROFILE.md, profile_vars.tex) synced to Open-Overleaf!"),
+          backgroundColor: AppColors.successGreen,
+        ),
+      );
+    } else {
+      final errorMessage = result?["error"]?.toString() ?? "Failed to sync profile to Open-Overleaf. Please ensure Open-Overleaf is configured.";
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1253,6 +1377,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           ),
         ),
         actions: [
+          IconButton(
+            tooltip: "Sync Profile to Open-Overleaf",
+            onPressed: _isSyncingToOverleaf ? null : _handleSyncToOverleaf,
+            icon: _isSyncingToOverleaf
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                  )
+                : const Icon(Icons.cloud_sync_outlined, color: AppColors.primary),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: ElevatedButton.icon(
