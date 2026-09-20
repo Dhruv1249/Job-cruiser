@@ -82,6 +82,9 @@ var schemaQueries = []string{
 		token_encrypted BOOLEAN DEFAULT false,
 		resume_template_path TEXT DEFAULT 'templates/resume.tex',
 		cover_letter_template_path TEXT DEFAULT 'templates/cover_letter.tex',
+		auto_sync_profile BOOLEAN DEFAULT true,
+		last_synced_at TIMESTAMPTZ,
+		sync_interval_hours INTEGER DEFAULT 24,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`,
 
@@ -365,6 +368,9 @@ var schemaQueries = []string{
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS notification_evaluation_mode VARCHAR(32) DEFAULT 'both';`,
 	`ALTER TABLE notifications ALTER COLUMN created_at TYPE TIMESTAMPTZ;`,
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS professional_headline TEXT DEFAULT '';`,
+	`ALTER TABLE user_overleaf_config ADD COLUMN IF NOT EXISTS auto_sync_profile BOOLEAN DEFAULT true;`,
+	`ALTER TABLE user_overleaf_config ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ;`,
+	`ALTER TABLE user_overleaf_config ADD COLUMN IF NOT EXISTS sync_interval_hours INTEGER DEFAULT 24;`,
 }
 
 // InitSchema executes the queries in sequence.

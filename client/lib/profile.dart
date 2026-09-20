@@ -67,6 +67,8 @@ class _ProfilePageState extends State<ProfilePage> {
 
   List<TailoredJobDocumentGroup> _tailoredGroups = [];
   bool _isLoadingDocuments = true;
+  bool _isSyncingToOverleaf = false;
+  String? _lastSyncedAt;
   Timer? _tailoringPollingTimer;
 
   @override
@@ -308,11 +310,23 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _loadSavedPreferences() async {
-    final apiPref = await _apiService.fetchPreferences();
+    final results = await Future.wait([
+      _apiService.fetchPreferences(),
+      _apiService.fetchOverleafConfig(),
+    ]);
     if (!mounted) return;
+
+    final apiPref = results[0];
+    final overleaf = results[1];
 
     setState(() {
       _preferencesData = apiPref;
+      if (overleaf != null) {
+        final Map<String, dynamic> config = (overleaf["data"] is Map<String, dynamic>)
+            ? Map<String, dynamic>.from(overleaf["data"] as Map)
+            : overleaf;
+        _lastSyncedAt = config["last_synced_at"] as String?;
+      }
     });
   }
 
@@ -341,6 +355,33 @@ class _ProfilePageState extends State<ProfilePage> {
     if (!mounted) return;
     await _loadSavedPreferences();
     await _loadUserProfile();
+  }
+
+  Future<void> _handleSyncProfileToOverleaf() async {
+    setState(() => _isSyncingToOverleaf = true);
+    final result = await _apiService.syncProfileToOverleaf();
+    if (!mounted) return;
+    setState(() => _isSyncingToOverleaf = false);
+
+    if (result != null && result["ok"] == true) {
+      setState(() {
+        _lastSyncedAt = DateTime.now().toUtc().toIso8601String();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Candidate profile files (profile.json, PROFILE.md, profile_vars.tex) synced to Open-Overleaf!"),
+          backgroundColor: AppColors.successGreen,
+        ),
+      );
+    } else {
+      final errorMessage = result?["error"]?.toString() ?? "Failed to sync profile to Open-Overleaf. Please configure Open-Overleaf in Preferences.";
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
   }
 
   @override
@@ -604,6 +645,44 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
             ],
           ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _isSyncingToOverleaf ? null : _handleSyncProfileToOverleaf,
+              icon: _isSyncingToOverleaf
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.cloud_sync_outlined, size: 16),
+              label: Text(_isSyncingToOverleaf ? "Syncing to Open-Overleaf..." : "Sync Profile to Open-Overleaf"),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                side: const BorderSide(color: AppColors.outlineVariant),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+          if (_lastSyncedAt != null && _lastSyncedAt!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.check_circle_outline, size: 14, color: AppColors.successGreen),
+                const SizedBox(width: 4),
+                Text(
+                  "Last Synced: ${_lastSyncedAt!}",
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppColors.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );

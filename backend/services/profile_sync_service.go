@@ -121,6 +121,8 @@ type CandidateProfileSyncPayload struct {
 	ResearchPatents          []ProfileResearchPatentItem `json:"research_patents"`
 	OpenSourceContributions  []ProfileOpenSourceItem     `json:"open_source_contributions"`
 	SyncedAt                 string                      `json:"synced_at"`
+	LastSyncedAt             string                      `json:"last_synced_at"`
+	SyncedBy                 string                      `json:"synced_by"`
 }
 
 /*
@@ -196,6 +198,12 @@ func FormatProfileJSON(candidateProfile CandidateProfileSyncPayload) ([]byte, er
 	if candidateProfile.SyncedAt == "" {
 		candidateProfile.SyncedAt = time.Now().UTC().Format(time.RFC3339)
 	}
+	if candidateProfile.LastSyncedAt == "" {
+		candidateProfile.LastSyncedAt = candidateProfile.SyncedAt
+	}
+	if candidateProfile.SyncedBy == "" {
+		candidateProfile.SyncedBy = "Job-cruiser"
+	}
 	return json.MarshalIndent(candidateProfile, "", "  ")
 }
 
@@ -205,7 +213,14 @@ FormatProfileMarkdown generates a clean, structured Markdown experience bank sui
 func FormatProfileMarkdown(candidateProfile CandidateProfileSyncPayload) string {
 	var builder strings.Builder
 
+	syncedTime := candidateProfile.SyncedAt
+	if syncedTime == "" {
+		syncedTime = time.Now().UTC().Format(time.RFC3339)
+	}
+
 	builder.WriteString("# Candidate Profile & Experience Bank\n\n")
+	builder.WriteString(fmt.Sprintf("<!-- Last Synced: %s by Job-cruiser -->\n", syncedTime))
+	builder.WriteString(fmt.Sprintf("> **Last Synced**: %s (via Job-cruiser)\n\n", syncedTime))
 
 	builder.WriteString("## Personal Information\n")
 	if candidateProfile.FullName != "" {
@@ -382,7 +397,14 @@ FormatProfileLaTeXVariables produces standard LaTeX variable macros for document
 func FormatProfileLaTeXVariables(candidateProfile CandidateProfileSyncPayload) string {
 	var builder strings.Builder
 
+	syncedTime := candidateProfile.SyncedAt
+	if syncedTime == "" {
+		syncedTime = time.Now().UTC().Format(time.RFC3339)
+	}
+
 	builder.WriteString("% Auto-generated candidate profile macros synced from Job-cruiser\n")
+	builder.WriteString(fmt.Sprintf("%% Last Synced: %s\n", syncedTime))
+	builder.WriteString(fmt.Sprintf("\\newcommand{\\candidateLastSyncedAt}{%s}\n", EscapeLaTeXText(syncedTime)))
 	builder.WriteString(fmt.Sprintf("\\newcommand{\\candidateName}{%s}\n", EscapeLaTeXText(candidateProfile.FullName)))
 	builder.WriteString(fmt.Sprintf("\\newcommand{\\candidateHeadline}{%s}\n", EscapeLaTeXText(candidateProfile.ProfessionalHeadline)))
 	builder.WriteString(fmt.Sprintf("\\newcommand{\\candidateEmail}{%s}\n", EscapeLaTeXText(candidateProfile.Email)))
@@ -554,5 +576,76 @@ func (service *ProfileSyncService) SyncUserProfileToOverleaf(
 		return nil, fmt.Errorf("failed writing profile/profile_vars.tex to open-overleaf: %w", writeError)
 	}
 
+	if service.DatabasePool != nil {
+		_, _ = service.DatabasePool.Exec(ctx, `UPDATE user_overleaf_config SET last_synced_at = CURRENT_TIMESTAMP WHERE user_id = $1`, userID)
+	}
+
 	return syncedFiles, nil
+}
+
+/*
+SyncAllDueProfiles queries all users who have auto sync enabled and whose sync interval has passed, then syncs them.
+*/
+func (service *ProfileSyncService) SyncAllDueProfiles(ctx context.Context) (int, error) {
+	if service.DatabasePool == nil {
+		return 0, nil
+	}
+
+	query := `
+		SELECT uoc.user_id::text
+		FROM user_overleaf_config uoc
+		WHERE COALESCE(uoc.auto_sync_profile, true) = true
+		  AND uoc.deployment_url IS NOT NULL
+		  AND uoc.deployment_url != ''
+		  AND uoc.encrypted_access_token IS NOT NULL
+		  AND uoc.encrypted_access_token != ''
+		  AND (
+		    uoc.last_synced_at IS NULL
+		    OR uoc.last_synced_at <= NOW() - (COALESCE(uoc.sync_interval_hours, 24) || ' hours')::interval
+		  )
+		LIMIT 100;
+	`
+
+	rows, queryErr := service.DatabasePool.Query(ctx, query)
+	if queryErr != nil {
+		return 0, fmt.Errorf("failed querying users due for profile sync: %w", queryErr)
+	}
+	defer rows.Close()
+
+	var userIDs []string
+	for rows.Next() {
+		var uid string
+		if scanErr := rows.Scan(&uid); scanErr == nil {
+			userIDs = append(userIDs, uid)
+		}
+	}
+
+	syncedCount := 0
+	for _, uid := range userIDs {
+		_, syncErr := service.SyncUserProfileToOverleaf(ctx, uid)
+		if syncErr == nil {
+			syncedCount++
+		}
+	}
+
+	return syncedCount, nil
+}
+
+/*
+StartBackgroundSyncScheduler runs a recurring ticker that checks for and synchronizes due profiles to Open-Overleaf.
+*/
+func (service *ProfileSyncService) StartBackgroundSyncScheduler(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Hour)
+	go func() {
+		_, _ = service.SyncAllDueProfiles(ctx)
+		for {
+			select {
+			case <-ctx.Done():
+				ticker.Stop()
+				return
+			case <-ticker.C:
+				_, _ = service.SyncAllDueProfiles(ctx)
+			}
+		}
+	}()
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -449,6 +450,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
         mcpSecret: secret.isNotEmpty ? secret : null,
         projectName: project.isNotEmpty ? project : 'job_applications',
       );
+      unawaited(_apiService.syncProfileToOverleaf());
     }
 
     if (!mounted) return;

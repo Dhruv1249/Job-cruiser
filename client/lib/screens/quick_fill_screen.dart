@@ -41,7 +41,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
   List<Map<String, dynamic>> _customFields = [];
   Map<String, dynamic> _fieldOverrides = {};
   Set<String> _deletedFieldIds = {};
-  final Set<String> _collapsedCategoryNames = {};
+  final Set<String> _expandedCategoryNames = {};
 
   final List<String> _defaultCategories = const [
     "Personal & Contact",
@@ -563,6 +563,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
   Future<void> _showAddOrEditFieldDialog({QuickFillItem? existingItem}) async {
     final labelController = TextEditingController(text: existingItem?.label ?? "");
     final valueController = TextEditingController(text: existingItem?.value ?? "");
+    final categorySearchController = TextEditingController();
     final customCategoryController = TextEditingController();
 
     final availableCategories = _getAllAvailableCategories();
@@ -577,6 +578,12 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
           if (!dropdownCategories.contains(selectedDialogCategory) && !isCustomCategoryMode) {
             dropdownCategories.add(selectedDialogCategory);
           }
+
+          final categoryFilterText = categorySearchController.text.trim().toLowerCase();
+          final filteredCategories = dropdownCategories
+              .where((categoryName) => categoryName.toLowerCase().contains(categoryFilterText))
+              .toList();
+          final hasExactMatch = dropdownCategories.any((cat) => cat.toLowerCase() == categoryFilterText);
 
           return AlertDialog(
             title: Text(existingItem != null ? "Edit ${existingItem.label}" : "Add Custom Field"),
@@ -633,26 +640,147 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
                           prefixIcon: Icon(Icons.create_new_folder_outlined, size: 18),
                         ),
                       )
-                    else
-                      DropdownButtonFormField<String>(
-                        initialValue: selectedDialogCategory,
-                        decoration: const InputDecoration(
-                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        ),
-                        items: dropdownCategories.map((categoryName) {
-                          return DropdownMenuItem(
-                            value: categoryName,
-                            child: Text(categoryName),
-                          );
-                        }).toList(),
-                        onChanged: (newVal) {
-                          if (newVal != null) {
-                            setModalState(() {
-                              selectedDialogCategory = newVal;
-                            });
-                          }
+                    else ...[
+                      TextField(
+                        controller: categorySearchController,
+                        onChanged: (text) {
+                          setModalState(() {});
                         },
+                        decoration: InputDecoration(
+                          hintText: "Search categories...",
+                          prefixIcon: const Icon(Icons.search, size: 18),
+                          suffixIcon: categorySearchController.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, size: 16),
+                                  onPressed: () {
+                                    categorySearchController.clear();
+                                    setModalState(() {});
+                                  },
+                                )
+                              : null,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        ),
                       ),
+                      const SizedBox(height: 8),
+                      if (categoryFilterText.isNotEmpty && !hasExactMatch)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(8),
+                            onTap: () {
+                              final typedCategory = categorySearchController.text.trim();
+                              setModalState(() {
+                                if (!dropdownCategories.contains(typedCategory)) {
+                                  dropdownCategories.add(typedCategory);
+                                  availableCategories.add(typedCategory);
+                                }
+                                selectedDialogCategory = typedCategory;
+                                categorySearchController.clear();
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.add_circle, size: 16, color: AppColors.primary),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      'Create category "${categorySearchController.text.trim()}"',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.primary,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (filteredCategories.isNotEmpty) ...[
+                        DropdownButtonFormField<String>(
+                          key: ValueKey("category_dropdown_${selectedDialogCategory}_${filteredCategories.length}"),
+                          initialValue: filteredCategories.contains(selectedDialogCategory)
+                              ? selectedDialogCategory
+                              : filteredCategories.first,
+                          decoration: const InputDecoration(
+                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          ),
+                          items: (filteredCategories.contains(selectedDialogCategory)
+                                  ? filteredCategories
+                                  : [selectedDialogCategory, ...filteredCategories])
+                              .map((categoryName) {
+                            return DropdownMenuItem(
+                              value: categoryName,
+                              child: Text(categoryName),
+                            );
+                          }).toList(),
+                          onChanged: (newVal) {
+                            if (newVal != null) {
+                              setModalState(() {
+                                selectedDialogCategory = newVal;
+                              });
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: filteredCategories.map((categoryName) {
+                              final isSelected = categoryName == selectedDialogCategory;
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 6),
+                                child: ChoiceChip(
+                                  label: Text(
+                                    categoryName,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                    ),
+                                  ),
+                                  selected: isSelected,
+                                  onSelected: (selected) {
+                                    if (selected) {
+                                      setModalState(() {
+                                        selectedDialogCategory = categoryName;
+                                      });
+                                    }
+                                  },
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ] else
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceContainerLow,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppColors.outlineVariant),
+                          ),
+                          child: Center(
+                            child: Text(
+                              'No existing categories matching "${categorySearchController.text.trim()}"',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                     const SizedBox(height: 14),
                     TextField(
                       controller: valueController,
@@ -741,6 +869,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
     labelController.dispose();
     valueController.dispose();
+    categorySearchController.dispose();
     customCategoryController.dispose();
   }
 
@@ -1204,12 +1333,13 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
 
   Widget _buildGroupedCategoriesView(bool isWide) {
     final groupedCategories = _getGroupedFilteredItems();
+    final isSearching = _searchController.text.trim().isNotEmpty;
 
     return Column(
       children: groupedCategories.entries.map((categoryEntry) {
         final categoryTitle = categoryEntry.key;
         final categoryItems = categoryEntry.value;
-        final isCollapsed = _collapsedCategoryNames.contains(categoryTitle);
+        final isExpanded = isSearching || _expandedCategoryNames.contains(categoryTitle);
 
         return Container(
           margin: const EdgeInsets.only(bottom: 16),
@@ -1231,16 +1361,16 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
               InkWell(
                 onTap: () {
                   setState(() {
-                    if (isCollapsed) {
-                      _collapsedCategoryNames.remove(categoryTitle);
+                    if (isExpanded) {
+                      _expandedCategoryNames.remove(categoryTitle);
                     } else {
-                      _collapsedCategoryNames.add(categoryTitle);
+                      _expandedCategoryNames.add(categoryTitle);
                     }
                   });
                 },
                 borderRadius: BorderRadius.vertical(
                   top: const Radius.circular(14),
-                  bottom: Radius.circular(isCollapsed ? 14 : 0),
+                  bottom: Radius.circular(isExpanded ? 0 : 14),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
@@ -1290,7 +1420,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
                         ),
                       ),
                       Icon(
-                        isCollapsed ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
+                        isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
                         size: 20,
                         color: AppColors.onSurfaceVariant,
                       ),
@@ -1298,7 +1428,7 @@ class _QuickFillScreenState extends State<QuickFillScreen> {
                   ),
                 ),
               ),
-              if (!isCollapsed) ...[
+              if (isExpanded) ...[
                 const Divider(height: 1, color: AppColors.outlineVariant),
                 Padding(
                   padding: const EdgeInsets.all(14.0),

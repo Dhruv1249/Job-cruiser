@@ -64,6 +64,12 @@ func TestFormatProfileJSONGeneratesValidPayload(testingContext *testing.T) {
 	if parsedOutput["professional_headline"] != "Systems Engineer & Full-Stack Architect" {
 		testingContext.Fatalf("expected headline 'Systems Engineer & Full-Stack Architect', got %v", parsedOutput["professional_headline"])
 	}
+	if parsedOutput["synced_by"] != "Job-cruiser" {
+		testingContext.Fatalf("expected synced_by 'Job-cruiser', got %v", parsedOutput["synced_by"])
+	}
+	if parsedOutput["last_synced_at"] == nil || parsedOutput["last_synced_at"] == "" {
+		testingContext.Fatalf("expected valid last_synced_at timestamp, got %v", parsedOutput["last_synced_at"])
+	}
 }
 
 func TestFormatProfileMarkdownGeneratesReadableDocument(testingContext *testing.T) {
@@ -95,6 +101,9 @@ func TestFormatProfileMarkdownGeneratesReadableDocument(testingContext *testing.
 	if !strings.Contains(markdownDocument, "# Candidate Profile & Experience Bank") {
 		testingContext.Fatalf("markdown missing primary header")
 	}
+	if !strings.Contains(markdownDocument, "Last Synced") {
+		testingContext.Fatalf("markdown missing Last Synced metadata banner")
+	}
 	if !strings.Contains(markdownDocument, "Dhruv Test") {
 		testingContext.Fatalf("markdown missing candidate name")
 	}
@@ -123,6 +132,9 @@ func TestFormatProfileLaTeXVariablesEscapesSpecialCharacters(testingContext *tes
 
 	latexVariablesOutput := services.FormatProfileLaTeXVariables(candidateProfile)
 
+	if !strings.Contains(latexVariablesOutput, `\newcommand{\candidateLastSyncedAt}`) {
+		testingContext.Fatalf("LaTeX missing candidateLastSyncedAt macro: %s", latexVariablesOutput)
+	}
 	if !strings.Contains(latexVariablesOutput, `\newcommand{\candidateName}{Dhruv \& Co\_Special\%Name\#1}`) {
 		testingContext.Fatalf("LaTeX variable candidateName not properly escaped: %s", latexVariablesOutput)
 	}

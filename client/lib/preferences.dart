@@ -1,3 +1,4 @@
+import "dart:async";
 import "package:flutter/foundation.dart" show kIsWeb;
 import "package:flutter/material.dart";
 import "package:url_launcher/url_launcher.dart";
@@ -153,6 +154,9 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
   int _matchThresholdPercentage = 80;
   String _notificationEvaluationMode = "both";
   late TextEditingController _notificationCriteriaController;
+  bool _autoSyncProfile = true;
+  int _syncIntervalHours = 24;
+  String? _lastSyncedAt;
 
   @override
   void initState() {
@@ -287,6 +291,9 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
         if (config["mcp_secret"] != null && (config["mcp_secret"] as String).isNotEmpty) {
           _overleafSecretController.text = config["mcp_secret"] as String;
         }
+        _autoSyncProfile = config["auto_sync_profile"] as bool? ?? true;
+        _syncIntervalHours = (config["sync_interval_hours"] as num?)?.toInt() ?? 24;
+        _lastSyncedAt = config["last_synced_at"] as String?;
       });
     }
   }
@@ -639,6 +646,88 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
               ),
             ],
           ),
+          const Divider(height: 24, color: AppColors.outlineVariant),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Auto-Sync Profile to Overleaf",
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      "Automatically synchronizes candidate profile files (JSON, Markdown, LaTeX vars) on profile updates and periodically.",
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Switch(
+                value: _autoSyncProfile,
+                onChanged: (val) => setState(() => _autoSyncProfile = val),
+              ),
+            ],
+          ),
+          if (_autoSyncProfile) ...[
+            const SizedBox(height: 8),
+            DropdownButtonFormField<int>(
+              initialValue: _syncIntervalHours,
+              decoration: const InputDecoration(
+                labelText: "Periodic Auto-Sync Frequency",
+                border: OutlineInputBorder(),
+                helperText: "Frequency to automatically refresh profile files in Overleaf in background",
+              ),
+              items: const [
+                DropdownMenuItem(value: 6, child: Text("Every 6 hours")),
+                DropdownMenuItem(value: 12, child: Text("Every 12 hours")),
+                DropdownMenuItem(value: 24, child: Text("Daily (Every 24 hours)")),
+                DropdownMenuItem(value: 48, child: Text("Every 2 days (48 hours)")),
+                DropdownMenuItem(value: 168, child: Text("Weekly (Every 7 days)")),
+              ],
+              onChanged: (val) {
+                if (val != null) setState(() => _syncIntervalHours = val);
+              },
+            ),
+          ],
+          if (_lastSyncedAt != null && _lastSyncedAt!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.outlineVariant),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle_outline, size: 16, color: AppColors.successGreen),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Last Synced: ${_lastSyncedAt!}",
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.onSurfaceVariant,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
@@ -649,6 +738,9 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
                 final result = await ApiService().syncProfileToOverleaf();
                 if (!mounted) return;
                 if (result != null && result["ok"] == true) {
+                  setState(() {
+                    _lastSyncedAt = DateTime.now().toUtc().toIso8601String();
+                  });
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text("Candidate profile files (profile.json, PROFILE.md, profile_vars.tex) synced to Open-Overleaf!"),
@@ -699,6 +791,8 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
                   projectName: project.isNotEmpty ? project : "job_applications",
                   resumeTemplatePath: resumeTemplate.isNotEmpty ? resumeTemplate : "templates/resume.tex",
                   coverLetterTemplatePath: coverLetterTemplate.isNotEmpty ? coverLetterTemplate : "templates/cover_letter.tex",
+                  autoSyncProfile: _autoSyncProfile,
+                  syncIntervalHours: _syncIntervalHours,
                 );
 
                 if (!mounted) return;
@@ -708,11 +802,14 @@ class _SetPreferencesScreenState extends State<SetPreferencesScreen> {
                     _overleafSecretController.text = secret;
                   });
                 }
+                if (ok) {
+                  unawaited(ApiService().syncProfileToOverleaf());
+                }
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
                       ok
-                          ? "Open-Overleaf configuration and format settings saved successfully!"
+                          ? "Open-Overleaf configuration saved and profile synced successfully!"
                           : "Failed to save Open-Overleaf configuration",
                     ),
                   ),

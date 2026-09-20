@@ -162,8 +162,9 @@ func main() {
 	tailorHandler := handlers.NewTailorHandler(tailorService, databasePool, overleafAESKey, overleafMCPSecret, fcmService)
 	versionsHandler := handlers.NewVersionsHandler(databasePool, overleafAESKey, overleafMCPSecret)
 	notificationsHandler := handlers.NewNotificationsHandler(databasePool)
+	profileSyncService := services.NewProfileSyncService(databasePool, overleafAESKey, overleafMCPSecret)
+	profileSyncService.StartBackgroundSyncScheduler(context.Background())
 
-	// Initialize the default Gin web router with basic logging and crash-recovery built in.
 	webRouter := gin.Default()
 	webRouter.Use(middleware.CORSMiddleware())
 

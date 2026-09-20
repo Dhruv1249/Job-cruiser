@@ -103,7 +103,7 @@ void main() {
       },
     };
 
-    testWidgets("renders profile items and standard ATS answers", (tester) async {
+    testWidgets("renders profile categories collapsed by default and expands on click", (tester) async {
       tester.view.physicalSize = const Size(1280, 1600);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
@@ -120,20 +120,21 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text("Quick Fill Vault"), findsOneWidget);
-      expect(find.text("Dhruv Sharma"), findsWidgets);
+      expect(find.text("Personal & Contact"), findsWidgets);
+      expect(find.text("Work Authorization"), findsWidgets);
+      expect(find.text("Socials & Links"), findsWidgets);
+
+      expect(find.text("dhruv.sharma@example.com"), findsNothing);
+
+      final personalHeaderFinder = find.widgetWithText(InkWell, "Personal & Contact").last;
+      await tester.tap(personalHeaderFinder);
+      await tester.pumpAndSettle();
+
       expect(find.text("dhruv.sharma@example.com"), findsOneWidget);
       expect(find.text("+91 9876543210"), findsOneWidget);
-      expect(find.text("Bengaluru, India"), findsOneWidget);
-      expect(find.text("https://linkedin.com/in/dhruvsharma"), findsOneWidget);
-      expect(find.text("https://github.com/dhruvsharma"), findsOneWidget);
-      expect(find.text("Authorized to work in India and US"), findsOneWidget);
-      expect(find.text("No sponsorship required"), findsOneWidget);
-      expect(find.text("Immediate (0 days)"), findsOneWidget);
-      expect(find.text("Veteran Status"), findsOneWidget);
-      expect(find.text("I am not a protected veteran"), findsOneWidget);
     });
 
-    testWidgets("filters items by search query", (tester) async {
+    testWidgets("filters items by search query and auto-expands matching categories", (tester) async {
       tester.view.physicalSize = const Size(1280, 1600);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
@@ -178,6 +179,10 @@ void main() {
       await tester.tap(socialsCategoryChipFinder);
       await tester.pumpAndSettle();
 
+      final allCardsViewIconButton = find.byTooltip("All Cards View");
+      await tester.tap(allCardsViewIconButton);
+      await tester.pumpAndSettle();
+
       expect(find.text("https://linkedin.com/in/dhruvsharma"), findsOneWidget);
       expect(find.text("https://github.com/dhruvsharma"), findsOneWidget);
       expect(find.text("https://dhruvsharma.dev"), findsOneWidget);
@@ -207,6 +212,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      final allCardsViewIconButton = find.byTooltip("All Cards View");
+      await tester.tap(allCardsViewIconButton);
+      await tester.pumpAndSettle();
+
       final emailTileFinder = find.widgetWithText(InkWell, "dhruv.sharma@example.com");
       expect(emailTileFinder, findsOneWidget);
       await tester.tap(emailTileFinder);
@@ -222,7 +231,7 @@ void main() {
       expect(find.byIcon(Icons.check), findsOneWidget);
     });
 
-    testWidgets("opens add custom field modal dialog", (tester) async {
+    testWidgets("opens add custom field modal dialog and searches categories", (tester) async {
       tester.view.physicalSize = const Size(1280, 1600);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
@@ -245,6 +254,17 @@ void main() {
 
       expect(find.text("Field Label *"), findsOneWidget);
       expect(find.text("Value to Copy *"), findsOneWidget);
+      expect(find.text("Search categories..."), findsOneWidget);
+
+      final categorySearchFinder = find.widgetWithText(TextField, "Search categories...");
+      await tester.enterText(categorySearchFinder, "Work");
+      await tester.pumpAndSettle();
+
+      final dialogChoiceChipFinder = find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.widgetWithText(ChoiceChip, "Work Authorization"),
+      );
+      expect(dialogChoiceChipFinder, findsOneWidget);
     });
 
     testWidgets("displays More button on long content and opens view dialog", (tester) async {
@@ -260,6 +280,10 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
+
+      final allCardsViewIconButton = find.byTooltip("All Cards View");
+      await tester.tap(allCardsViewIconButton);
       await tester.pumpAndSettle();
 
       final moreButtonFinder = find.text("More");
@@ -286,6 +310,10 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
+
+      final allCardsViewIconButton = find.byTooltip("All Cards View");
+      await tester.tap(allCardsViewIconButton);
       await tester.pumpAndSettle();
 
       final editIconButtons = find.byIcon(Icons.edit_outlined);
@@ -399,6 +427,10 @@ void main() {
       await tester.pump();
 
       await tester.tap(find.text("Save"));
+      await tester.pumpAndSettle();
+
+      final allCardsViewIconButton = find.byTooltip("All Cards View");
+      await tester.tap(allCardsViewIconButton);
       await tester.pumpAndSettle();
 
       expect(find.text("Government Clearances"), findsWidgets);

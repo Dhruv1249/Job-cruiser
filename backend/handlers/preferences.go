@@ -682,6 +682,16 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 		go h.MatchService.EvaluateForSingleUser(context.Background(), fmt.Sprintf("%v", userID))
 	}
 
+	userIdentifier, identifierOk := userID.(string)
+	if identifierOk && userIdentifier != "" {
+		go func() {
+			backgroundContext, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
+			syncService := services.NewProfileSyncService(h.DB, h.AESKey, h.MCPSecret)
+			_, _ = syncService.SyncUserProfileToOverleaf(backgroundContext, userIdentifier)
+		}()
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "Preferences saved successfully"})
 }
 
@@ -966,6 +976,8 @@ type OverleafConfigRequest struct {
 	ProjectName             string `json:"project_name"`
 	ResumeTemplatePath      string `json:"resume_template_path"`
 	CoverLetterTemplatePath string `json:"cover_letter_template_path"`
+	AutoSyncProfile         *bool  `json:"auto_sync_profile"`
+	SyncIntervalHours       *int   `json:"sync_interval_hours"`
 }
 
 /*
@@ -999,6 +1011,16 @@ func (h *PreferencesHandler) UpdateOverleafConfig(c *gin.Context) {
 		coverLetterTemplatePath = "templates/cover_letter.tex"
 	}
 
+	autoSyncProfile := true
+	if req.AutoSyncProfile != nil {
+		autoSyncProfile = *req.AutoSyncProfile
+	}
+
+	syncIntervalHours := 24
+	if req.SyncIntervalHours != nil && *req.SyncIntervalHours > 0 {
+		syncIntervalHours = *req.SyncIntervalHours
+	}
+
 	var encryptedToken *string
 	tokenEncrypted := false
 
@@ -1028,29 +1050,51 @@ func (h *PreferencesHandler) UpdateOverleafConfig(c *gin.Context) {
 	}
 
 	query := `
-		INSERT INTO user_overleaf_config (user_id, deployment_url, project_name, encrypted_access_token, token_encrypted, resume_template_path, cover_letter_template_path)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO user_overleaf_config (
+			user_id, deployment_url, project_name, encrypted_access_token,
+			token_encrypted, resume_template_path, cover_letter_template_path,
+			auto_sync_profile, sync_interval_hours
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (user_id)
 		DO UPDATE SET
 			deployment_url = EXCLUDED.deployment_url,
 			project_name = EXCLUDED.project_name,
 			resume_template_path = EXCLUDED.resume_template_path,
 			cover_letter_template_path = EXCLUDED.cover_letter_template_path,
+			auto_sync_profile = EXCLUDED.auto_sync_profile,
+			sync_interval_hours = EXCLUDED.sync_interval_hours,
 			encrypted_access_token = CASE WHEN EXCLUDED.encrypted_access_token IS NOT NULL THEN EXCLUDED.encrypted_access_token ELSE user_overleaf_config.encrypted_access_token END,
 			token_encrypted = CASE WHEN EXCLUDED.encrypted_access_token IS NOT NULL THEN EXCLUDED.token_encrypted ELSE user_overleaf_config.token_encrypted END,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 
-	_, err := h.DB.Exec(context.Background(), query, userID, cleanDeploymentURL, projectName, encryptedToken, tokenEncrypted, resumeTemplatePath, coverLetterTemplatePath)
+	_, err := h.DB.Exec(
+		context.Background(),
+		query,
+		userID,
+		cleanDeploymentURL,
+		projectName,
+		encryptedToken,
+		tokenEncrypted,
+		resumeTemplatePath,
+		coverLetterTemplatePath,
+		autoSyncProfile,
+		syncIntervalHours,
+	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save open-overleaf configuration"})
 		return
 	}
 
-	go func(uID string) {
-		client, _, clientErr := services.LoadUserMCPClient(context.Background(), h.DB, uID, h.AESKey, "")
+	go func(userIdentifier string) {
+		backgroundContext, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		client, _, clientErr := services.LoadUserMCPClient(backgroundContext, h.DB, userIdentifier, h.AESKey, "")
 		if clientErr == nil && client != nil {
-			_ = services.EnsureDefaultTemplatesExist(context.Background(), client, projectName)
+			_ = services.EnsureDefaultTemplatesExist(backgroundContext, client, projectName)
+			syncService := services.NewProfileSyncService(h.DB, h.AESKey, h.MCPSecret)
+			_, _ = syncService.SyncUserProfileToOverleaf(backgroundContext, userIdentifier)
 		}
 	}(fmt.Sprintf("%v", userID))
 
@@ -1069,14 +1113,27 @@ func (h *PreferencesHandler) GetOverleafConfig(c *gin.Context) {
 
 	query := `
 		SELECT deployment_url, COALESCE(project_name, 'job_applications'), COALESCE(encrypted_access_token, ''), COALESCE(token_encrypted, false),
-		       COALESCE(resume_template_path, 'templates/resume.tex'), COALESCE(cover_letter_template_path, 'templates/cover_letter.tex')
+		       COALESCE(resume_template_path, 'templates/resume.tex'), COALESCE(cover_letter_template_path, 'templates/cover_letter.tex'),
+		       COALESCE(auto_sync_profile, true), COALESCE(sync_interval_hours, 24), last_synced_at
 		FROM user_overleaf_config
 		WHERE user_id = $1;
 	`
 
 	var url, projectName, encryptedToken, resumeTemplatePath, coverLetterTemplatePath string
-	var tokenEncrypted bool
-	err := h.DB.QueryRow(context.Background(), query, userID).Scan(&url, &projectName, &encryptedToken, &tokenEncrypted, &resumeTemplatePath, &coverLetterTemplatePath)
+	var tokenEncrypted, autoSyncProfile bool
+	var syncIntervalHours int
+	var lastSyncedAt *time.Time
+	err := h.DB.QueryRow(context.Background(), query, userID).Scan(
+		&url,
+		&projectName,
+		&encryptedToken,
+		&tokenEncrypted,
+		&resumeTemplatePath,
+		&coverLetterTemplatePath,
+		&autoSyncProfile,
+		&syncIntervalHours,
+		&lastSyncedAt,
+	)
 	if err != nil {
 		if err.Error() == "no rows in result set" {
 			c.JSON(http.StatusOK, gin.H{"data": nil})
@@ -1102,6 +1159,11 @@ func (h *PreferencesHandler) GetOverleafConfig(c *gin.Context) {
 
 	cleanURL := strings.TrimRight(strings.Trim(strings.TrimSpace(url), "\"'"), "/")
 
+	var lastSyncedString string
+	if lastSyncedAt != nil {
+		lastSyncedString = lastSyncedAt.UTC().Format(time.RFC3339)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
 			"deployment_url":             cleanURL,
@@ -1110,6 +1172,9 @@ func (h *PreferencesHandler) GetOverleafConfig(c *gin.Context) {
 			"mcp_secret":                 secret,
 			"resume_template_path":       resumeTemplatePath,
 			"cover_letter_template_path": coverLetterTemplatePath,
+			"auto_sync_profile":          autoSyncProfile,
+			"sync_interval_hours":        syncIntervalHours,
+			"last_synced_at":             lastSyncedString,
 		},
 	})
 }

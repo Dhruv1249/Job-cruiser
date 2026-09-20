@@ -657,6 +657,8 @@ class ApiService {
     String? projectName,
     String? resumeTemplatePath,
     String? coverLetterTemplatePath,
+    bool? autoSyncProfile,
+    int? syncIntervalHours,
   }) async {
     try {
       final payload = <String, dynamic>{
@@ -673,6 +675,12 @@ class ApiService {
       }
       if (coverLetterTemplatePath != null && coverLetterTemplatePath.isNotEmpty) {
         payload['cover_letter_template_path'] = coverLetterTemplatePath;
+      }
+      if (autoSyncProfile != null) {
+        payload['auto_sync_profile'] = autoSyncProfile;
+      }
+      if (syncIntervalHours != null) {
+        payload['sync_interval_hours'] = syncIntervalHours;
       }
       final response = await _dio.post('/overleaf/config', data: payload);
       return response.statusCode == 200;
