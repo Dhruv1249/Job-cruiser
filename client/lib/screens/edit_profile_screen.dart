@@ -25,6 +25,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
   late final TextEditingController _fullNameController;
+  late final TextEditingController _professionalHeadlineController;
   late final TextEditingController _emailController;
   late final TextEditingController _phoneController;
   late final TextEditingController _locationController;
@@ -54,6 +55,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   void initState() {
     super.initState();
     _fullNameController = TextEditingController();
+    _professionalHeadlineController = TextEditingController();
     _emailController = TextEditingController();
     _phoneController = TextEditingController();
     _locationController = TextEditingController();
@@ -75,6 +77,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   void dispose() {
     _fullNameController.dispose();
+    _professionalHeadlineController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
     _locationController.dispose();
@@ -93,6 +96,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   void _populateFromData(Map<String, dynamic> data) {
     _fullNameController.text = data["full_name"] as String? ?? "";
+    _professionalHeadlineController.text = data["professional_headline"] as String? ?? "";
     _emailController.text = data["email"] as String? ?? "";
     _phoneController.text = data["phone"] as String? ?? "";
     _locationController.text = data["location"] as String? ?? "";
@@ -381,6 +385,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final companyController = TextEditingController(text: existingExperience?["company"]?.toString() ?? "");
     final roleController = TextEditingController(text: existingExperience?["role"]?.toString() ?? "");
     final durationController = TextEditingController(text: existingExperience?["duration"]?.toString() ?? "");
+    final techStackController = TextEditingController(
+      text: existingExperience?["tech_stack"] is List
+          ? (existingExperience!["tech_stack"] as List).join(", ")
+          : existingExperience?["tech_stack"]?.toString() ?? "",
+    );
     final highlightsController = TextEditingController(
       text: existingExperience?["highlights"] is List
           ? (existingExperience!["highlights"] as List).join("\n")
@@ -423,6 +432,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  controller: techStackController,
+                  decoration: const InputDecoration(
+                    labelText: "Technologies / Tech Stack (comma separated)",
+                    hintText: "e.g. Go, PostgreSQL, AWS, Docker",
+                    prefixIcon: Icon(Icons.layers_outlined, size: 20),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
                   controller: highlightsController,
                   minLines: 1,
                   maxLines: 4,
@@ -454,11 +472,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
 
     if (result == true && mounted) {
+      final techList = techStackController.text
+          .split(",")
+          .map((tech) => tech.trim())
+          .where((tech) => tech.isNotEmpty)
+          .toList();
+
       final updatedItem = <String, dynamic>{
         "company": companyController.text.trim(),
         "role": roleController.text.trim(),
         "duration": durationController.text.trim(),
         "highlights": highlightsController.text.trim(),
+        "tech_stack": techList,
       };
 
       setState(() {
@@ -473,6 +498,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     companyController.dispose();
     roleController.dispose();
     durationController.dispose();
+    techStackController.dispose();
     highlightsController.dispose();
   }
 
@@ -1171,6 +1197,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       "phone": _phoneController.text.trim(),
       "location": _locationController.text.trim(),
       "country": _countryController.text.trim(),
+      "professional_headline": _professionalHeadlineController.text.trim(),
       "linkedin_url": _linkedinController.text.trim(),
       "github_url": _githubController.text.trim(),
       "portfolio_url": _portfolioController.text.trim(),
@@ -1491,6 +1518,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               prefixIcon: Icon(Icons.person_outline, size: 20),
             ),
             validator: (value) => (value == null || value.trim().isEmpty) ? "Please enter your name" : null,
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _professionalHeadlineController,
+            decoration: const InputDecoration(
+              labelText: "Professional Headline",
+              hintText: "e.g. Senior Full-Stack Engineer | Go & Flutter",
+              prefixIcon: Icon(Icons.badge_outlined, size: 20),
+            ),
           ),
           const SizedBox(height: 12),
           TextFormField(
@@ -1912,6 +1948,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 final duration = exp["duration"]?.toString() ?? "";
                 final highlights = exp["highlights"]?.toString() ?? "";
                 final formattedDuration = formatDisplayDuration(duration);
+                final techStackRaw = exp["tech_stack"];
+                final List<String> techStack = techStackRaw is List
+                    ? techStackRaw.map((element) => element.toString().trim()).where((element) => element.isNotEmpty).toList()
+                    : [];
 
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1938,6 +1978,28 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             Text(
                               highlights,
                               style: const TextStyle(color: AppColors.onSurfaceVariant, fontSize: 12),
+                            ),
+                          ],
+                          if (techStack.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              children: techStack
+                                  .map(
+                                    (tech) => Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.surfaceContainerHigh,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        tech,
+                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
                             ),
                           ],
                         ],

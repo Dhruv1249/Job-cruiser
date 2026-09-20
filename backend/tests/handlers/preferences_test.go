@@ -765,3 +765,80 @@ func TestCustomFormAnswersBinding(testingContext *testing.T) {
 	}
 }
 
+/*
+TestMergeProjectTechIntoSkills verifies that unique project technologies are merged into candidate skills without duplication.
+*/
+func TestMergeProjectTechIntoSkills(testingContext *testing.T) {
+	initialSkills := []string{"Go", "PostgreSQL"}
+	projects := []handlers.ParsedProjectItem{
+		{
+			Title:     "API Gateway",
+			TechStack: []string{"go", "Docker", "Redis"},
+		},
+		{
+			Title:     "Data Pipeline",
+			TechStack: []string{"Python", "redis", "Kafka", "  "},
+		},
+	}
+
+	mergedSkills := handlers.MergeProjectTechIntoSkills(initialSkills, projects)
+	expectedSkills := []string{"Go", "PostgreSQL", "Docker", "Redis", "Python", "Kafka"}
+
+	if len(mergedSkills) != len(expectedSkills) {
+		testingContext.Fatalf("expected %d skills, got %d: %v", len(expectedSkills), len(mergedSkills), mergedSkills)
+	}
+
+	for index, expectedSkill := range expectedSkills {
+		if mergedSkills[index] != expectedSkill {
+			testingContext.Errorf("skill at index %d expected %q, got %q", index, expectedSkill, mergedSkills[index])
+		}
+	}
+}
+
+/*
+TestProfileUpdateRequestWithHeadlineAndExperienceTech verifies json serialization of professional headline and role technologies.
+*/
+func TestProfileUpdateRequestWithHeadlineAndExperienceTech(testingContext *testing.T) {
+	rawPayload := map[string]interface{}{
+		"full_name":             "Alex Morgan",
+		"professional_headline": "Staff Systems Architect",
+		"experiences": []map[string]interface{}{
+			{
+				"company":    "Acme Corp",
+				"role":       "Lead Backend Engineer",
+				"duration":   "2021 - Present",
+				"highlights": "Led distributed system migration",
+				"tech_stack": []string{"Go", "gRPC", "Kubernetes"},
+			},
+		},
+	}
+
+	serializedBytes, serializationError := json.Marshal(rawPayload)
+	if serializationError != nil {
+		testingContext.Fatalf("failed to marshal request: %v", serializationError)
+	}
+
+	var parsedRequest handlers.ProfileUpdateRequest
+	unmarshalError := json.Unmarshal(serializedBytes, &parsedRequest)
+	if unmarshalError != nil {
+		testingContext.Fatalf("failed to unmarshal request: %v", unmarshalError)
+	}
+
+	if parsedRequest.ProfessionalHeadline != "Staff Systems Architect" {
+		testingContext.Errorf("expected headline 'Staff Systems Architect', got %q", parsedRequest.ProfessionalHeadline)
+	}
+
+	if len(parsedRequest.Experiences) != 1 {
+		testingContext.Fatalf("expected 1 experience item, got %d", len(parsedRequest.Experiences))
+	}
+
+	targetExperience := parsedRequest.Experiences[0]
+	if len(targetExperience.TechStack) != 3 {
+		testingContext.Fatalf("expected 3 tech stack items, got %d", len(targetExperience.TechStack))
+	}
+
+	if targetExperience.TechStack[0] != "Go" || targetExperience.TechStack[1] != "gRPC" || targetExperience.TechStack[2] != "Kubernetes" {
+		testingContext.Errorf("unexpected tech stack: %v", targetExperience.TechStack)
+	}
+}
+

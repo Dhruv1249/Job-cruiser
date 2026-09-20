@@ -33,6 +33,7 @@ type CustomLinkItem struct {
 
 type PreferencesRequest struct {
 	FullName                          string                    `json:"full_name" binding:"required"`
+	ProfessionalHeadline              string                    `json:"professional_headline"`
 	Email                             string                    `json:"email"`
 	Phone                             string                    `json:"phone"`
 	Location                          string                    `json:"location"`
@@ -73,6 +74,7 @@ ProfileUpdateRequest encapsulates personal background, contact information, soci
 */
 type ProfileUpdateRequest struct {
 	FullName                string                     `json:"full_name" binding:"required"`
+	ProfessionalHeadline    string                     `json:"professional_headline"`
 	Email                   string                     `json:"email"`
 	Phone                   string                     `json:"phone"`
 	Location                string                     `json:"location"`
@@ -164,10 +166,11 @@ type ParseCVRequest struct {
 }
 
 type ParsedExperienceItem struct {
-	Company    string `json:"company"`
-	Role       string `json:"role"`
-	Duration   string `json:"duration"`
-	Highlights string `json:"highlights"`
+	Company    string   `json:"company"`
+	Role       string   `json:"role"`
+	Duration   string   `json:"duration"`
+	Highlights string   `json:"highlights"`
+	TechStack  []string `json:"tech_stack"`
 }
 
 type ParsedProjectItem struct {
@@ -241,6 +244,33 @@ type ParsedCVResponse struct {
 }
 
 /*
+MergeProjectTechIntoSkills combines project technologies into candidate skills avoiding duplicates.
+*/
+func MergeProjectTechIntoSkills(existingSkills []string, projects []ParsedProjectItem) []string {
+	skillSet := make(map[string]struct{})
+	for _, skill := range existingSkills {
+		normalizedSkill := strings.ToLower(strings.TrimSpace(skill))
+		if normalizedSkill != "" {
+			skillSet[normalizedSkill] = struct{}{}
+		}
+	}
+	mergedSkills := append([]string{}, existingSkills...)
+	for _, project := range projects {
+		for _, tech := range project.TechStack {
+			trimmedTech := strings.TrimSpace(tech)
+			normalizedTech := strings.ToLower(trimmedTech)
+			if normalizedTech != "" {
+				if _, exists := skillSet[normalizedTech]; !exists {
+					skillSet[normalizedTech] = struct{}{}
+					mergedSkills = append(mergedSkills, trimmedTech)
+				}
+			}
+		}
+	}
+	return mergedSkills
+}
+
+/*
 UpdateProfile persists personal contact info, bio, links, and structured experience records.
 */
 func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
@@ -276,7 +306,8 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 		educationJSON = []byte("[]")
 	}
 
-	skillsJSON, marshalSkillsError := json.Marshal(req.Skills)
+	mergedSkills := MergeProjectTechIntoSkills(req.Skills, req.Projects)
+	skillsJSON, marshalSkillsError := json.Marshal(mergedSkills)
 	if marshalSkillsError != nil {
 		skillsJSON = []byte("[]")
 	}
@@ -327,14 +358,15 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 
 	upsertQuery := `
 		INSERT INTO user_preferences (
-			user_id, full_name, email, phone, location, country, linkedin_url, github_url, portfolio_url,
+			user_id, full_name, professional_headline, email, phone, location, country, linkedin_url, github_url, portfolio_url,
 			custom_links, bio_experience_text, master_cv_text, experiences, projects, education, skills, achievements, certifications,
 			research_patents, open_source_contributions, custom_form_answers, target_roles, work_models
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13, $14, $15, $16, $17, $18, $19, COALESCE($20::jsonb, '{}'::jsonb), '[]'::jsonb, '[]'::jsonb)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13, $14, $15, $16, $17, $18, $19, $20, COALESCE($21::jsonb, '{}'::jsonb), '[]'::jsonb, '[]'::jsonb)
 		ON CONFLICT (user_id)
 		DO UPDATE SET
 			full_name = EXCLUDED.full_name,
+			professional_headline = EXCLUDED.professional_headline,
 			email = EXCLUDED.email,
 			phone = EXCLUDED.phone,
 			location = EXCLUDED.location,
@@ -353,7 +385,7 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 			certifications = EXCLUDED.certifications,
 			research_patents = EXCLUDED.research_patents,
 			open_source_contributions = EXCLUDED.open_source_contributions,
-			custom_form_answers = CASE WHEN $20::jsonb IS NOT NULL THEN $20::jsonb ELSE user_preferences.custom_form_answers END,
+			custom_form_answers = CASE WHEN $21::jsonb IS NOT NULL THEN $21::jsonb ELSE user_preferences.custom_form_answers END,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 	_, err := h.DB.Exec(
@@ -361,6 +393,7 @@ func (h *PreferencesHandler) UpdateProfile(c *gin.Context) {
 		upsertQuery,
 		userID,
 		req.FullName,
+		req.ProfessionalHeadline,
 		req.Email,
 		req.Phone,
 		req.Location,
@@ -511,6 +544,7 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 	if skills == nil {
 		skills = []string{}
 	}
+	skills = MergeProjectTechIntoSkills(skills, projects)
 	if achievements == nil {
 		achievements = []ParsedAchievementItem{}
 	}
@@ -542,7 +576,7 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 
 	query := `
 		INSERT INTO user_preferences (
-			user_id, full_name, email, phone, location, country, linkedin_url, github_url, portfolio_url,
+			user_id, full_name, professional_headline, email, phone, location, country, linkedin_url, github_url, portfolio_url,
 			custom_links, target_roles, target_industries, target_locations, work_models,
 			min_salary, currency, master_cv_text, bio_experience_text, target_resume_pages,
 			target_cover_letter_pages, match_threshold_notification_enabled, match_threshold_percentage,
@@ -550,10 +584,11 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 			experiences, projects, education, skills, achievements, certifications,
 			research_patents, open_source_contributions, custom_form_answers
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, COALESCE($33::jsonb, '{}'::jsonb))
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, COALESCE($34::jsonb, '{}'::jsonb))
 		ON CONFLICT (user_id) 
 		DO UPDATE SET 
 			full_name = CASE WHEN EXCLUDED.full_name <> '' AND EXCLUDED.full_name <> 'User' THEN EXCLUDED.full_name ELSE user_preferences.full_name END,
+			professional_headline = CASE WHEN EXCLUDED.professional_headline <> '' THEN EXCLUDED.professional_headline ELSE user_preferences.professional_headline END,
 			email = CASE WHEN EXCLUDED.email <> '' THEN EXCLUDED.email ELSE user_preferences.email END,
 			phone = CASE WHEN EXCLUDED.phone <> '' THEN EXCLUDED.phone ELSE user_preferences.phone END,
 			location = CASE WHEN EXCLUDED.location <> '' THEN EXCLUDED.location ELSE user_preferences.location END,
@@ -584,7 +619,7 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 			certifications = CASE WHEN jsonb_typeof(EXCLUDED.certifications) = 'array' AND jsonb_array_length(EXCLUDED.certifications) > 0 THEN EXCLUDED.certifications ELSE user_preferences.certifications END,
 			research_patents = CASE WHEN jsonb_typeof(EXCLUDED.research_patents) = 'array' AND jsonb_array_length(EXCLUDED.research_patents) > 0 THEN EXCLUDED.research_patents ELSE user_preferences.research_patents END,
 			open_source_contributions = CASE WHEN jsonb_typeof(EXCLUDED.open_source_contributions) = 'array' AND jsonb_array_length(EXCLUDED.open_source_contributions) > 0 THEN EXCLUDED.open_source_contributions ELSE user_preferences.open_source_contributions END,
-			custom_form_answers = CASE WHEN $33::jsonb IS NOT NULL THEN $33::jsonb ELSE user_preferences.custom_form_answers END,
+			custom_form_answers = CASE WHEN $34::jsonb IS NOT NULL THEN $34::jsonb ELSE user_preferences.custom_form_answers END,
 			updated_at = CURRENT_TIMESTAMP;
 	`
 
@@ -593,6 +628,7 @@ func (h *PreferencesHandler) UpdatePreferences(c *gin.Context) {
 		query,
 		userID,
 		req.FullName,
+		req.ProfessionalHeadline,
 		req.Email,
 		req.Phone,
 		req.Location,
@@ -650,6 +686,7 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 	query := `
 		SELECT 
 			COALESCE(p.full_name, ''), 
+			COALESCE(p.professional_headline, ''),
 			COALESCE(p.email, u.primary_email, ''),
 			COALESCE(p.phone, u.phone, ''),
 			COALESCE(p.location, u.location, ''),
@@ -705,6 +742,7 @@ func (h *PreferencesHandler) GetPreferences(c *gin.Context) {
 
 	err := h.DB.QueryRow(context.Background(), query, userID).Scan(
 		&pref.FullName,
+		&pref.ProfessionalHeadline,
 		&pref.Email,
 		&pref.Phone,
 		&pref.Location,
@@ -1076,6 +1114,7 @@ type flexExperienceItem struct {
 	Role       string      `json:"role"`
 	Duration   string      `json:"duration"`
 	Highlights interface{} `json:"highlights"`
+	TechStack  interface{} `json:"tech_stack"`
 }
 
 type flexProjectItem struct {
@@ -1219,7 +1258,8 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
       "company": "Company Name",
       "role": "Role Title",
       "duration": "2021 - Present",
-      "highlights": ["Key contribution 1", "Key contribution 2"]
+      "highlights": ["Key contribution 1", "Key contribution 2"],
+      "tech_stack": ["Go", "Docker"]
     }
   ],
   "projects": [
@@ -1310,6 +1350,10 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 						"role": {"type": "string"},
 						"duration": {"type": "string"},
 						"highlights": {
+							"type": "array",
+							"items": {"type": "string"}
+						},
+						"tech_stack": {
 							"type": "array",
 							"items": {"type": "string"}
 						}
@@ -1455,11 +1499,28 @@ Return ONLY a strict JSON object matching this schema without markdown formattin
 	}
 
 	for _, item := range flexRes.Experience {
+		var experienceTechList []string
+		switch techStackValue := item.TechStack.(type) {
+		case string:
+			if strings.TrimSpace(techStackValue) != "" {
+				experienceTechList = []string{strings.TrimSpace(techStackValue)}
+			}
+		case []interface{}:
+			for _, techElement := range techStackValue {
+				if techString, isString := techElement.(string); isString {
+					trimmedTech := strings.TrimSpace(techString)
+					if trimmedTech != "" {
+						experienceTechList = append(experienceTechList, trimmedTech)
+					}
+				}
+			}
+		}
 		parsedResponse.Experience = append(parsedResponse.Experience, ParsedExperienceItem{
 			Company:    item.Company,
 			Role:       item.Role,
 			Duration:   item.Duration,
 			Highlights: stringifyFlex(item.Highlights),
+			TechStack:  experienceTechList,
 		})
 	}
 

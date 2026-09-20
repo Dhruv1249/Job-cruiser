@@ -92,15 +92,17 @@ func (handler *TailorHandler) fetchJobTailoringRecord(ctx *gin.Context, jobID st
 }
 
 func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{}) string {
-	var fullName, primaryEmail, contactEmail, phone, location, linkedInURL, gitHubURL, portfolioURL string
+	var fullName, professionalHeadline, primaryEmail, contactEmail, phone, location, linkedInURL, gitHubURL, portfolioURL string
 	var bioExperienceText, masterCVText, latexCV, parsedExperienceJSON string
 	var customLinksJSON, skillsJSON, projectsJSON, experiencesJSON, educationJSON []byte
 	var achievementsJSON, certificationsJSON, researchPatentsJSON, openSourceJSON []byte
+	var targetLocationsJSON, targetIndustriesJSON []byte
 
 	queryError := handler.DB.QueryRow(
 		ctx.Request.Context(),
 		`SELECT
 			COALESCE(p.full_name, ''),
+			COALESCE(p.professional_headline, ''),
 			COALESCE(u.primary_email, ''),
 			COALESCE(p.email, ''),
 			COALESCE(p.phone, u.phone, ''),
@@ -109,6 +111,8 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 			COALESCE(p.github_url, u.links->>'github', ''),
 			COALESCE(p.portfolio_url, u.links->>'portfolio', ''),
 			COALESCE(p.custom_links, '[]'::jsonb),
+			COALESCE(p.target_locations, '[]'::jsonb),
+			COALESCE(p.target_industries, '[]'::jsonb),
 			COALESCE(p.bio_experience_text, ''),
 			COALESCE(p.master_cv_text, ''),
 			COALESCE(u.latex_cv, ''),
@@ -127,6 +131,7 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 		userID,
 	).Scan(
 		&fullName,
+		&professionalHeadline,
 		&primaryEmail,
 		&contactEmail,
 		&phone,
@@ -135,6 +140,8 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 		&gitHubURL,
 		&portfolioURL,
 		&customLinksJSON,
+		&targetLocationsJSON,
+		&targetIndustriesJSON,
 		&bioExperienceText,
 		&masterCVText,
 		&latexCV,
@@ -157,6 +164,9 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 	profile.WriteString("CANDIDATE CONTACT INFORMATION & LINKS (USE AS-IS, DO NOT MODIFY OR INVENT)\n")
 	if fullName != "" {
 		profile.WriteString(fmt.Sprintf("  Full Name: %s\n", fullName))
+	}
+	if professionalHeadline != "" {
+		profile.WriteString(fmt.Sprintf("  Professional Headline: %s\n", professionalHeadline))
 	}
 	effectiveEmail := contactEmail
 	if effectiveEmail == "" {
@@ -229,10 +239,11 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 	}
 
 	type experienceRecord struct {
-		Company    string `json:"company"`
-		Role       string `json:"role"`
-		Duration   string `json:"duration"`
-		Highlights string `json:"highlights"`
+		Company    string   `json:"company"`
+		Role       string   `json:"role"`
+		Duration   string   `json:"duration"`
+		Highlights string   `json:"highlights"`
+		TechStack  []string `json:"tech_stack"`
 	}
 	var rawExperiences []experienceRecord
 	if len(experiencesJSON) > 0 {
@@ -246,6 +257,9 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 				durationText = fmt.Sprintf(" (%s)", experienceItem.Duration)
 			}
 			profile.WriteString(fmt.Sprintf("  %s at %s%s\n", experienceItem.Role, experienceItem.Company, durationText))
+			if len(experienceItem.TechStack) > 0 {
+				profile.WriteString(fmt.Sprintf("    Technologies Used: %s\n", strings.Join(experienceItem.TechStack, ", ")))
+			}
 			if experienceItem.Highlights != "" {
 				profile.WriteString(fmt.Sprintf("    %s\n", experienceItem.Highlights))
 			}
@@ -466,6 +480,25 @@ func (handler *TailorHandler) fetchUserBio(ctx *gin.Context, userID interface{})
 		profile.WriteString("RAW LATEX CV SOURCE\n")
 		profile.WriteString(latexCV)
 		profile.WriteString("\n\n")
+	}
+
+	var targetLocations []string
+	if len(targetLocationsJSON) > 0 {
+		_ = json.Unmarshal(targetLocationsJSON, &targetLocations)
+	}
+	var targetIndustries []string
+	if len(targetIndustriesJSON) > 0 {
+		_ = json.Unmarshal(targetIndustriesJSON, &targetIndustries)
+	}
+	if len(targetLocations) > 0 || len(targetIndustries) > 0 {
+		profile.WriteString("CANDIDATE JOB TARGETING PREFERENCES\n")
+		if len(targetLocations) > 0 {
+			profile.WriteString(fmt.Sprintf("  Preferred Locations: %s\n", strings.Join(targetLocations, ", ")))
+		}
+		if len(targetIndustries) > 0 {
+			profile.WriteString(fmt.Sprintf("  Target Industries: %s\n", strings.Join(targetIndustries, ", ")))
+		}
+		profile.WriteString("\n")
 	}
 
 	result := profile.String()

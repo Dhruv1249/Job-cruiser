@@ -29,6 +29,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
   bool _isSaving = false;
 
   late TextEditingController _nameController;
+  late TextEditingController _professionalHeadlineController;
   late TextEditingController _emailController;
   late TextEditingController _phoneController;
   late TextEditingController _locationController;
@@ -61,7 +62,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
     'Europe Remote',
   ];
 
-  final List<Map<String, String>> _experiences = [];
+  final List<Map<String, dynamic>> _experiences = [];
   final List<Map<String, String>> _projects = [];
   final List<Map<String, String>> _education = [];
   final List<String> _skills = [];
@@ -115,6 +116,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.suggestedName ?? '');
+    _professionalHeadlineController = TextEditingController();
     _emailController = TextEditingController(text: widget.suggestedEmail ?? '');
     _phoneController = TextEditingController();
     _locationController = TextEditingController();
@@ -147,6 +149,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _professionalHeadlineController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
     _locationController.dispose();
@@ -222,14 +225,23 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
             _bioTextController.text = extractedText.trim();
           }
 
+          if (parsed['professional_headline'] != null && (parsed['professional_headline'] as String).isNotEmpty) {
+            _professionalHeadlineController.text = parsed['professional_headline'] as String;
+          }
+
           if (parsed['experience'] is List) {
             _experiences.clear();
             for (var item in parsed['experience']) {
+              final rawTech = item['tech_stack'];
+              final List<String> techList = rawTech is List
+                  ? rawTech.map((element) => element.toString().trim()).where((element) => element.isNotEmpty).toList()
+                  : [];
               _experiences.add({
                 'company': item['company']?.toString() ?? '',
                 'role': item['role']?.toString() ?? '',
                 'duration': item['duration']?.toString() ?? '',
                 'highlights': item['highlights']?.toString() ?? '',
+                'tech_stack': techList,
               });
             }
           }
@@ -398,6 +410,7 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
       'full_name': _nameController.text.trim().isNotEmpty
           ? _nameController.text.trim()
           : 'User',
+      'professional_headline': _professionalHeadlineController.text.trim(),
       'email': _emailController.text.trim(),
       'phone': _phoneController.text.trim(),
       'location': _locationController.text.trim(),
@@ -601,6 +614,16 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
           decoration: const InputDecoration(
             labelText: 'Full Name',
             hintText: 'e.g. Jane Doe',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          ),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _professionalHeadlineController,
+          decoration: const InputDecoration(
+            labelText: 'Professional Headline (Optional)',
+            hintText: 'e.g. Senior Full-Stack Engineer | Go & Flutter',
             border: OutlineInputBorder(),
             contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           ),
@@ -898,15 +921,19 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                   itemCount: _experiences.length,
                   itemBuilder: (context, index) {
                     final item = _experiences[index];
-                    final company = item['company'] ?? '';
-                    final role = item['role'] ?? '';
-                    final duration = item['duration'] ?? '';
-                    final highlights = item['highlights'] ?? '';
+                    final company = item['company']?.toString() ?? '';
+                    final role = item['role']?.toString() ?? '';
+                    final duration = item['duration']?.toString() ?? '';
+                    final highlights = item['highlights']?.toString() ?? '';
                     final formattedDuration = formatDisplayDuration(duration);
                     final subtitleParts = [
                       if (company.isNotEmpty) company,
                       if (formattedDuration.isNotEmpty) formattedDuration,
                     ].join(' • ');
+                    final techStackRaw = item['tech_stack'];
+                    final techStackStr = techStackRaw is List
+                        ? techStackRaw.join(', ')
+                        : techStackRaw?.toString() ?? '';
 
                     return Card(
                       margin: const EdgeInsets.only(bottom: 8),
@@ -939,6 +966,16 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
                                 highlights,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppColors.onSurfaceVariant,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                            if (techStackStr.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Tech: $techStackStr',
                                 style: const TextStyle(
                                   color: AppColors.onSurfaceVariant,
                                   fontSize: 12,
@@ -1814,10 +1851,17 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
 
   void _showAddExperienceDialog({int? editIndex}) {
     final isEditing = editIndex != null;
-    final companyCtrl = TextEditingController(text: isEditing ? _experiences[editIndex]['company'] : '');
-    final roleCtrl = TextEditingController(text: isEditing ? _experiences[editIndex]['role'] : '');
-    final durationCtrl = TextEditingController(text: isEditing ? _experiences[editIndex]['duration'] : '');
-    final highlightsCtrl = TextEditingController(text: isEditing ? _experiences[editIndex]['highlights'] : '');
+    final companyCtrl = TextEditingController(text: isEditing ? _experiences[editIndex]['company']?.toString() ?? '' : '');
+    final roleCtrl = TextEditingController(text: isEditing ? _experiences[editIndex]['role']?.toString() ?? '' : '');
+    final durationCtrl = TextEditingController(text: isEditing ? _experiences[editIndex]['duration']?.toString() ?? '' : '');
+    final techStackCtrl = TextEditingController(
+      text: isEditing
+          ? (_experiences[editIndex]['tech_stack'] is List
+              ? (_experiences[editIndex]['tech_stack'] as List).join(', ')
+              : _experiences[editIndex]['tech_stack']?.toString() ?? '')
+          : '',
+    );
+    final highlightsCtrl = TextEditingController(text: isEditing ? _experiences[editIndex]['highlights']?.toString() ?? '' : '');
 
     showDialog(
       context: context,
@@ -1851,6 +1895,15 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
               ),
               const SizedBox(height: 8),
               TextField(
+                controller: techStackCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Technologies / Tech Stack (comma separated)',
+                  hintText: 'e.g. Go, PostgreSQL, AWS, Docker',
+                  prefixIcon: Icon(Icons.layers_outlined, size: 20),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
                 controller: highlightsCtrl,
                 minLines: 1,
                 maxLines: 4,
@@ -1867,12 +1920,19 @@ class _OnboardingWizardScreenState extends State<OnboardingWizardScreen> {
           ElevatedButton(
             onPressed: () {
               if (roleCtrl.text.trim().isNotEmpty) {
+                final techList = techStackCtrl.text
+                    .split(',')
+                    .map((element) => element.trim())
+                    .where((element) => element.isNotEmpty)
+                    .toList();
+
                 setState(() {
-                  final data = {
+                  final data = <String, dynamic>{
                     'company': companyCtrl.text.trim(),
                     'role': roleCtrl.text.trim(),
                     'duration': durationCtrl.text.trim(),
                     'highlights': highlightsCtrl.text.trim(),
+                    'tech_stack': techList,
                   };
                   if (isEditing) {
                     _experiences[editIndex] = data;

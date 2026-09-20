@@ -364,6 +364,7 @@ var schemaQueries = []string{
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS notification_prompt_criteria TEXT DEFAULT '';`,
 	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS notification_evaluation_mode VARCHAR(32) DEFAULT 'both';`,
 	`ALTER TABLE notifications ALTER COLUMN created_at TYPE TIMESTAMPTZ;`,
+	`ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS professional_headline TEXT DEFAULT '';`,
 }
 
 // InitSchema executes the queries in sequence.
