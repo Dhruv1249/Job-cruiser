@@ -75,15 +75,27 @@ func main() {
 
 	overleafAESKeyHex := strings.TrimSpace(os.Getenv("OVERLEAF_AES_KEY"))
 	if overleafAESKeyHex == "" {
-		log.Fatal("CRITICAL ERROR: OVERLEAF_AES_KEY environment variable is missing.")
+		overleafAESKeyHex = strings.TrimSpace(os.Getenv("ENCRYPTION_KEY"))
 	}
 
 	var overleafAESKey []byte
-	decodedKey, hexError := hex.DecodeString(overleafAESKeyHex)
-	if hexError == nil && len(decodedKey) == 32 {
-		overleafAESKey = decodedKey
+	if overleafAESKeyHex != "" {
+		decodedKey, hexError := hex.DecodeString(overleafAESKeyHex)
+		if hexError == nil && len(decodedKey) == 32 {
+			overleafAESKey = decodedKey
+		} else {
+			hash := sha256.Sum256([]byte(overleafAESKeyHex))
+			overleafAESKey = hash[:]
+		}
 	} else {
-		hash := sha256.Sum256([]byte(overleafAESKeyHex))
+		salt := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+		if salt == "" {
+			salt = strings.TrimSpace(os.Getenv("DATABASE_URL"))
+		}
+		if salt == "" {
+			log.Fatal("CRITICAL ERROR: No encryption key or salt configured (OVERLEAF_AES_KEY, ENCRYPTION_KEY, JWT_SECRET, or DATABASE_URL).")
+		}
+		hash := sha256.Sum256([]byte("job_cruiser_overleaf_aes_key:" + salt))
 		overleafAESKey = hash[:]
 	}
 
@@ -102,14 +114,9 @@ func main() {
 		log.Fatal("CRITICAL ERROR: GOOGLE_CLIENT_ID environment variable is missing.")
 	}
 
-	allowedOrigins := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS"))
-	if allowedOrigins == "" {
-		log.Fatal("CRITICAL ERROR: ALLOWED_ORIGINS environment variable is missing.")
-	}
-
 	serverPort := strings.TrimSpace(os.Getenv("PORT"))
 	if serverPort == "" {
-		log.Fatal("CRITICAL ERROR: PORT environment variable is missing.")
+		serverPort = "8080"
 	}
 
 	firebaseProjectID := strings.TrimSpace(os.Getenv("FIREBASE_PROJECT_ID"))
