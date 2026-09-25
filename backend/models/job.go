@@ -2,12 +2,15 @@ package models
 
 import "time"
 
+/*
+Job represents a raw job listing entity in the database.
+*/
 type Job struct {
 	ID                 string    `json:"id"`
 	CompanyID          string    `json:"company_id"`
 	Company            string    `json:"company"`
 	Title              string    `json:"title"`
-	Location           *string   `json:"location"` // Pointer because it might be null
+	Location           *string   `json:"location"`
 	SalaryMin          *int      `json:"salary_min"`
 	SalaryMax          *int      `json:"salary_max"`
 	Currency           *string   `json:"currency"`
@@ -18,19 +21,8 @@ type Job struct {
 	Source             string    `json:"source"`
 	URL                string    `json:"url"`
 	PostedDate         *string   `json:"posted_date"`
-	Tags               any       `json:"tags"` // or json.RawMessage
+	Tags               any       `json:"tags"`
 	Summary            string    `json:"summary"`
 	RawDescription     string    `json:"raw_description"`
 	ScrapedAt          time.Time `json:"scraped_at"`
-}
-
-type UserJobMatch struct {
-	UserID          string    `json:"user_id"`
-	JobID           string    `json:"job_id"`
-	MatchScore      int       `json:"match_score"`
-	MatchReasons    []string  `json:"match_reasons"`
-	SuggestedAction string    `json:"suggested_action"`
-	IsDismissed     bool      `json:"is_dismissed"`
-	IsAIMatched     bool      `json:"is_ai_matched"`
-	CreatedAt       time.Time `json:"created_at"`
 }

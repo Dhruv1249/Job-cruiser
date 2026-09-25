@@ -16,7 +16,6 @@ import 'models/job_filter_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'services/api_service.dart';
 import 'services/fcm_service.dart';
-import 'services/notification_service.dart';
 import 'services/update_checker_service.dart';
 import 'widgets/company_logo_avatar.dart';
 import 'widgets/notifications_sheet.dart';
@@ -43,12 +42,6 @@ Future<void> main() async {
     } catch (e) {
       debugPrint("Firebase/FCM init failed: $e");
     }
-  }
-
-  try {
-    await NotificationService.instance.initialize();
-  } catch (e) {
-    debugPrint("NotificationService init failed: $e");
   }
 
   runApp(const MyApp());
@@ -229,7 +222,6 @@ class _JobCruiserShellState extends State<JobCruiserShell> with WidgetsBindingOb
   final ApiService _apiService = ApiService();
   int _unreadNotificationCount = 0;
   Timer? _notificationPollingTimer;
-  StreamSubscription<String>? _notificationTapSubscription;
 
   @override
   void initState() {
@@ -240,13 +232,13 @@ class _JobCruiserShellState extends State<JobCruiserShell> with WidgetsBindingOb
       const Duration(seconds: 10),
       (_) => _loadUnreadNotificationsCount(),
     );
-    _notificationTapSubscription = NotificationService.instance.onNotificationTapped.listen(_handleNotificationJobTap);
+    FCMService.instance.onNotificationTap = _handleNotificationJobTap;
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _notificationTapSubscription?.cancel();
+    FCMService.instance.onNotificationTap = null;
     _notificationPollingTimer?.cancel();
     _inboxRefreshTrigger.dispose();
     super.dispose();
@@ -529,7 +521,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   Timer? _searchDebounceTimer;
   PendingUpdate? _pendingUpdate;
   bool _updateBannerDismissed = false;
-  final Set<String> _seenNotificationIds = {};
 
   @override
   void initState() {
@@ -575,10 +566,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _initializeFilterAndData() async {
-    final sharedPreferences = await SharedPreferences.getInstance();
-    final savedSeenIds = sharedPreferences.getStringList('seen_system_notification_ids') ?? [];
-    _seenNotificationIds.addAll(savedSeenIds);
-
     final savedFilters = await JobFilterState.loadFromStorage();
     if (!mounted) return;
 
@@ -590,6 +577,12 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     await _loadMatchedJobs();
     await _loadUnreadNotificationsCount();
     _checkForUpdate();
+  }
+
+  Future<void> _loadUnreadNotificationsCount() async {
+    final count = await _apiService.fetchUnreadNotificationsCount();
+    if (!mounted) return;
+    setState(() => _unreadNotificationCount = count);
   }
 
   Future<void> _refreshMatchStatus() async {
@@ -607,50 +600,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
       if (wasEvaluating && !isEvaluating) {
         _loadMatchedJobs();
-      }
-    }
-  }
-
-  Future<void> _loadUnreadNotificationsCount() async {
-    final count = await _apiService.fetchUnreadNotificationsCount();
-    if (!mounted) return;
-    setState(() => _unreadNotificationCount = count);
-
-    if (count > 0) {
-      final notifications = await _apiService.fetchNotifications();
-      var hasNewDispatchedNotifications = false;
-
-      for (final item in notifications) {
-        final id = item['id']?.toString() ?? '';
-        final isRead = item['is_read'] == true;
-        if (!isRead && id.isNotEmpty && !_seenNotificationIds.contains(id)) {
-          _seenNotificationIds.add(id);
-          hasNewDispatchedNotifications = true;
-          final title = item['title']?.toString() ?? 'Job Cruiser';
-          final message = item['message']?.toString() ?? '';
-          final jobId = item['job_id']?.toString();
-          final isTailoring = title.toLowerCase().contains('tailor') ||
-              title.toLowerCase().contains('application ready') ||
-              message.toLowerCase().contains('resume') ||
-              message.toLowerCase().contains('cover letter');
-          final notificationPayload =
-              isTailoring && jobId != null ? 'tailor:$jobId' : (jobId ?? '');
-          NotificationService.instance.showLocalNotification(
-            id: id.hashCode,
-            title: title,
-            body: message,
-            payload: notificationPayload,
-          );
-        }
-      }
-
-      if (hasNewDispatchedNotifications) {
-        final sharedPreferences = await SharedPreferences.getInstance();
-        final trimmedIds = _seenNotificationIds.toList();
-        if (trimmedIds.length > 500) {
-          trimmedIds.removeRange(0, trimmedIds.length - 300);
-        }
-        await sharedPreferences.setStringList('seen_system_notification_ids', trimmedIds);
       }
     }
   }

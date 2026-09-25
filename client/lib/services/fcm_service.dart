@@ -24,7 +24,7 @@ class FCMService {
 
   static final FCMService instance = FCMService._();
 
-  final FirebaseMessaging _messaging = FirebaseMessaging.instance;
+  FirebaseMessaging get _messaging => FirebaseMessaging.instance;
 
   static const AndroidNotificationChannel _highImportanceChannel =
       AndroidNotificationChannel(
@@ -112,8 +112,13 @@ class FCMService {
 
   void _handleMessageTap(RemoteMessage message) {
     final String? jobId = message.data['job_id'] as String?;
+    final String? type = message.data['type'] as String?;
     if (jobId != null && jobId.isNotEmpty && onNotificationTap != null) {
-      onNotificationTap!(jobId);
+      if (type == 'tailor_complete' || type == 'application_ready') {
+        onNotificationTap!('tailor:$jobId');
+      } else {
+        onNotificationTap!(jobId);
+      }
     }
   }
 
@@ -123,8 +128,13 @@ class FCMService {
       final Map<String, dynamic> data =
           jsonDecode(response.payload!) as Map<String, dynamic>;
       final String? jobId = data['job_id'] as String?;
+      final String? type = data['type'] as String?;
       if (jobId != null && jobId.isNotEmpty && onNotificationTap != null) {
-        onNotificationTap!(jobId);
+        if (type == 'tailor_complete' || type == 'application_ready') {
+          onNotificationTap!('tailor:$jobId');
+        } else {
+          onNotificationTap!(jobId);
+        }
       }
     } catch (_) {}
   }

@@ -28,10 +28,7 @@ type PreferencesHandler struct {
 	MCPSecret    string
 }
 
-type CustomLinkItem struct {
-	Label string `json:"label"`
-	URL   string `json:"url"`
-}
+type CustomLinkItem = services.ProfileCustomLinkItem
 
 type PreferencesRequest struct {
 	FullName                          string                    `json:"full_name" binding:"required"`
@@ -167,68 +164,13 @@ type ParseCVRequest struct {
 	RawCVText string `json:"raw_cv_text" binding:"required"`
 }
 
-type ParsedExperienceItem struct {
-	Company    string   `json:"company"`
-	Role       string   `json:"role"`
-	Duration   string   `json:"duration"`
-	Highlights string   `json:"highlights"`
-	TechStack  []string `json:"tech_stack"`
-}
-
-type ParsedProjectItem struct {
-	Title         string   `json:"title"`
-	TechStack     []string `json:"tech_stack"`
-	Description   string   `json:"description"`
-	Link          string   `json:"link"`
-	GithubURL     string   `json:"github_url"`
-	DeploymentURL string   `json:"deployment_url"`
-	Duration      string   `json:"duration"`
-}
-
-type ParsedAchievementItem struct {
-	Title   string `json:"title"`
-	Details string `json:"details"`
-	Date    string `json:"date"`
-	Link    string `json:"link"`
-}
-
-type ParsedCertificationItem struct {
-	Name   string `json:"name"`
-	Issuer string `json:"issuer"`
-	Date   string `json:"date"`
-	Link   string `json:"link"`
-}
-
-type ParsedEducationItem struct {
-	Institution string `json:"institution"`
-	Degree      string `json:"degree"`
-	Year        string `json:"year"`
-	Grade       string `json:"grade"`
-}
-
-/*
-ParsedResearchPatentItem represents a research publication, conference paper, or granted patent.
-*/
-type ParsedResearchPatentItem struct {
-	Title                     string `json:"title"`
-	Authors                   string `json:"authors"`
-	PublicationOrPatentNumber string `json:"publication_or_patent_number"`
-	Date                      string `json:"date"`
-	Link                      string `json:"link"`
-	Description               string `json:"description"`
-}
-
-/*
-ParsedOpenSourceItem represents an open-source software project or codebase contribution.
-*/
-type ParsedOpenSourceItem struct {
-	ProjectName      string   `json:"project_name"`
-	ContributionRole string   `json:"contribution_role"`
-	TechStack        []string `json:"tech_stack"`
-	Link             string   `json:"link"`
-	Duration         string   `json:"duration"`
-	Description      string   `json:"description"`
-}
+type ParsedExperienceItem = services.ProfileExperienceItem
+type ParsedProjectItem = services.ProfileProjectItem
+type ParsedAchievementItem = services.ProfileAchievementItem
+type ParsedCertificationItem = services.ProfileCertificationItem
+type ParsedEducationItem = services.ProfileEducationItem
+type ParsedResearchPatentItem = services.ProfileResearchPatentItem
+type ParsedOpenSourceItem = services.ProfileOpenSourceItem
 
 type ParsedCVResponse struct {
 	BioSummary              string                     `json:"bio_summary"`

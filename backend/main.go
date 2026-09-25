@@ -42,30 +42,21 @@ func main() {
 		log.Fatal("CRITICAL ERROR: DATABASE_URL environment variable is missing.")
 	}
 
-	// Create a background context for the database connection process.
 	backgroundContext := context.Background()
-
-	// Initialize a pool of connections to CockroachDB.
-	// We use a pool instead of a single connection so multiple users can hit the API at once.
 	databasePool, connectionError := pgxpool.New(backgroundContext, databaseURL)
 	if connectionError != nil {
 		log.Fatalf("CRITICAL ERROR: Failed to connect to the database. Details: %v", connectionError)
 	}
-
-	// 'defer' ensures the database connections are properly closed when the program shuts down.
 	defer databasePool.Close()
 
 	var serverTime time.Time
-
-	// Send a test query to ask the database for its current time.
 	queryError := databasePool.QueryRow(backgroundContext, "SELECT NOW()").Scan(&serverTime)
 	if queryError != nil {
 		log.Fatalf("CRITICAL ERROR: Connected to DB, but test query failed. Details: %v", queryError)
 	}
 
-	// Format the raw time data into a readable text string.
 	formattedTime := serverTime.Format(time.RFC3339)
-	fmt.Printf("Successfully connected to CockroachDB! Server time: %s\n", formattedTime)
+	fmt.Printf("Successfully connected to PostgreSQL! Server time: %s\n", formattedTime)
 
 	schemaError := db.InitSchema(databasePool)
 	if schemaError != nil {
@@ -188,7 +179,6 @@ func main() {
 	{
 		scraperIngest.POST("/start", ingestHandler.StartRun)
 		scraperIngest.POST("/ingest-raw", ingestHandler.IngestRaw)
-		scraperIngest.POST("/ingest", ingestHandler.IngestJobs)
 		scraperIngest.POST("/finish", ingestHandler.FinishRun)
 		scraperIngest.GET("/ats-slugs", ingestHandler.GetATSSlugs)
 		scraperIngest.POST("/register-ats-slug", ingestHandler.RegisterATSSlug)
@@ -197,7 +187,6 @@ func main() {
 		scraperIngest.POST("/enrich-descriptions", ingestHandler.EnrichJobDescriptions)
 	}
 
-	// Protected Routes (Requires JWT)
 	protected := webRouter.Group("/api")
 	protected.Use(middleware.RequireAuth())
 	{
@@ -219,7 +208,6 @@ func main() {
 
 		protected.POST("/tailor/resume", tailorHandler.TailorResume)
 		protected.POST("/tailor/cover-letter", tailorHandler.GenerateCoverLetter)
-		protected.POST("/tailor/application", tailorHandler.TailorApplicationAsync)
 		protected.POST("/tailor/application-async", tailorHandler.TailorApplicationAsync)
 		protected.GET("/tailor/templates", tailorHandler.ListTemplates)
 		protected.POST("/tailor/templates/seed", tailorHandler.SeedDefaultTemplates)
@@ -261,10 +249,9 @@ func main() {
 		protected.POST("/admin/pipeline/restart", adminHandler.RestartAIPipeline)
 	}
 
-	// Check if a specific network port was requested in the .env file.
 	serverPort := os.Getenv("PORT")
 	if serverPort == "" {
-		serverPort = "8080" // Default to port 8080 if none is specified.
+		serverPort = "8080"
 	}
 
 	go func() {
@@ -274,7 +261,6 @@ func main() {
 
 	fmt.Printf("Starting web server on port %s...\n", serverPort)
 
-	// Turn the server on and lock it in an infinite loop listening for internet traffic.
 	serverError := webRouter.Run(":" + serverPort)
 	if serverError != nil {
 		log.Fatalf("CRITICAL ERROR: The web server crashed. Details: %v", serverError)

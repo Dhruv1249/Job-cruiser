@@ -13,12 +13,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+/*
+UnmarshalStringJSON parses JSON encoded as a string into the target pointer.
+*/
 func UnmarshalStringJSON(raw string, target interface{}) error {
 	return json.Unmarshal([]byte(raw), target)
-}
-
-func unmarshalStringJSON(raw string, target interface{}) error {
-	return UnmarshalStringJSON(raw, target)
 }
 
 // MatchedJobsHandler serves the matched jobs endpoint, reading from user_job_matches
@@ -272,7 +271,7 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 			return
 		}
 
-		if err := unmarshalStringJSON(techStackRaw, &job.TechStack); err != nil {
+		if err := UnmarshalStringJSON(techStackRaw, &job.TechStack); err != nil {
 			job.TechStack = []string{}
 		}
 
@@ -431,7 +430,7 @@ func (h *MatchedJobsHandler) GetMatchedJobByID(c *gin.Context) {
 	}
 
 	if techStackRaw != "" {
-		_ = unmarshalStringJSON(techStackRaw, &job.TechStack)
+		_ = UnmarshalStringJSON(techStackRaw, &job.TechStack)
 	}
 	if job.TechStack == nil {
 		job.TechStack = []string{}

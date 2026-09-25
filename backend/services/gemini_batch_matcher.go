@@ -578,6 +578,32 @@ func (s *GeminiBatchMatchService) notifyAdminModelDisabled(modelName string, rea
 		WHERE is_master_admin = true OR (primary_email = $3 AND $3 != '');
 	`
 	_, _ = s.DB.Exec(context.Background(), query, title, message, masterAdminEmail)
+
+	if s.FCMService != nil {
+		adminRows, queryError := s.DB.Query(context.Background(), `
+			SELECT COALESCE(fcm_token, '')
+			FROM users
+			WHERE (is_master_admin = true OR (primary_email = $1 AND $1 != ''))
+			  AND fcm_token IS NOT NULL AND fcm_token != '';
+		`, masterAdminEmail)
+		if queryError == nil {
+			defer adminRows.Close()
+			for adminRows.Next() {
+				var deviceToken string
+				if scanError := adminRows.Scan(&deviceToken); scanError == nil && deviceToken != "" {
+					go func(token string) {
+						_ = s.FCMService.SendPushNotification(
+							context.Background(),
+							token,
+							title,
+							message,
+							map[string]string{"type": "admin_alert"},
+						)
+					}(deviceToken)
+				}
+			}
+		}
+	}
 }
 
 func (s *GeminiBatchMatchService) notifyAdminPipelineShutdown() {
@@ -597,6 +623,32 @@ func (s *GeminiBatchMatchService) notifyAdminPipelineShutdown() {
 		WHERE is_master_admin = true OR (primary_email = $3 AND $3 != '');
 	`
 	_, _ = s.DB.Exec(context.Background(), query, title, message, masterAdminEmail)
+
+	if s.FCMService != nil {
+		adminRows, queryError := s.DB.Query(context.Background(), `
+			SELECT COALESCE(fcm_token, '')
+			FROM users
+			WHERE (is_master_admin = true OR (primary_email = $1 AND $1 != ''))
+			  AND fcm_token IS NOT NULL AND fcm_token != '';
+		`, masterAdminEmail)
+		if queryError == nil {
+			defer adminRows.Close()
+			for adminRows.Next() {
+				var deviceToken string
+				if scanError := adminRows.Scan(&deviceToken); scanError == nil && deviceToken != "" {
+					go func(token string) {
+						_ = s.FCMService.SendPushNotification(
+							context.Background(),
+							token,
+							title,
+							message,
+							map[string]string{"type": "admin_alert"},
+						)
+					}(deviceToken)
+				}
+			}
+		}
+	}
 }
 
 func (s *GeminiBatchMatchService) enforceRateLimitPacing() {

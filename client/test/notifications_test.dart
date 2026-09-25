@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_app/services/notification_service.dart';
+import 'package:flutter_app/services/fcm_service.dart';
 import 'package:flutter_app/widgets/notifications_sheet.dart';
 
 void main() {
@@ -9,16 +9,16 @@ void main() {
     dotenv.loadFromString(envString: 'API_BASE_URL=http://localhost:8080');
   });
 
-  group('NotificationService unit tests', () {
-    test('singleton instance exists and stream can receive tap payloads', () async {
-      final service = NotificationService.instance;
+  group('FCMService unit tests', () {
+    test('singleton instance exists and tap callback can be assigned', () async {
+      final service = FCMService.instance;
       expect(service, isNotNull);
 
-      final receivedPayloads = <String>[];
-      final subscription = service.onNotificationTapped.listen(receivedPayloads.add);
+      String? tappedPayload;
+      service.onNotificationTap = (payload) => tappedPayload = payload;
 
-      expect(receivedPayloads, isEmpty);
-      await subscription.cancel();
+      expect(tappedPayload, isNull);
+      service.onNotificationTap = null;
     });
   });
 

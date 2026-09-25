@@ -3,33 +3,6 @@ import 'main.dart' show AppColors;
 import 'models/job.dart';
 import 'widgets/job_detail_panel.dart';
 
-void main() {
-  runApp(const CompanyDetailsApp());
-}
-
-/// Standalone entry application widget for the Company Details screen.
-class CompanyDetailsApp extends StatelessWidget {
-  const CompanyDetailsApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Company Deep Dive',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        scaffoldBackgroundColor: AppColors.background,
-        fontFamily: 'Inter',
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.primary,
-          surface: AppColors.surface,
-          primary: AppColors.primary,
-        ),
-      ),
-      home: const CompanyDetailsPage(),
-    );
-  }
-}
-
 /// Dedicated page rendering full details of a specific job opportunity.
 class CompanyDetailsPage extends StatelessWidget {
   const CompanyDetailsPage({
