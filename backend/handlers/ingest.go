@@ -741,19 +741,39 @@ func (h *IngestHandler) EnrichJobDescriptions(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	updatedCount := 0
+	var ids []string
+	var descriptions []string
 	for _, updateItem := range req.Updates {
-		if updateItem.ID == "" || updateItem.DescriptionText == "" {
-			continue
+		if updateItem.ID != "" && updateItem.DescriptionText != "" {
+			ids = append(ids, updateItem.ID)
+			descriptions = append(descriptions, updateItem.DescriptionText)
 		}
-		query := `UPDATE jobs SET raw_desc = $1 WHERE id = $2;`
-		if _, execErr := h.DB.Exec(ctx, query, updateItem.DescriptionText, updateItem.ID); execErr == nil {
-			updatedCount++
-		}
+	}
+
+	if len(ids) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"message":       "No valid updates provided",
+			"updated_count": 0,
+		})
+		return
+	}
+
+	query := `
+		UPDATE jobs
+		SET raw_desc = batch_data.description
+		FROM (
+			SELECT unnest($1::uuid[]) AS id, unnest($2::text[]) AS description
+		) AS batch_data
+		WHERE jobs.id = batch_data.id;
+	`
+	cmdTag, execErr := h.DB.Exec(ctx, query, ids, descriptions)
+	if execErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update descriptions: " + execErr.Error()})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":       "Descriptions updated successfully",
-		"updated_count": updatedCount,
+		"updated_count": cmdTag.RowsAffected(),
 	})
 }

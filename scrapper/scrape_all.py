@@ -1115,13 +1115,24 @@ def enrich_linkedin_descriptions(
         pending_endpoint = (
             f"{BACKEND_API_URL}/scraper/jobs-without-description?source=linkedin&limit={current_batch_limit}&since_minutes={since_minutes}"
         )
-        try:
-            response = requests.get(pending_endpoint, headers=request_headers, timeout=15)
-            if response.status_code != 200:
-                break
-            pending_jobs = response.json().get("data", [])
-        except Exception as fetch_error:
-            logger.error(f"[enrichment] Failed to fetch pending LinkedIn jobs from backend: {type(fetch_error).__name__}: {fetch_error}")
+        pending_jobs = []
+        for fetch_attempt in range(3):
+            try:
+                response = requests.get(pending_endpoint, headers=request_headers, timeout=30)
+                if response.status_code == 200:
+                    pending_jobs = response.json().get("data", [])
+                    break
+                logger.warning(
+                    f"[enrichment] Backend returned status {response.status_code} when fetching pending jobs on attempt {fetch_attempt + 1}"
+                )
+                time.sleep(2.0 * (fetch_attempt + 1))
+            except Exception as fetch_error:
+                logger.warning(
+                    f"[enrichment] Attempt {fetch_attempt + 1} failed to fetch pending jobs: {type(fetch_error).__name__}: {fetch_error}"
+                )
+                time.sleep(2.0 * (fetch_attempt + 1))
+
+        if not pending_jobs:
             break
 
         eligible_jobs = [
@@ -1145,6 +1156,7 @@ def enrich_linkedin_descriptions(
                 job_attempt_counts[record_id] = job_attempt_counts.get(record_id, 0) + 1
 
         batch_enriched_updates = []
+        batch_completed_ids = []
         effective_workers = len(active_routes) if max_workers is None else min(max_workers, len(active_routes))
         actual_workers = max(1, min(effective_workers, len(jobs_to_process)))
         rate_limit_occurred_in_batch = False
@@ -1196,7 +1208,7 @@ def enrich_linkedin_descriptions(
 
                 if update_payload is not None:
                     batch_enriched_updates.append(update_payload)
-                    resolved_job_identifiers.add(job_identifier)
+                    batch_completed_ids.append(job_identifier)
                 elif status_code == 200:
                     resolved_job_identifiers.add(job_identifier)
                 elif job_attempt_counts.get(job_identifier, 0) >= max_retries_per_job:
@@ -1214,20 +1226,37 @@ def enrich_linkedin_descriptions(
 
         if batch_enriched_updates:
             enrich_endpoint = f"{BACKEND_API_URL}/scraper/enrich-descriptions"
-            try:
-                update_response = requests.post(
-                    enrich_endpoint,
-                    json={"updates": batch_enriched_updates},
-                    headers=request_headers,
-                    timeout=20,
-                )
-                if update_response.status_code == 200:
-                    total_enriched_count += len(batch_enriched_updates)
-                    logger.info(
-                        f"[enrichment] Successfully updated {len(batch_enriched_updates)} LinkedIn job descriptions ({total_enriched_count} total)."
+            post_succeeded = False
+            for post_attempt in range(3):
+                try:
+                    update_response = requests.post(
+                        enrich_endpoint,
+                        json={"updates": batch_enriched_updates},
+                        headers=request_headers,
+                        timeout=60,
                     )
-            except Exception as enrich_post_error:
-                logger.error(f"[enrichment] Failed to POST description batch to backend: {type(enrich_post_error).__name__}: {enrich_post_error}")
+                    if update_response.status_code == 200:
+                        total_enriched_count += len(batch_enriched_updates)
+                        resolved_job_identifiers.update(batch_completed_ids)
+                        logger.info(
+                            f"[enrichment] Successfully updated {len(batch_enriched_updates)} LinkedIn job descriptions ({total_enriched_count} total)."
+                        )
+                        post_succeeded = True
+                        break
+                    logger.warning(
+                        f"[enrichment] Backend POST returned status {update_response.status_code} on attempt {post_attempt + 1}"
+                    )
+                    time.sleep(2.0 * (post_attempt + 1))
+                except Exception as enrich_post_error:
+                    logger.error(
+                        f"[enrichment] Attempt {post_attempt + 1} failed to POST description batch to backend: {type(enrich_post_error).__name__}: {enrich_post_error}"
+                    )
+                    time.sleep(2.0 * (post_attempt + 1))
+
+            if not post_succeeded:
+                logger.error(
+                    f"[enrichment] Failed to persist batch of {len(batch_enriched_updates)} descriptions after 3 attempts. Retrying jobs in subsequent batches."
+                )
 
         if halt_event.is_set():
             break

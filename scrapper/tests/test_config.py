@@ -18,11 +18,39 @@ class TestConfigDefaults(unittest.TestCase):
         """
         Ensures that missing INGEST_API_KEY raises a critical RuntimeError immediately without fallback.
         """
-        environment_copy = dict(os.environ)
-        environment_copy.pop("INGEST_API_KEY", None)
-        environment_copy.pop("INGEST_KEY", None)
+        test_env = {
+            "BACKEND_API_URL": "http://localhost:8080/api",
+            "GEMINI_API_KEY": "test-gemini-key",
+        }
+        with patch.dict(os.environ, test_env, clear=True):
+            with patch.object(Path, "exists", return_value=False):
+                import config
+                with self.assertRaises(RuntimeError):
+                    importlib.reload(config)
 
-        with patch.dict(os.environ, environment_copy, clear=True):
+    def test_missing_backend_api_url_raises_runtime_error(self):
+        """
+        Ensures that missing BACKEND_API_URL raises a critical RuntimeError immediately without fallback.
+        """
+        test_env = {
+            "INGEST_API_KEY": "test-ingest-key",
+            "GEMINI_API_KEY": "test-gemini-key",
+        }
+        with patch.dict(os.environ, test_env, clear=True):
+            with patch.object(Path, "exists", return_value=False):
+                import config
+                with self.assertRaises(RuntimeError):
+                    importlib.reload(config)
+
+    def test_missing_gemini_api_key_raises_runtime_error(self):
+        """
+        Ensures that missing GEMINI_API_KEY raises a critical RuntimeError immediately without fallback.
+        """
+        test_env = {
+            "BACKEND_API_URL": "http://localhost:8080/api",
+            "INGEST_API_KEY": "test-ingest-key",
+        }
+        with patch.dict(os.environ, test_env, clear=True):
             with patch.object(Path, "exists", return_value=False):
                 import config
                 with self.assertRaises(RuntimeError):

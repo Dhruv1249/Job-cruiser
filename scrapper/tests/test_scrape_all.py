@@ -4,6 +4,7 @@ Unit tests for the job search scraper orchestrator module.
 
 import unittest
 from unittest.mock import Mock, patch, ANY
+import requests
 from jobspy.model import Site
 from scrape_all import (
     normalize_job_post,
@@ -1288,6 +1289,50 @@ class TestDirectCareerProcessing(unittest.TestCase):
 
         self.assertEqual(total_enriched, 1)
         self.assertEqual(mock_fetch_single.call_count, 2)
+
+    @patch("scrape_all.requests.get")
+    @patch("scrape_all.requests.post")
+    @patch("scrape_all.fetch_single_linkedin_description")
+    def test_enrich_linkedin_descriptions_retries_failed_post_to_backend(
+        self, mock_fetch_single, mock_requests_post, mock_requests_get
+    ):
+        """
+        Verify that a transient network failure on posting descriptions retries and successfully resolves the batch.
+        """
+        mock_get_response = Mock()
+        mock_get_response.status_code = 200
+        mock_get_response.json.return_value = {
+            "data": [
+                {"id": "job-post-retry-1", "url": "https://www.linkedin.com/jobs/view/222"},
+            ]
+        }
+        mock_requests_get.return_value = mock_get_response
+
+        mock_fetch_single.return_value = (
+            {"id": "job-post-retry-1", "description_text": "Parsed description"},
+            200,
+            False,
+        )
+
+        mock_post_fail = Mock(status_code=500)
+        mock_post_success = Mock(status_code=200)
+        mock_requests_post.side_effect = [
+            requests.exceptions.Timeout("Connection timed out after 20s"),
+            mock_post_fail,
+            mock_post_success,
+        ]
+
+        with patch("scrape_all.time.sleep", return_value=None):
+            total_enriched = enrich_linkedin_descriptions(
+                cooldown_seconds=0,
+                batch_size=10,
+                max_jobs=1,
+                since_minutes=60,
+                max_workers=1,
+            )
+
+        self.assertEqual(total_enriched, 1)
+        self.assertEqual(mock_requests_post.call_count, 3)
 
 
 if __name__ == "__main__":

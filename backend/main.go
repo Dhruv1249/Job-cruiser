@@ -73,16 +73,6 @@ func main() {
 		log.Fatal("CRITICAL ERROR: NVIDIA_MODEL environment variable is missing.")
 	}
 
-	overleafURL := strings.TrimSpace(os.Getenv("OVERLEAF_MCP_URL"))
-	if overleafURL == "" {
-		log.Fatal("CRITICAL ERROR: OVERLEAF_MCP_URL environment variable is missing.")
-	}
-
-	mcpToken := strings.TrimSpace(os.Getenv("OVERLEAF_MCP_TOKEN"))
-	if mcpToken == "" {
-		log.Fatal("CRITICAL ERROR: OVERLEAF_MCP_TOKEN environment variable is missing.")
-	}
-
 	overleafAESKeyHex := strings.TrimSpace(os.Getenv("OVERLEAF_AES_KEY"))
 	if overleafAESKeyHex == "" {
 		log.Fatal("CRITICAL ERROR: OVERLEAF_AES_KEY environment variable is missing.")
@@ -95,11 +85,6 @@ func main() {
 	} else {
 		hash := sha256.Sum256([]byte(overleafAESKeyHex))
 		overleafAESKey = hash[:]
-	}
-
-	overleafMCPSecret := strings.TrimSpace(os.Getenv("OVERLEAF_MCP_SECRET"))
-	if overleafMCPSecret == "" {
-		log.Fatal("CRITICAL ERROR: OVERLEAF_MCP_SECRET environment variable is missing.")
 	}
 
 	ingestAPIKey := strings.TrimSpace(os.Getenv("INGEST_API_KEY"))
@@ -184,7 +169,7 @@ func main() {
 		NimService:   nvidiaNimService,
 		AESKey:       overleafAESKey,
 		APIKey:       geminiAPIKey,
-		MCPSecret:    overleafMCPSecret,
+		MCPSecret:    "",
 	}
 	appHandler := &handlers.ApplicationHandler{DB: databasePool}
 	ingestHandler := &handlers.IngestHandler{
@@ -194,13 +179,11 @@ func main() {
 	matchedJobsHandler := &handlers.MatchedJobsHandler{DB: databasePool}
 	adminHandler := &handlers.AdminHandler{DB: databasePool, MatchService: hybridMatchService}
 
-	mcpClient := services.NewMCPClient(overleafURL, mcpToken)
-
-	tailorService := services.NewResumeTailorService("https://generativelanguage.googleapis.com", geminiAPIKey, mcpClient)
-	tailorHandler := handlers.NewTailorHandler(tailorService, databasePool, overleafAESKey, overleafMCPSecret, fcmService)
-	versionsHandler := handlers.NewVersionsHandler(databasePool, overleafAESKey, overleafMCPSecret)
+	tailorService := services.NewResumeTailorService("https://generativelanguage.googleapis.com", geminiAPIKey, nil)
+	tailorHandler := handlers.NewTailorHandler(tailorService, databasePool, overleafAESKey, "", fcmService)
+	versionsHandler := handlers.NewVersionsHandler(databasePool, overleafAESKey, "")
 	notificationsHandler := handlers.NewNotificationsHandler(databasePool)
-	profileSyncService := services.NewProfileSyncService(databasePool, overleafAESKey, overleafMCPSecret)
+	profileSyncService := services.NewProfileSyncService(databasePool, overleafAESKey, "")
 	profileSyncService.StartBackgroundSyncScheduler(context.Background())
 
 	webRouter := gin.Default()
