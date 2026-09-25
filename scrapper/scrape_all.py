@@ -1243,7 +1243,7 @@ def run_orchestration(target_platform: str | None = None) -> dict:
     ensure_dir(DATA_DIR)
 
     if target_platform is None:
-        target_platform = os.environ.get("TARGET_SITE") or os.environ.get("TARGET_PLATFORM")
+        target_platform = os.environ.get("TARGET_SITE")
     if target_platform:
         target_platform = target_platform.strip().lower()
 

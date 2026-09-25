@@ -146,13 +146,6 @@ func NewGeminiBatchMatchService(databasePool *pgxpool.Pool, apiKey string) *Gemi
 func parseConfiguredGeminiModels() []string {
 	environmentModels := strings.TrimSpace(os.Getenv("GEMINI_BATCH_MODELS"))
 	if environmentModels == "" {
-		environmentModels = strings.TrimSpace(os.Getenv("GEMINI_MODELS"))
-	}
-	if environmentModels == "" {
-		environmentModels = strings.TrimSpace(os.Getenv("GEMINI_MODEL"))
-	}
-
-	if environmentModels == "" {
 		return nil
 	}
 
@@ -210,9 +203,15 @@ func (s *GeminiBatchMatchService) IsQueuePaused() bool {
 	return s.isQueuePaused
 }
 
-// StartBackgroundScheduler starts a periodic ticker triggering batch evaluations every 10 minutes.
+// StartBackgroundScheduler starts a periodic ticker triggering batch evaluations every 5 minutes.
 func (s *GeminiBatchMatchService) StartBackgroundScheduler(ctx context.Context) {
-	tickerDuration := 10 * time.Minute
+	tickerDuration := 5 * time.Minute
+	rawInterval := strings.TrimSpace(os.Getenv("GEMINI_BATCH_SCHEDULER_INTERVAL"))
+	if rawInterval != "" {
+		if parsedMinutes, err := strconv.Atoi(rawInterval); err == nil && parsedMinutes > 0 {
+			tickerDuration = time.Duration(parsedMinutes) * time.Minute
+		}
+	}
 	ticker := time.NewTicker(tickerDuration)
 	log.Printf("[GeminiBatchMatchService] Started %v background ticker scheduler.", tickerDuration)
 
@@ -305,7 +304,7 @@ func (s *GeminiBatchMatchService) EvaluatePendingForAllUsers(ctx context.Context
 
 		selectedModel, errModel := s.getNextModelName()
 		if errModel != nil {
-			log.Printf("[GeminiBatchMatchService] Configuration/Shutdown error: %v", errModel)
+			log.Printf("[GeminiBatchMatchService] No active models available for batch evaluation (%v). Yielding run; background scheduler will retry unevaluated backlog in 5 minutes.", errModel)
 			return
 		}
 
@@ -387,7 +386,7 @@ func (s *GeminiBatchMatchService) EvaluateForSingleUser(ctx context.Context, tar
 
 		selectedModel, errModel := s.getNextModelName()
 		if errModel != nil {
-			log.Printf("[GeminiBatchMatchService] Configuration error for user %s: %v", targetUserID, errModel)
+			log.Printf("[GeminiBatchMatchService] No active models available for user %s (%v). Yielding evaluation loop; background scheduler will retry in 5 minutes.", targetUserID, errModel)
 			return
 		}
 
@@ -517,6 +516,28 @@ func (s *GeminiBatchMatchService) ResetPipeline() {
 	log.Println("[GeminiBatchMatchService] Gemini AI matching pipeline has been reset and resumed.")
 }
 
+// IsTransientHighDemandError checks if an error message represents temporary 503 high demand, rate limiting, or server overload.
+func IsTransientHighDemandError(errorMessage string) bool {
+	normalizedMessage := strings.ToLower(errorMessage)
+	return strings.Contains(normalizedMessage, "503") ||
+		strings.Contains(normalizedMessage, "service unavailable") ||
+		strings.Contains(normalizedMessage, "high demand") ||
+		strings.Contains(normalizedMessage, "overloaded") ||
+		strings.Contains(normalizedMessage, "unavailable") ||
+		strings.Contains(normalizedMessage, "resource has been exhausted") ||
+		strings.Contains(normalizedMessage, "resourceexhausted") ||
+		strings.Contains(normalizedMessage, "resource_exhausted") ||
+		strings.Contains(normalizedMessage, "too many requests") ||
+		strings.Contains(normalizedMessage, "429") ||
+		strings.Contains(normalizedMessage, "rate limit") ||
+		strings.Contains(normalizedMessage, "deadline exceeded") ||
+		strings.Contains(normalizedMessage, "timeout") ||
+		strings.Contains(normalizedMessage, "502") ||
+		strings.Contains(normalizedMessage, "bad gateway") ||
+		strings.Contains(normalizedMessage, "504") ||
+		strings.Contains(normalizedMessage, "gateway timeout")
+}
+
 func (s *GeminiBatchMatchService) recordModelSuccess(modelName string) {
 	s.modelErrorMutex.Lock()
 	defer s.modelErrorMutex.Unlock()
@@ -527,6 +548,12 @@ func (s *GeminiBatchMatchService) recordModelSuccess(modelName string) {
 func (s *GeminiBatchMatchService) recordModelFailure(ctx context.Context, modelName string, failureReason string) {
 	s.modelErrorMutex.Lock()
 	defer s.modelErrorMutex.Unlock()
+
+	if IsTransientHighDemandError(failureReason) {
+		s.runDisabledModels[modelName] = true
+		log.Printf("[GeminiBatchMatchService] Model '%s' encountered transient high-demand / 503 error (%s). Temporarily rotated for current cycle without halting AI pipeline.", modelName, failureReason)
+		return
+	}
 
 	s.modelRunErrors[modelName]++
 	consecutiveErrors := s.modelRunErrors[modelName]

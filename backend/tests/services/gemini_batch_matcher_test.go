@@ -162,7 +162,7 @@ func TestGeminiBatchMatchServicePerModelSixErrorsDisablesModel(t *testing.T) {
 	service := services.NewGeminiBatchMatchService(nil, "test-api-key")
 
 	for i := 0; i < 5; i++ {
-		service.RecordModelFailureForTest(context.Background(), "test-model-1", "mock timeout error")
+		service.RecordModelFailureForTest(context.Background(), "test-model-1", "mock fatal error: invalid schema")
 	}
 	if service.IsModelDisabledForTest("test-model-1") {
 		t.Fatalf("expected model to remain enabled after 5 errors")
@@ -174,7 +174,7 @@ func TestGeminiBatchMatchServicePerModelSixErrorsDisablesModel(t *testing.T) {
 	}
 
 	for i := 0; i < 6; i++ {
-		service.RecordModelFailureForTest(context.Background(), "test-model-1", "mock 429 quota error")
+		service.RecordModelFailureForTest(context.Background(), "test-model-1", "mock fatal error: unsupported format")
 	}
 	if !service.IsModelDisabledForTest("test-model-1") {
 		t.Fatalf("expected model to be disabled after 6 errors in current run")
@@ -197,10 +197,10 @@ func TestGeminiBatchMatchServiceAllModelsDisabledShutsDownPipeline(t *testing.T)
 	service := services.NewGeminiBatchMatchService(nil, "test-api-key")
 
 	for i := 0; i < 6; i++ {
-		service.RecordModelFailureForTest(context.Background(), "alpha-model", "mock 500 error")
+		service.RecordModelFailureForTest(context.Background(), "alpha-model", "mock fatal error: invalid API key")
 	}
 	for i := 0; i < 6; i++ {
-		service.RecordModelFailureForTest(context.Background(), "beta-model", "mock 500 error")
+		service.RecordModelFailureForTest(context.Background(), "beta-model", "mock fatal error: invalid API key")
 	}
 
 	if !service.IsPipelinePermanentlyStoppedForTest() {
@@ -219,7 +219,7 @@ func TestGeminiBatchMatchServiceTurnBasedRecovery(t *testing.T) {
 	service := services.NewGeminiBatchMatchService(nil, "test-api-key")
 
 	for i := 0; i < 6; i++ {
-		service.RecordModelFailureForTest(context.Background(), "alpha-model", "mock rate limit error")
+		service.RecordModelFailureForTest(context.Background(), "alpha-model", "mock fatal error: unsupported operation")
 	}
 
 	if !service.IsModelDisabledForTest("alpha-model") {
@@ -240,6 +240,64 @@ func TestGeminiBatchMatchServiceTurnBasedRecovery(t *testing.T) {
 	firstModelNextRun, errNext := service.GetNextModelNameForTest()
 	if errNext != nil || (firstModelNextRun != "alpha-model" && firstModelNextRun != "beta-model") {
 		t.Fatalf("expected active model selection on next run, got %s (err: %v)", firstModelNextRun, errNext)
+	}
+}
+
+func TestIsTransientHighDemandError(t *testing.T) {
+	transientErrors := []string{
+		"503 Service Unavailable",
+		"The model is overloaded. Please try again later.",
+		"gemini api error: high demand",
+		"resource has been exhausted (ResourceExhausted)",
+		"429 Too Many Requests: quota exceeded",
+		"context deadline exceeded (timeout)",
+		"502 Bad Gateway",
+		"504 Gateway Timeout",
+	}
+
+	for _, errString := range transientErrors {
+		if !services.IsTransientHighDemandError(errString) {
+			t.Fatalf("expected %q to be identified as transient high demand error", errString)
+		}
+	}
+
+	nonTransientErrors := []string{
+		"400 Bad Request: invalid argument",
+		"401 Unauthorized: invalid api key",
+		"404 Not Found: model does not exist",
+		"invalid character 'x' looking for beginning of value",
+	}
+
+	for _, errString := range nonTransientErrors {
+		if services.IsTransientHighDemandError(errString) {
+			t.Fatalf("expected %q NOT to be identified as transient high demand error", errString)
+		}
+	}
+}
+
+func TestGeminiBatchMatchService503HighDemandDoesNotHaltPipeline(t *testing.T) {
+	t.Setenv("GEMINI_BATCH_MODELS", "gemini-model-1,gemini-model-2")
+
+	service := services.NewGeminiBatchMatchService(nil, "test-api-key")
+
+	for i := 0; i < 10; i++ {
+		service.RecordModelFailureForTest(context.Background(), "gemini-model-1", "503 Service Unavailable: The model is overloaded. Please try again later.")
+		service.RecordModelFailureForTest(context.Background(), "gemini-model-2", "503 high demand on server")
+	}
+
+	if service.IsPipelinePermanentlyStoppedForTest() {
+		t.Fatalf("expected pipeline NOT to be permanently stopped on 503 high demand errors")
+	}
+
+	service.ResetRunErrorsIfHealthyForTest()
+
+	if service.IsModelDisabledForTest("gemini-model-1") || service.IsModelDisabledForTest("gemini-model-2") {
+		t.Fatalf("expected models to be fully active on next run after transient 503 recovery")
+	}
+
+	activeModel, errModel := service.GetNextModelNameForTest()
+	if errModel != nil || (activeModel != "gemini-model-1" && activeModel != "gemini-model-2") {
+		t.Fatalf("expected active model selection on next run, got: %s (err: %v)", activeModel, errModel)
 	}
 }
 

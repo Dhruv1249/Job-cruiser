@@ -12,6 +12,7 @@ import (
 )
 
 func TestResumeTailorServiceGenerateTailoredResumeSuccess(t *testing.T) {
+	t.Setenv("GEMINI_MODELS", "test-model-1")
 	geminiServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		responsePayload := map[string]interface{}{
 			"candidates": []map[string]interface{}{
@@ -122,6 +123,7 @@ func TestSanitizeGeminiLatexStripsMarkdownFences(t *testing.T) {
 }
 
 func TestTailorResumeToFolderSuccess(t *testing.T) {
+	t.Setenv("GEMINI_MODELS", "test-model-1")
 	geminiServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		responsePayload := map[string]interface{}{
 			"candidates": []map[string]interface{}{
@@ -195,6 +197,7 @@ func TestTailorResumeToFolderSuccess(t *testing.T) {
 }
 
 func TestGenerateCoverLetterToFolderSuccess(t *testing.T) {
+	t.Setenv("GEMINI_MODELS", "test-model-1")
 	geminiServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		respPayload := map[string]interface{}{
 			"candidates": []map[string]interface{}{
@@ -264,21 +267,17 @@ func TestGenerateCoverLetterToFolderSuccess(t *testing.T) {
 }
 
 func TestGetGeminiModelCascade(t *testing.T) {
-	t.Run("default cascade when env is empty", func(t *testing.T) {
+	t.Run("returns nil when env is empty", func(t *testing.T) {
 		t.Setenv("GEMINI_MODELS", "")
 		t.Setenv("GEMINI_MODEL", "")
 		cascade := services.GetGeminiModelCascade()
-		if len(cascade) != 3 {
-			t.Fatalf("expected 3 default models in cascade, got %d", len(cascade))
-		}
-		if cascade[0] != "gemini-3.5-flash-lite" || cascade[1] != "gemini-3.1-flash-lite" || cascade[2] != "gemini-2.5-flash-lite" {
-			t.Fatalf("unexpected default cascade slice: %v", cascade)
+		if len(cascade) != 0 {
+			t.Fatalf("expected 0 models in cascade when unset, got %d", len(cascade))
 		}
 	})
 
 	t.Run("parses GEMINI_MODELS comma separated list", func(t *testing.T) {
 		t.Setenv("GEMINI_MODELS", "custom-model-1, custom-model-2 ,custom-model-3")
-		t.Setenv("GEMINI_MODEL", "")
 		cascade := services.GetGeminiModelCascade()
 		if len(cascade) != 3 {
 			t.Fatalf("expected 3 models, got %d", len(cascade))
@@ -288,12 +287,12 @@ func TestGetGeminiModelCascade(t *testing.T) {
 		}
 	})
 
-	t.Run("falls back to GEMINI_MODEL when GEMINI_MODELS is unset", func(t *testing.T) {
+	t.Run("ignores GEMINI_MODEL legacy variable without fallback", func(t *testing.T) {
 		t.Setenv("GEMINI_MODELS", "")
 		t.Setenv("GEMINI_MODEL", "single-fallback-model")
 		cascade := services.GetGeminiModelCascade()
-		if len(cascade) != 1 || cascade[0] != "single-fallback-model" {
-			t.Fatalf("expected single fallback model, got %v", cascade)
+		if len(cascade) != 0 {
+			t.Fatalf("expected zero fallback from GEMINI_MODEL, got %v", cascade)
 		}
 	})
 }
@@ -378,6 +377,7 @@ func TestResumeTailorServiceFailsWhenAllModelsRateLimited(t *testing.T) {
 }
 
 func TestTailorResumeSelfHealingOnCompileFailure(t *testing.T) {
+	t.Setenv("GEMINI_MODELS", "test-model-1")
 	var geminiCallCount int
 	geminiServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		geminiCallCount++
@@ -474,6 +474,7 @@ func TestTailorResumeSelfHealingOnCompileFailure(t *testing.T) {
 }
 
 func TestTailorResumeToFolderWithTemplateIncludesBaselineInPrompt(t *testing.T) {
+	t.Setenv("GEMINI_MODELS", "test-model-1")
 	customTemplate := "\\documentclass{article}\n\\newcommand{\\myCustomMacro}[1]{\\textbf{#1}}\n\\begin{document}\nTemplate\n\\end{document}"
 	var capturedGeminiPrompt string
 
@@ -576,6 +577,7 @@ func TestTailorResumeToFolderWithTemplateIncludesBaselineInPrompt(t *testing.T) 
 }
 
 func TestTailorResumeToFolderWithTemplatePreservesFontAwesomeAndPreambleDirectives(t *testing.T) {
+	t.Setenv("GEMINI_MODELS", "test-model-1")
 	customTemplate := "\\documentclass{article}\n\\usepackage{fontspec}\n\\usepackage{fontawesome5}\n\\begin{document}\n\\faPhone\\ 123456\n\\end{document}"
 	var capturedSystemInstruction string
 

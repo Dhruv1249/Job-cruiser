@@ -21,34 +21,22 @@ const defaultTargetPages = 1
 const defaultMaxTighteningPasses = 3
 const jobApplicationsProjectName = "job_applications"
 
-var defaultGeminiModelsCascade = []string{
-	"gemini-3.5-flash-lite",
-	"gemini-3.1-flash-lite",
-	"gemini-2.5-flash-lite",
-}
-
 /*
-GetGeminiModelCascade parses GEMINI_MODELS or GEMINI_MODEL environment variables,
-falling back to the default ordered cascade list.
+GetGeminiModelCascade parses GEMINI_MODELS environment variable with zero fallback.
 */
 func GetGeminiModelCascade() []string {
-	environmentModels := os.Getenv("GEMINI_MODELS")
+	environmentModels := strings.TrimSpace(os.Getenv("GEMINI_MODELS"))
 	if environmentModels == "" {
-		environmentModels = os.Getenv("GEMINI_MODEL")
+		return nil
 	}
-	if environmentModels != "" {
-		var parsedModels []string
-		for _, rawModel := range strings.Split(environmentModels, ",") {
-			cleanedModel := strings.TrimSpace(rawModel)
-			if cleanedModel != "" {
-				parsedModels = append(parsedModels, cleanedModel)
-			}
-		}
-		if len(parsedModels) > 0 {
-			return parsedModels
+	var parsedModels []string
+	for _, rawModel := range strings.Split(environmentModels, ",") {
+		cleanedModel := strings.TrimSpace(rawModel)
+		if cleanedModel != "" {
+			parsedModels = append(parsedModels, cleanedModel)
 		}
 	}
-	return defaultGeminiModelsCascade
+	return parsedModels
 }
 
 var markdownLatexFenceRegexp = regexp.MustCompile("(?s)^\\s*`{3,}(latex|tex)?\\s*")
@@ -751,7 +739,10 @@ func (service *ResumeTailorService) generateContentWithGeminiAndSystemInstructio
 
 	modelsToTry := service.GeminiModels
 	if len(modelsToTry) == 0 {
-		modelsToTry = defaultGeminiModelsCascade
+		modelsToTry = GetGeminiModelCascade()
+	}
+	if len(modelsToTry) == 0 {
+		return "", fmt.Errorf("no gemini models configured in GEMINI_MODELS")
 	}
 
 	var lastError error

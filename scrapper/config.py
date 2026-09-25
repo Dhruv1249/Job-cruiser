@@ -21,8 +21,17 @@ REQUEST_TIMEOUT = 300
 REQUEST_DELAY = 0.25
 USER_AGENT = "JobCruiser/1.0"
 RETRY_COUNT = 5
-BACKEND_API_URL = os.environ.get("BACKEND_API_URL", "http://localhost:8080/api")
-INGEST_API_KEY = os.environ.get("INGEST_API_KEY") or os.environ.get("INGEST_KEY", "")
+BACKEND_API_URL = os.environ.get("BACKEND_API_URL")
+if not BACKEND_API_URL:
+    raise RuntimeError("CRITICAL ERROR: BACKEND_API_URL environment variable is missing.")
+
+INGEST_API_KEY = os.environ.get("INGEST_API_KEY")
+if not INGEST_API_KEY:
+    raise RuntimeError("CRITICAL ERROR: INGEST_API_KEY environment variable is missing.")
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise RuntimeError("CRITICAL ERROR: GEMINI_API_KEY environment variable is missing.")
 
 
 def parse_proxy_configuration(raw_proxy_string: str) -> list[str]:

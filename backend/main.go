@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 	_ "time/tzdata"
 
@@ -36,10 +37,107 @@ func main() {
 	if loadError != nil {
 		log.Println("Note: No local .env file found. Relying on system variables.")
 	}
-	// Fetch the database connection string from the environment variables.
-	databaseURL := os.Getenv("DATABASE_URL")
+
+	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if databaseURL == "" {
 		log.Fatal("CRITICAL ERROR: DATABASE_URL environment variable is missing.")
+	}
+
+	jwtSecret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if jwtSecret == "" {
+		log.Fatal("CRITICAL ERROR: JWT_SECRET environment variable is missing.")
+	}
+
+	geminiAPIKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
+	if geminiAPIKey == "" {
+		log.Fatal("CRITICAL ERROR: GEMINI_API_KEY environment variable is missing.")
+	}
+
+	geminiBatchModels := strings.TrimSpace(os.Getenv("GEMINI_BATCH_MODELS"))
+	if geminiBatchModels == "" {
+		log.Fatal("CRITICAL ERROR: GEMINI_BATCH_MODELS environment variable is missing.")
+	}
+
+	geminiModels := strings.TrimSpace(os.Getenv("GEMINI_MODELS"))
+	if geminiModels == "" {
+		log.Fatal("CRITICAL ERROR: GEMINI_MODELS environment variable is missing.")
+	}
+
+	nvidiaApiKey := strings.TrimSpace(os.Getenv("NVIDIA_API_KEY"))
+	if nvidiaApiKey == "" {
+		log.Fatal("CRITICAL ERROR: NVIDIA_API_KEY environment variable is missing.")
+	}
+
+	nvidiaModel := strings.TrimSpace(os.Getenv("NVIDIA_MODEL"))
+	if nvidiaModel == "" {
+		log.Fatal("CRITICAL ERROR: NVIDIA_MODEL environment variable is missing.")
+	}
+
+	overleafURL := strings.TrimSpace(os.Getenv("OVERLEAF_MCP_URL"))
+	if overleafURL == "" {
+		log.Fatal("CRITICAL ERROR: OVERLEAF_MCP_URL environment variable is missing.")
+	}
+
+	mcpToken := strings.TrimSpace(os.Getenv("OVERLEAF_MCP_TOKEN"))
+	if mcpToken == "" {
+		log.Fatal("CRITICAL ERROR: OVERLEAF_MCP_TOKEN environment variable is missing.")
+	}
+
+	overleafAESKeyHex := strings.TrimSpace(os.Getenv("OVERLEAF_AES_KEY"))
+	if overleafAESKeyHex == "" {
+		log.Fatal("CRITICAL ERROR: OVERLEAF_AES_KEY environment variable is missing.")
+	}
+
+	var overleafAESKey []byte
+	decodedKey, hexError := hex.DecodeString(overleafAESKeyHex)
+	if hexError == nil && len(decodedKey) == 32 {
+		overleafAESKey = decodedKey
+	} else {
+		hash := sha256.Sum256([]byte(overleafAESKeyHex))
+		overleafAESKey = hash[:]
+	}
+
+	overleafMCPSecret := strings.TrimSpace(os.Getenv("OVERLEAF_MCP_SECRET"))
+	if overleafMCPSecret == "" {
+		log.Fatal("CRITICAL ERROR: OVERLEAF_MCP_SECRET environment variable is missing.")
+	}
+
+	ingestAPIKey := strings.TrimSpace(os.Getenv("INGEST_API_KEY"))
+	if ingestAPIKey == "" {
+		log.Fatal("CRITICAL ERROR: INGEST_API_KEY environment variable is missing.")
+	}
+
+	masterAdminEmail := strings.TrimSpace(os.Getenv("MASTER_ADMIN_EMAIL"))
+	if masterAdminEmail == "" {
+		log.Fatal("CRITICAL ERROR: MASTER_ADMIN_EMAIL environment variable is missing.")
+	}
+
+	googleClientID := strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID"))
+	if googleClientID == "" {
+		log.Fatal("CRITICAL ERROR: GOOGLE_CLIENT_ID environment variable is missing.")
+	}
+
+	allowedOrigins := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS"))
+	if allowedOrigins == "" {
+		log.Fatal("CRITICAL ERROR: ALLOWED_ORIGINS environment variable is missing.")
+	}
+
+	serverPort := strings.TrimSpace(os.Getenv("PORT"))
+	if serverPort == "" {
+		log.Fatal("CRITICAL ERROR: PORT environment variable is missing.")
+	}
+
+	firebaseProjectID := strings.TrimSpace(os.Getenv("FIREBASE_PROJECT_ID"))
+	if firebaseProjectID == "" {
+		log.Fatal("CRITICAL ERROR: FIREBASE_PROJECT_ID environment variable is missing.")
+	}
+	firebaseClientEmail := strings.TrimSpace(os.Getenv("FIREBASE_CLIENT_EMAIL"))
+	if firebaseClientEmail == "" {
+		log.Fatal("CRITICAL ERROR: FIREBASE_CLIENT_EMAIL environment variable is missing.")
+	}
+	firebasePrivateKey := strings.TrimSpace(os.Getenv("FIREBASE_PRIVATE_KEY"))
+	if firebasePrivateKey == "" {
+		log.Fatal("CRITICAL ERROR: FIREBASE_PRIVATE_KEY environment variable is missing.")
 	}
 
 	backgroundContext := context.Background()
@@ -63,50 +161,20 @@ func main() {
 		log.Fatalf("CRITICAL ERROR: Failed to initialize database schema. Details: %v", schemaError)
 	}
 	println("Database schema initialized.")
-	nvidiaApiKey := os.Getenv("NVIDIA_API_KEY")
-	if nvidiaApiKey == "" {
-		log.Println("WARNING: NVIDIA_API_KEY missing. NVIDIA NIM GLM-5.2 features will fail.")
-	}
+
 	fcmService := services.NewFCMService()
 	if fcmService == nil {
-		log.Println("WARNING: FCM credentials missing (FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY). Push notifications will be disabled.")
+		log.Fatal("CRITICAL ERROR: Failed to initialize Firebase FCM service with provided credentials.")
 	}
+
 	nvidiaNimService := services.NewNvidiaNimService(databasePool, nvidiaApiKey)
 	nvidiaNimService.FCMService = fcmService
-	geminiApiKey := os.Getenv("GEMINI_API_KEY")
-	geminiBatchService := services.NewGeminiBatchMatchService(databasePool, geminiApiKey)
+
+	geminiBatchService := services.NewGeminiBatchMatchService(databasePool, geminiAPIKey)
 	geminiBatchService.FCMService = fcmService
 	hybridMatchService := services.NewHybridBatchMatchService(nvidiaNimService, geminiBatchService)
 
 	hybridMatchService.StartBackgroundScheduler(context.Background())
-
-	overleafAESKeyHex := os.Getenv("OVERLEAF_AES_KEY")
-	overleafAESKey := make([]byte, 32)
-	if overleafAESKeyHex != "" {
-		decodedKey, hexError := hex.DecodeString(overleafAESKeyHex)
-		if hexError == nil && len(decodedKey) == 32 {
-			overleafAESKey = decodedKey
-		} else {
-			hash := sha256.Sum256([]byte(overleafAESKeyHex))
-			overleafAESKey = hash[:]
-		}
-	} else {
-		salt := os.Getenv("JWT_SECRET")
-		if salt == "" {
-			salt = os.Getenv("DATABASE_URL")
-		}
-		if salt == "" {
-			log.Fatalf("CRITICAL ERROR: Neither OVERLEAF_AES_KEY, JWT_SECRET, nor DATABASE_URL is configured.")
-		}
-		hash := sha256.Sum256([]byte("job_cruiser_overleaf_aes_key:" + salt))
-		overleafAESKey = hash[:]
-	}
-	overleafMCPSecret := os.Getenv("OVERLEAF_MCP_SECRET")
-	if overleafMCPSecret == "" {
-		overleafMCPSecret = os.Getenv("SESSION_SECRET")
-	}
-
-	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
 
 	authHandler := &handlers.AuthHandler{DB: databasePool}
 	jobHandler := &handlers.JobHandler{DB: databasePool}
@@ -126,27 +194,6 @@ func main() {
 	matchedJobsHandler := &handlers.MatchedJobsHandler{DB: databasePool}
 	adminHandler := &handlers.AdminHandler{DB: databasePool, MatchService: hybridMatchService}
 
-	overleafURL := os.Getenv("OVERLEAF_MCP_URL")
-	if overleafURL == "" {
-		overleafURL = "http://localhost:3202"
-	}
-	mcpToken := os.Getenv("OVERLEAF_MCP_TOKEN")
-	if mcpToken == "" {
-		secretKey := os.Getenv("OVERLEAF_MCP_SECRET")
-		if secretKey == "" {
-			secretKey = os.Getenv("SESSION_SECRET")
-		}
-		ghTokenHash := os.Getenv("GITHUB_TOKEN_HASH")
-		if ghTokenHash == "" {
-			ghClientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
-			if ghClientSecret != "" {
-				sum := sha256.Sum256([]byte(ghClientSecret))
-				ghTokenHash = hex.EncodeToString(sum[:])
-			}
-		}
-		repoName := os.Getenv("GITHUB_SINGLE_REPO_NAME")
-		mcpToken = services.GenerateMCPToken(secretKey, ghTokenHash, repoName)
-	}
 	mcpClient := services.NewMCPClient(overleafURL, mcpToken)
 
 	tailorService := services.NewResumeTailorService("https://generativelanguage.googleapis.com", geminiAPIKey, mcpClient)
@@ -249,10 +296,6 @@ func main() {
 		protected.POST("/admin/pipeline/restart", adminHandler.RestartAIPipeline)
 	}
 
-	serverPort := os.Getenv("PORT")
-	if serverPort == "" {
-		serverPort = "8080"
-	}
 
 	go func() {
 		log.Println("[BackgroundMatcher] Startup pass: evaluating unscored jobs for active users.")
