@@ -41,10 +41,41 @@ var GeminiBatchJobMatchSchemaJSON = `{
           "inferred_required_yoe": {"type": "integer"},
           "standardized_location": {"type": "string"},
           "work_model": {"type": "string"},
-          "is_matched": {"type": "boolean"}
+          "is_matched": {"type": "boolean"},
+          "notification_criteria_met": {"type": "boolean"},
+          "salary_min": {"type": "integer", "nullable": true},
+          "salary_max": {"type": "integer", "nullable": true},
+          "salary_currency": {"type": "string", "nullable": true},
+          "salary_period": {"type": "string", "nullable": true},
+          "employment_type": {"type": "string", "nullable": true}
         },
-        "required": ["job_id", "user_id", "match_score", "match_reasoning", "inferred_required_yoe", "standardized_location", "work_model", "is_matched"],
-        "propertyOrdering": ["job_id", "user_id", "match_score", "match_reasoning", "inferred_required_yoe", "standardized_location", "work_model", "is_matched"]
+        "required": [
+          "job_id",
+          "user_id",
+          "match_score",
+          "match_reasoning",
+          "inferred_required_yoe",
+          "standardized_location",
+          "work_model",
+          "is_matched",
+          "notification_criteria_met"
+        ],
+        "propertyOrdering": [
+          "job_id",
+          "user_id",
+          "match_score",
+          "match_reasoning",
+          "inferred_required_yoe",
+          "standardized_location",
+          "work_model",
+          "is_matched",
+          "notification_criteria_met",
+          "salary_min",
+          "salary_max",
+          "salary_currency",
+          "salary_period",
+          "employment_type"
+        ]
       }
     }
   },
@@ -776,7 +807,18 @@ func (s *GeminiBatchMatchService) evaluateJobBatch(
 		if upsertErr != nil {
 			log.Printf("[GeminiBatchMatchService] Upsert error for user %s job %s: %v", resultItem.UserID, resultItem.JobID, upsertErr)
 		}
-		_ = updateJobStandardizedLocationAndWorkModel(ctx, s.DB, resultItem.JobID, resultItem.StandardizedLocation, resultItem.WorkModel)
+		_ = updateJobExtractedMetadata(
+			ctx,
+			s.DB,
+			resultItem.JobID,
+			resultItem.StandardizedLocation,
+			resultItem.WorkModel,
+			resultItem.SalaryMin,
+			resultItem.SalaryMax,
+			resultItem.SalaryCurrency,
+			resultItem.SalaryPeriod,
+			resultItem.EmploymentType,
+		)
 		if matchedProfile != nil {
 			notifyUserOnHighMatch(ctx, s.DB, s.FCMService, matchedProfile, resultItem.JobID, resultItem.MatchScore, resultItem.MatchReasoning, resultItem.NotificationCriteriaMet)
 		}

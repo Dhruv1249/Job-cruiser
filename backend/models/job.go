@@ -14,6 +14,8 @@ type Job struct {
 	SalaryMin          *int      `json:"salary_min"`
 	SalaryMax          *int      `json:"salary_max"`
 	Currency           *string   `json:"currency"`
+	SalaryPeriod       *string   `json:"salary_period"`
+	EmploymentType     *string   `json:"employment_type"`
 	ExperienceRequired *string   `json:"experience_required"`
 	JobType            *string   `json:"job_type"`
 	IsEasyApply        bool      `json:"is_easy_apply"`

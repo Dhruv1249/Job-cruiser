@@ -327,3 +327,203 @@ func TestGeminiBatchMatchServiceModelTokenBudgetsConfig(t *testing.T) {
 		t.Fatalf("expected fallback budget 120000 for unlisted-future-model, got %d", budgetFallback)
 	}
 }
+
+func TestGeminiBatchMatchSchemaJSONIncludesNotificationCriteriaAndSalaryFields(t *testing.T) {
+	var schemaMap map[string]interface{}
+	if err := json.Unmarshal([]byte(services.GeminiBatchJobMatchSchemaJSON), &schemaMap); err != nil {
+		t.Fatalf("expected GeminiBatchJobMatchSchemaJSON to be valid JSON, got error: %v", err)
+	}
+
+	properties, ok := schemaMap["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected top-level properties map in schema")
+	}
+
+	results, ok := properties["results"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected results object in schema properties")
+	}
+
+	items, ok := results["items"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected items object in results schema")
+	}
+
+	itemProperties, ok := items["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected properties in item schema")
+	}
+
+	expectedFields := []string{
+		"job_id",
+		"user_id",
+		"match_score",
+		"match_reasoning",
+		"inferred_required_yoe",
+		"standardized_location",
+		"work_model",
+		"is_matched",
+		"notification_criteria_met",
+		"salary_min",
+		"salary_max",
+		"salary_currency",
+		"salary_period",
+		"employment_type",
+	}
+
+	for _, field := range expectedFields {
+		if _, exists := itemProperties[field]; !exists {
+			t.Fatalf("expected item schema property %q to exist in GeminiBatchJobMatchSchemaJSON", field)
+		}
+	}
+
+	requiredList, ok := items["required"].([]interface{})
+	if !ok {
+		t.Fatalf("expected required list in items schema")
+	}
+
+	requiredMap := make(map[string]bool)
+	for _, req := range requiredList {
+		if reqStr, isString := req.(string); isString {
+			requiredMap[reqStr] = true
+		}
+	}
+
+	if !requiredMap["notification_criteria_met"] {
+		t.Fatalf("expected notification_criteria_met to be in items required list")
+	}
+}
+
+func TestGeminiBatchMatchParsingNotificationCriteriaAndSalary(t *testing.T) {
+	sampleJSON := `{
+		"results": [
+			{
+				"job_id": "00000000-0000-0000-0000-000000000001",
+				"user_id": "11111111-1111-1111-1111-111111111111",
+				"match_score": 85,
+				"match_reasoning": "Strong match for backend Go internship.",
+				"inferred_required_yoe": 0,
+				"standardized_location": "Bengaluru, India",
+				"work_model": "onsite",
+				"is_matched": true,
+				"notification_criteria_met": true,
+				"salary_min": 25000,
+				"salary_max": 25000,
+				"salary_currency": "INR",
+				"salary_period": "monthly",
+				"employment_type": "intern"
+			},
+			{
+				"job_id": "00000000-0000-0000-0000-000000000002",
+				"user_id": "11111111-1111-1111-1111-111111111111",
+				"match_score": 92,
+				"match_reasoning": "Direct match for 6-month internship with pre-placement offer.",
+				"inferred_required_yoe": 0,
+				"standardized_location": "Hyderabad, India",
+				"work_model": "hybrid",
+				"is_matched": true,
+				"notification_criteria_met": true,
+				"salary_min": 40000,
+				"salary_max": 40000,
+				"salary_currency": "INR",
+				"salary_period": "monthly",
+				"employment_type": "intern_ppo"
+			},
+			{
+				"job_id": "00000000-0000-0000-0000-000000000003",
+				"user_id": "11111111-1111-1111-1111-111111111111",
+				"match_score": 75,
+				"match_reasoning": "Full-time senior role.",
+				"inferred_required_yoe": 5,
+				"standardized_location": "San Francisco, CA, USA",
+				"work_model": "remote",
+				"is_matched": true,
+				"notification_criteria_met": false,
+				"salary_min": 140000,
+				"salary_max": 180000,
+				"salary_currency": "USD",
+				"salary_period": "yearly",
+				"employment_type": "full_time"
+			},
+			{
+				"job_id": "00000000-0000-0000-0000-000000000004",
+				"user_id": "11111111-1111-1111-1111-111111111111",
+				"match_score": 60,
+				"match_reasoning": "Unpaid research internship with open source contribution.",
+				"inferred_required_yoe": 0,
+				"standardized_location": "Remote (Global)",
+				"work_model": "remote",
+				"is_matched": true,
+				"notification_criteria_met": true,
+				"salary_min": null,
+				"salary_max": null,
+				"salary_currency": null,
+				"salary_period": null,
+				"employment_type": "intern"
+			}
+		]
+	}`
+
+	service := services.NewGeminiBatchMatchService(nil, "test-api-key")
+	parsedResponse, ok := service.ParseAndValidateBatchJSONForTest(sampleJSON)
+	if !ok {
+		t.Fatalf("expected successful parsing of batch JSON with salary and notification fields")
+	}
+
+	if len(parsedResponse.Results) != 4 {
+		t.Fatalf("expected 4 parsed results, got %d", len(parsedResponse.Results))
+	}
+
+	firstItem := parsedResponse.Results[0]
+	if !firstItem.NotificationCriteriaMet {
+		t.Fatalf("expected item 0 notification_criteria_met to be true")
+	}
+	if firstItem.SalaryMin == nil || *firstItem.SalaryMin != 25000 {
+		t.Fatalf("expected item 0 salary_min to be 25000")
+	}
+	if firstItem.SalaryCurrency == nil || *firstItem.SalaryCurrency != "INR" {
+		t.Fatalf("expected item 0 salary_currency to be INR")
+	}
+	if firstItem.SalaryPeriod == nil || *firstItem.SalaryPeriod != "monthly" {
+		t.Fatalf("expected item 0 salary_period to be monthly")
+	}
+	if firstItem.EmploymentType == nil || *firstItem.EmploymentType != "intern" {
+		t.Fatalf("expected item 0 employment_type to be intern")
+	}
+
+	secondItem := parsedResponse.Results[1]
+	if secondItem.EmploymentType == nil || *secondItem.EmploymentType != "intern_ppo" {
+		t.Fatalf("expected item 1 employment_type to be intern_ppo")
+	}
+	if secondItem.SalaryMin == nil || *secondItem.SalaryMin != 40000 {
+		t.Fatalf("expected item 1 salary_min to be 40000")
+	}
+
+	thirdItem := parsedResponse.Results[2]
+	if thirdItem.NotificationCriteriaMet {
+		t.Fatalf("expected item 2 notification_criteria_met to be false")
+	}
+	if thirdItem.SalaryMax == nil || *thirdItem.SalaryMax != 180000 {
+		t.Fatalf("expected item 2 salary_max to be 180000")
+	}
+	if thirdItem.SalaryCurrency == nil || *thirdItem.SalaryCurrency != "USD" {
+		t.Fatalf("expected item 2 salary_currency to be USD")
+	}
+	if thirdItem.SalaryPeriod == nil || *thirdItem.SalaryPeriod != "yearly" {
+		t.Fatalf("expected item 2 salary_period to be yearly")
+	}
+
+	fourthItem := parsedResponse.Results[3]
+	if fourthItem.SalaryMin != nil {
+		t.Fatalf("expected item 3 salary_min to be nil for unpaid job, got %v", *fourthItem.SalaryMin)
+	}
+	if fourthItem.SalaryMax != nil {
+		t.Fatalf("expected item 3 salary_max to be nil for unpaid job, got %v", *fourthItem.SalaryMax)
+	}
+	if fourthItem.SalaryCurrency != nil {
+		t.Fatalf("expected item 3 salary_currency to be nil for unpaid job, got %v", *fourthItem.SalaryCurrency)
+	}
+	if fourthItem.SalaryPeriod != nil {
+		t.Fatalf("expected item 3 salary_period to be nil for unpaid job, got %v", *fourthItem.SalaryPeriod)
+	}
+}

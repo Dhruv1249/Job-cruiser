@@ -371,6 +371,8 @@ var schemaQueries = []string{
 	`ALTER TABLE user_overleaf_config ADD COLUMN IF NOT EXISTS auto_sync_profile BOOLEAN DEFAULT true;`,
 	`ALTER TABLE user_overleaf_config ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ;`,
 	`ALTER TABLE user_overleaf_config ADD COLUMN IF NOT EXISTS sync_interval_hours INTEGER DEFAULT 24;`,
+	`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS salary_period VARCHAR(20);`,
+	`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS employment_type VARCHAR(30);`,
 }
 
 // InitSchema executes the queries in sequence.

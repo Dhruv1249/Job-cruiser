@@ -511,10 +511,12 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
               _buildBadge(Icons.location_on_outlined, widget.job.location),
               if (widget.job.isRemote)
                 _buildBadge(Icons.wifi, 'Remote Position'),
-              if (widget.job.seniority.isNotEmpty)
+              if (widget.job.employmentTypeDisplay.isNotEmpty)
+                _buildBadge(Icons.badge_outlined, widget.job.employmentTypeDisplay),
+              if (widget.job.seniority.isNotEmpty && widget.job.seniority != widget.job.employmentTypeDisplay)
                 _buildBadge(Icons.workspace_premium_outlined, widget.job.seniority),
               if (widget.job.salaryText.isNotEmpty)
-                _buildBadge(Icons.attach_money, widget.job.salaryText),
+                _buildBadge(Icons.payments_outlined, widget.job.salaryText),
               if (widget.job.scrapedAgoText.isNotEmpty)
                 _buildBadge(Icons.schedule_outlined, 'Scraped ${widget.job.scrapedAgoText}'),
               if (widget.job.source.isNotEmpty)

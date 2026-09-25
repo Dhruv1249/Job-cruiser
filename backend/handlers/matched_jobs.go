@@ -47,6 +47,9 @@ type MatchedJobResponse struct {
 	SalaryMin         *int     `json:"salary_min"`
 	SalaryMax         *int     `json:"salary_max"`
 	Currency          string   `json:"currency"`
+	SalaryPeriod      *string  `json:"salary_period"`
+	EmploymentType    *string  `json:"employment_type"`
+	JobType           *string  `json:"job_type"`
 	IsViewed          bool     `json:"is_viewed"`
 	ApplicationStatus string   `json:"application_status"`
 	ViewedAt          *string  `json:"viewed_at"`
@@ -216,6 +219,9 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 			j.salary_min,
 			j.salary_max,
 			COALESCE(j.currency, 'USD'),
+			j.salary_period,
+			COALESCE(j.employment_type, j.job_type),
+			j.job_type,
 			(ujv.viewed_at IS NOT NULL) AS is_viewed,
 			COALESCE(app.status, 'unapplied') AS application_status,
 			ujv.viewed_at::text AS viewed_at,
@@ -261,6 +267,9 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 			&job.SalaryMin,
 			&job.SalaryMax,
 			&job.Currency,
+			&job.SalaryPeriod,
+			&job.EmploymentType,
+			&job.JobType,
 			&job.IsViewed,
 			&job.ApplicationStatus,
 			&job.ViewedAt,
@@ -382,6 +391,9 @@ func (h *MatchedJobsHandler) GetMatchedJobByID(c *gin.Context) {
 			j.salary_min,
 			j.salary_max,
 			COALESCE(j.currency, 'USD'),
+			j.salary_period,
+			COALESCE(j.employment_type, j.job_type),
+			j.job_type,
 			(ujv.viewed_at IS NOT NULL) AS is_viewed,
 			COALESCE(app.status, 'unapplied') AS application_status,
 			ujv.viewed_at::text AS viewed_at,
@@ -418,6 +430,9 @@ func (h *MatchedJobsHandler) GetMatchedJobByID(c *gin.Context) {
 		&job.SalaryMin,
 		&job.SalaryMax,
 		&job.Currency,
+		&job.SalaryPeriod,
+		&job.EmploymentType,
+		&job.JobType,
 		&job.IsViewed,
 		&job.ApplicationStatus,
 		&job.ViewedAt,

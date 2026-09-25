@@ -98,15 +98,20 @@ type JobSnippetData struct {
 
 // BatchMatchResultItem encapsulates an evaluated job match output for a specific candidate.
 type BatchMatchResultItem struct {
-	JobID                   string `json:"job_id"`
-	UserID                  string `json:"user_id"`
-	MatchScore              int    `json:"match_score"`
-	MatchReasoning          string `json:"match_reasoning"`
-	InferredRequiredYoE     int    `json:"inferred_required_yoe"`
-	StandardizedLocation    string `json:"standardized_location"`
-	WorkModel               string `json:"work_model"`
-	IsMatched               bool   `json:"is_matched"`
-	NotificationCriteriaMet bool   `json:"notification_criteria_met"`
+	JobID                   string  `json:"job_id"`
+	UserID                  string  `json:"user_id"`
+	MatchScore              int     `json:"match_score"`
+	MatchReasoning          string  `json:"match_reasoning"`
+	InferredRequiredYoE     int     `json:"inferred_required_yoe"`
+	StandardizedLocation    string  `json:"standardized_location"`
+	WorkModel               string  `json:"work_model"`
+	IsMatched               bool    `json:"is_matched"`
+	NotificationCriteriaMet bool    `json:"notification_criteria_met"`
+	SalaryMin               *int    `json:"salary_min"`
+	SalaryMax               *int    `json:"salary_max"`
+	SalaryCurrency          *string `json:"salary_currency"`
+	SalaryPeriod            *string `json:"salary_period"`
+	EmploymentType          *string `json:"employment_type"`
 }
 
 // BatchMatchResponse defines the structured JSON array envelope emitted by AI matching engines.
@@ -146,16 +151,22 @@ func buildBatchJobMatchSchema(expectedCount int) map[string]any {
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"job_id":                map[string]any{"type": "string"},
-						"user_id":               map[string]any{"type": "string"},
-						"match_score":           map[string]any{"type": "integer"},
-						"match_reasoning":       map[string]any{"type": "string"},
-						"inferred_required_yoe": map[string]any{"type": "integer"},
-						"standardized_location": map[string]any{"type": "string"},
-						"work_model":            map[string]any{"type": "string"},
-						"is_matched":            map[string]any{"type": "boolean"},
+						"job_id":                    map[string]any{"type": "string"},
+						"user_id":                   map[string]any{"type": "string"},
+						"match_score":               map[string]any{"type": "integer"},
+						"match_reasoning":           map[string]any{"type": "string"},
+						"inferred_required_yoe":     map[string]any{"type": "integer"},
+						"standardized_location":     map[string]any{"type": "string"},
+						"work_model":                map[string]any{"type": "string"},
+						"is_matched":                map[string]any{"type": "boolean"},
+						"notification_criteria_met": map[string]any{"type": "boolean"},
+						"salary_min":                map[string]any{"type": []string{"integer", "null"}},
+						"salary_max":                map[string]any{"type": []string{"integer", "null"}},
+						"salary_currency":           map[string]any{"type": []string{"string", "null"}},
+						"salary_period":             map[string]any{"type": []string{"string", "null"}},
+						"employment_type":           map[string]any{"type": []string{"string", "null"}},
 					},
-					"required": []string{"job_id", "user_id", "match_score", "match_reasoning", "inferred_required_yoe", "standardized_location", "work_model", "is_matched"},
+					"required": []string{"job_id", "user_id", "match_score", "match_reasoning", "inferred_required_yoe", "standardized_location", "work_model", "is_matched", "notification_criteria_met"},
 				},
 			},
 		},
@@ -997,7 +1008,18 @@ func (s *NvidiaNimService) evaluateJobBatchWithBackoff(
 		if upsertErr != nil {
 			log.Printf("[Worker-%d] Upsert error for user %s job %s: %v", workerID, res.UserID, res.JobID, upsertErr)
 		}
-		_ = updateJobStandardizedLocationAndWorkModel(ctx, s.DB, res.JobID, res.StandardizedLocation, res.WorkModel)
+		_ = updateJobExtractedMetadata(
+			ctx,
+			s.DB,
+			res.JobID,
+			res.StandardizedLocation,
+			res.WorkModel,
+			res.SalaryMin,
+			res.SalaryMax,
+			res.SalaryCurrency,
+			res.SalaryPeriod,
+			res.EmploymentType,
+		)
 		if matchedProfile != nil {
 			notifyUserOnHighMatch(ctx, s.DB, s.FCMService, matchedProfile, res.JobID, res.MatchScore, res.MatchReasoning, res.NotificationCriteriaMet)
 		}
@@ -1279,7 +1301,12 @@ SCHEMA FORMAT:
       "standardized_location": "<standardized canonical location e.g. Bengaluru, India or Remote (Global)>",
       "work_model": "<remote|hybrid|onsite>",
       "is_matched": <true|false>,
-      "notification_criteria_met": <true|false>
+      "notification_criteria_met": <true|false>,
+      "salary_min": <integer or null>,
+      "salary_max": <integer or null>,
+      "salary_currency": <"USD"|"INR"|"EUR"|"GBP"|"CAD"|"SGD"|null>,
+      "salary_period": <"yearly"|"monthly"|"hourly"|"weekly"|"stipend"|null>,
+      "employment_type": <"full_time"|"intern"|"intern_ppo"|"contract"|"freelance"|null>
     }
   ]
 }
@@ -1336,7 +1363,25 @@ SCORING INSTRUCTIONS & CONSTRAINTS:
    - Each candidate profile may optionally specify "Notification Criteria".
    - If the candidate profile does NOT contain "Notification Criteria" (or it is empty), set "notification_criteria_met" to true.
    - If the candidate profile DOES specify "Notification Criteria", evaluate whether this job listing satisfies all the candidate's custom criteria. Set "notification_criteria_met" to true IF AND ONLY IF the job satisfies the candidate's criteria, otherwise set to false.
-   - INDEPENDENCE MANDATE: "notification_criteria_met" is an isolated alerting flag for push notifications only. It MUST NEVER influence, reduce, cap, or alter "match_score" or "is_matched". Evaluate "match_score" strictly and independently on skills, experience, and location compatibility regardless of whether notification criteria are met.`, expectedResultCount, currentTimeText)
+   - INDEPENDENCE MANDATE: "notification_criteria_met" is an isolated alerting flag for push notifications only. It MUST NEVER influence, reduce, cap, or alter "match_score" or "is_matched". Evaluate "match_score" strictly and independently on skills, experience, and location compatibility regardless of whether notification criteria are met.
+
+7. SALARY & EMPLOYMENT TYPE EXTRACTION RULES:
+   - "salary_min" and "salary_max":
+     * Values MUST be integer numbers without formatting, currency symbols, commas, or abbreviations (e.g. 120000, 150000, 25000).
+     * If Indian compensation is given in LPA (e.g. 12 LPA, 15-20 LPA), convert to full annual integer (12 LPA -> 1200000, 15-20 LPA -> salary_min: 1500000, salary_max: 2000000).
+     * If a single exact number is given (e.g. "$120k/year", "₹25,000/month"), set both salary_min and salary_max to that exact integer.
+     * If unpaid, volunteer, equity-only, or no numerical salary is found in the JD: set "salary_min", "salary_max", "salary_currency", and "salary_period" strictly to null.
+   - "salary_currency": 3-letter ISO code ("USD", "INR", "EUR", "GBP", "CAD", "SGD", etc.). Null if no salary.
+   - "salary_period": "yearly", "monthly", "hourly", "weekly", or "stipend". Null if no salary.
+   - "employment_type":
+     * "intern": Pure internship (with or without stipend). If stipend is given, extract it (e.g. 25000, "INR", "monthly").
+     * "intern_ppo": Internship offering a Pre-Placement Offer (PPO) or full-time conversion after internship.
+       - If intern stipend is given and PPO salary is NOT given: extract only the intern stipend and period "monthly", and set employment_type to "intern_ppo".
+       - If only intern in job and no PPO: set employment_type to "intern" and only show intern salary.
+     * "full_time": Permanent full-time position.
+     * "contract": Contractor, fixed-term, or C2C position.
+     * "freelance": Freelance or project-based engagement.
+     * If unspecified, default to "full_time" unless title indicates internship or contract.`, expectedResultCount, currentTimeText)
 }
 
 /*
@@ -1897,22 +1942,71 @@ func upsertUserJobMatchRecord(ctx context.Context, databasePool *pgxpool.Pool, u
 	return errExec
 }
 
-func updateJobStandardizedLocationAndWorkModel(ctx context.Context, databasePool *pgxpool.Pool, jobID string, standardizedLocation string, workModel string) error {
-	if databasePool == nil || jobID == "" || (standardizedLocation == "" && workModel == "") {
+func updateJobExtractedMetadata(
+	ctx context.Context,
+	databasePool *pgxpool.Pool,
+	jobID string,
+	standardizedLocation string,
+	workModel string,
+	salaryMin *int,
+	salaryMax *int,
+	salaryCurrency *string,
+	salaryPeriod *string,
+	employmentType *string,
+) error {
+	if databasePool == nil || jobID == "" {
 		return nil
 	}
 	cleanLocation := strings.TrimSpace(standardizedLocation)
 	cleanWorkModel := strings.TrimSpace(strings.ToLower(workModel))
 	isRemote := strings.Contains(cleanWorkModel, "remote") || strings.Contains(strings.ToLower(cleanLocation), "remote")
 
+	var cleanCurrency *string
+	if salaryCurrency != nil && strings.TrimSpace(*salaryCurrency) != "" {
+		trimmed := strings.ToUpper(strings.TrimSpace(*salaryCurrency))
+		cleanCurrency = &trimmed
+	}
+
+	var cleanPeriod *string
+	if salaryPeriod != nil && strings.TrimSpace(*salaryPeriod) != "" {
+		trimmed := strings.ToLower(strings.TrimSpace(*salaryPeriod))
+		cleanPeriod = &trimmed
+	}
+
+	var cleanEmploymentType *string
+	if employmentType != nil && strings.TrimSpace(*employmentType) != "" {
+		trimmed := strings.ToLower(strings.TrimSpace(*employmentType))
+		cleanEmploymentType = &trimmed
+	}
+
+	var cleanMinSalary *int
+	if salaryMin != nil && *salaryMin > 0 {
+		cleanMinSalary = salaryMin
+	}
+
+	var cleanMaxSalary *int
+	if salaryMax != nil && *salaryMax > 0 {
+		cleanMaxSalary = salaryMax
+	}
+
 	sqlQuery := `
 		UPDATE jobs
 		SET location = CASE WHEN $1 <> '' THEN $1 ELSE location END,
-		    is_remote = CASE WHEN $2 THEN true ELSE is_remote END
-		WHERE id = $3;
+		    is_remote = CASE WHEN $2 THEN true ELSE is_remote END,
+		    salary_min = CASE WHEN $3::integer IS NOT NULL THEN $3 ELSE salary_min END,
+		    salary_max = CASE WHEN $4::integer IS NOT NULL THEN $4 ELSE salary_max END,
+		    currency = CASE WHEN $5::text IS NOT NULL THEN $5 ELSE currency END,
+		    salary_period = CASE WHEN $6::text IS NOT NULL THEN $6 ELSE salary_period END,
+		    employment_type = CASE WHEN $7::text IS NOT NULL THEN $7 ELSE employment_type END,
+		    job_type = CASE WHEN $7::text IS NOT NULL THEN $7 ELSE job_type END
+		WHERE id = $8;
 	`
-	_, errExec := databasePool.Exec(ctx, sqlQuery, cleanLocation, isRemote, jobID)
+	_, errExec := databasePool.Exec(ctx, sqlQuery, cleanLocation, isRemote, cleanMinSalary, cleanMaxSalary, cleanCurrency, cleanPeriod, cleanEmploymentType, jobID)
 	return errExec
+}
+
+func updateJobStandardizedLocationAndWorkModel(ctx context.Context, databasePool *pgxpool.Pool, jobID string, standardizedLocation string, workModel string) error {
+	return updateJobExtractedMetadata(ctx, databasePool, jobID, standardizedLocation, workModel, nil, nil, nil, nil, nil)
 }
 
 /*

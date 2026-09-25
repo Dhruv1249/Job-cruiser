@@ -22,6 +22,8 @@ class MatchedJob {
     this.salaryMin,
     this.salaryMax,
     this.currency = 'USD',
+    this.salaryPeriod,
+    this.employmentType,
     this.isViewed = false,
     this.applicationStatus = 'unapplied',
     this.isNew = false,
@@ -47,6 +49,8 @@ class MatchedJob {
   final int? salaryMin;
   final int? salaryMax;
   final String currency;
+  final String? salaryPeriod;
+  final String? employmentType;
   final bool isViewed;
   final String applicationStatus;
   final bool isNew;
@@ -79,6 +83,8 @@ class MatchedJob {
       salaryMin: salaryMin,
       salaryMax: salaryMax,
       currency: currency,
+      salaryPeriod: salaryPeriod,
+      employmentType: employmentType,
       isViewed: isViewed ?? this.isViewed,
       applicationStatus: applicationStatus ?? this.applicationStatus,
       isNew: isNew ?? this.isNew,
@@ -128,6 +134,8 @@ class MatchedJob {
       salaryMin: json['salary_min'] as int?,
       salaryMax: json['salary_max'] as int?,
       currency: json['currency'] as String? ?? 'USD',
+      salaryPeriod: json['salary_period'] as String?,
+      employmentType: json['employment_type'] as String? ?? json['job_type'] as String?,
       isViewed: isViewedVal,
       applicationStatus: json['application_status'] as String? ?? 'unapplied',
       isNew: json['is_new'] as bool? ?? (!isViewedVal),
@@ -137,12 +145,143 @@ class MatchedJob {
 
   /// Formatted salary string representation.
   String get salaryText {
-    if (salaryMin != null && salaryMax != null) {
-      return '\$$salaryMin - \$$salaryMax';
-    } else if (salaryMin != null) {
-      return '\$$salaryMin+';
-    } else if (salaryMax != null) {
-      return 'Up to \$$salaryMax';
+    final minVal = salaryMin;
+    final maxVal = salaryMax;
+
+    if ((minVal == null || minVal <= 0) && (maxVal == null || maxVal <= 0)) {
+      return '';
+    }
+
+    final cleanCurrency = currency.toUpperCase().trim();
+    String symbol = '\$';
+    if (cleanCurrency == 'INR') {
+      symbol = '₹';
+    } else if (cleanCurrency == 'EUR') {
+      symbol = '€';
+    } else if (cleanCurrency == 'GBP') {
+      symbol = '£';
+    } else if (cleanCurrency == 'CAD') {
+      symbol = 'CA\$';
+    } else if (cleanCurrency == 'AUD') {
+      symbol = 'A\$';
+    } else if (cleanCurrency == 'SGD') {
+      symbol = 'S\$';
+    } else if (cleanCurrency.isNotEmpty && cleanCurrency != 'USD') {
+      symbol = '$cleanCurrency ';
+    }
+
+    final cleanPeriod = salaryPeriod?.toLowerCase().trim() ?? '';
+    final isStipendOrMonthly = cleanPeriod == 'monthly' || cleanPeriod == 'stipend';
+    final isHourly = cleanPeriod == 'hourly';
+    final isWeekly = cleanPeriod == 'weekly';
+
+    String formatSingleAmount(int amount) {
+      if (cleanCurrency == 'INR') {
+        if (!isStipendOrMonthly && amount >= 100000) {
+          final lpa = amount / 100000;
+          final formattedLpa = lpa % 1 == 0 ? lpa.toInt().toString() : lpa.toStringAsFixed(1);
+          return '$symbol$formattedLpa LPA';
+        }
+        if (amount >= 1000) {
+          final kVal = amount / 1000;
+          final formattedK = kVal % 1 == 0 ? kVal.toInt().toString() : kVal.toStringAsFixed(1);
+          return '$symbol${formattedK}k';
+        }
+        return '$symbol$amount';
+      }
+
+      if (isHourly) {
+        return '$symbol$amount';
+      }
+
+      if (amount >= 1000) {
+        final kVal = amount / 1000;
+        final formattedK = kVal % 1 == 0 ? kVal.toInt().toString() : kVal.toStringAsFixed(1);
+        return '$symbol${formattedK}k';
+      }
+      return '$symbol$amount';
+    }
+
+    String periodSuffix = '';
+    if (isHourly) {
+      periodSuffix = '/hr';
+    } else if (cleanPeriod == 'stipend') {
+      periodSuffix = '/stipend';
+    } else if (isStipendOrMonthly) {
+      periodSuffix = '/mo';
+    } else if (isWeekly) {
+      periodSuffix = '/wk';
+    }
+
+    if (minVal != null && minVal > 0 && maxVal != null && maxVal > 0) {
+      if (minVal == maxVal) {
+        final formatted = formatSingleAmount(minVal);
+        if (formatted.endsWith('LPA') || periodSuffix.isEmpty) {
+          return formatted;
+        }
+        return '$formatted$periodSuffix';
+      }
+
+      final formattedMin = formatSingleAmount(minVal);
+      final formattedMax = formatSingleAmount(maxVal);
+
+      if (formattedMin.endsWith('LPA') && formattedMax.endsWith('LPA')) {
+        final minNum = formattedMin.replaceAll(' LPA', '');
+        return '$minNum - $formattedMax';
+      }
+      if (periodSuffix.isNotEmpty) {
+        return '$formattedMin - $formattedMax$periodSuffix';
+      }
+      return '$formattedMin - $formattedMax';
+    } else if (minVal != null && minVal > 0) {
+      final formatted = formatSingleAmount(minVal);
+      if (formatted.endsWith('LPA') || periodSuffix.isEmpty) {
+        return '$formatted+';
+      }
+      return '$formatted+$periodSuffix';
+    } else if (maxVal != null && maxVal > 0) {
+      final formatted = formatSingleAmount(maxVal);
+      if (formatted.endsWith('LPA') || periodSuffix.isEmpty) {
+        return 'Up to $formatted';
+      }
+      return 'Up to $formatted$periodSuffix';
+    }
+
+    return '';
+  }
+
+  /// Formatted employment type badge text.
+  String get employmentTypeDisplay {
+    final type = employmentType?.toLowerCase().trim() ?? '';
+    if (type == 'intern_ppo' || type.contains('ppo')) {
+      return 'Intern + PPO';
+    }
+    if (type == 'intern' || type == 'internship') {
+      return 'Internship';
+    }
+    if (type == 'contract') {
+      return 'Contract';
+    }
+    if (type == 'freelance') {
+      return 'Freelance';
+    }
+    if (type == 'full_time' || type == 'full-time' || type == 'fulltime') {
+      return 'Full-Time';
+    }
+
+    final lowerTitle = title.toLowerCase();
+    final lowerSeniority = seniority.toLowerCase();
+    if (lowerTitle.contains('ppo') || lowerSeniority.contains('ppo')) {
+      return 'Intern + PPO';
+    }
+    if (lowerTitle.contains('intern') || lowerSeniority.contains('intern')) {
+      return 'Internship';
+    }
+    if (lowerTitle.contains('contract') || lowerSeniority.contains('contract')) {
+      return 'Contract';
+    }
+    if (lowerTitle.contains('freelance')) {
+      return 'Freelance';
     }
     return '';
   }

@@ -30,9 +30,9 @@ func (h *JobHandler) GetJobs(c *gin.Context) {
 
 	offset := (page - 1) * limit
 
-	// Fetch latest scraped jobs within the 14-day retention window
 	query := `
 		SELECT j.id, j.company_id, COALESCE(comp.name, ''), j.title, j.location, j.salary_min, j.salary_max, j.currency, 
+		       j.salary_period, COALESCE(j.employment_type, j.job_type),
 		       j.experience_required, j.job_type, j.is_easy_apply, j.is_remote, j.source, 
 		       j.url, j.posted_date, j.tags, COALESCE(j.summary, ''), COALESCE(j.raw_desc, ''), j.scraped_at 
 		FROM jobs j
@@ -55,11 +55,12 @@ func (h *JobHandler) GetJobs(c *gin.Context) {
 		var j models.Job
 		err := rows.Scan(
 			&j.ID, &j.CompanyID, &j.Company, &j.Title, &j.Location, &j.SalaryMin, &j.SalaryMax, &j.Currency,
+			&j.SalaryPeriod, &j.EmploymentType,
 			&j.ExperienceRequired, &j.JobType, &j.IsEasyApply, &j.IsRemote, &j.Source,
 			&j.URL, &j.PostedDate, &j.Tags, &j.Summary, &j.RawDescription, &j.ScrapedAt,
 		)
 		if err != nil {
-			log.Printf("Row scan error: %v", err) // Helpful for debugging struct mismatches
+			log.Printf("Row scan error: %v", err)
 			continue
 		}
 		jobs = append(jobs, j)

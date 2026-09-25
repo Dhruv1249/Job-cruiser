@@ -1584,6 +1584,49 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                 overflow: TextOverflow.ellipsis,
               ),
             ],
+            if (job.employmentTypeDisplay.isNotEmpty || job.salaryText.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  if (job.employmentTypeDisplay.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+                      ),
+                      child: Text(
+                        job.employmentTypeDisplay,
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ),
+                  if (job.salaryText.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.matchGreen.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: AppColors.matchGreen.withValues(alpha: 0.2)),
+                      ),
+                      child: Text(
+                        job.salaryText,
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.matchGreen,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
             if (job.hasTailoredDocs) ...[
               const SizedBox(height: 6),
               InkWell(
