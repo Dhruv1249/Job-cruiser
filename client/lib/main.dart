@@ -1584,13 +1584,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                 overflow: TextOverflow.ellipsis,
               ),
             ],
-            if (job.employmentTypeDisplay.isNotEmpty || job.salaryText.isNotEmpty) ...[
+            if (job.isSpecialEmploymentType || job.salaryText.isNotEmpty) ...[
               const SizedBox(height: 6),
               Wrap(
                 spacing: 6,
                 runSpacing: 4,
                 children: [
-                  if (job.employmentTypeDisplay.isNotEmpty)
+                  if (job.isSpecialEmploymentType)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
@@ -1615,13 +1615,20 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                         borderRadius: BorderRadius.circular(4),
                         border: Border.all(color: AppColors.matchGreen.withValues(alpha: 0.2)),
                       ),
-                      child: Text(
-                        job.salaryText,
-                        style: const TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.matchGreen,
-                        ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.payments_outlined, size: 11, color: AppColors.matchGreen),
+                          const SizedBox(width: 3),
+                          Text(
+                            job.salaryText,
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.matchGreen,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                 ],

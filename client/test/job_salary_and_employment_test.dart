@@ -184,6 +184,47 @@ void main() {
       );
       expect(titleInternJob.employmentTypeDisplay, equals('Internship'));
       expect(titleInternJob.salaryText, isEmpty);
+      expect(titleInternJob.isSpecialEmploymentType, isTrue);
+    });
+
+    test('distinguishes special employment types from standard full-time', () {
+      const fullTimeJob = MatchedJob(
+        jobId: 'job-8',
+        title: 'Full Stack Engineer',
+        company: 'GitLab',
+        location: 'Remote',
+        isRemote: true,
+        source: 'greenhouse',
+        url: 'https://example.com/8',
+        postedDate: '2026-09-25',
+        seniority: 'Mid-Level',
+        summary: 'Full-time engineering role.',
+        matchScore: 80,
+        matchReasoning: 'Fit',
+        techStack: ['Ruby'],
+        isMatched: true,
+        employmentType: 'full_time',
+      );
+      expect(fullTimeJob.isSpecialEmploymentType, isFalse);
+
+      const contractJob = MatchedJob(
+        jobId: 'job-9',
+        title: 'DevOps Specialist',
+        company: 'Cloud Corp',
+        location: 'Remote',
+        isRemote: true,
+        source: 'ashby',
+        url: 'https://example.com/9',
+        postedDate: '2026-09-25',
+        seniority: 'Senior',
+        summary: 'Contracting specialist.',
+        matchScore: 80,
+        matchReasoning: 'Fit',
+        techStack: ['Terraform'],
+        isMatched: true,
+        employmentType: 'contract',
+      );
+      expect(contractJob.isSpecialEmploymentType, isTrue);
     });
   });
 

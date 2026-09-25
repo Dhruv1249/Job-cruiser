@@ -512,11 +512,21 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
               if (widget.job.isRemote)
                 _buildBadge(Icons.wifi, 'Remote Position'),
               if (widget.job.employmentTypeDisplay.isNotEmpty)
-                _buildBadge(Icons.badge_outlined, widget.job.employmentTypeDisplay),
+                _buildBadge(
+                  Icons.badge_outlined,
+                  widget.job.employmentTypeDisplay,
+                  color: widget.job.isSpecialEmploymentType ? AppColors.primary : null,
+                  isPill: widget.job.isSpecialEmploymentType,
+                ),
               if (widget.job.seniority.isNotEmpty && widget.job.seniority != widget.job.employmentTypeDisplay)
                 _buildBadge(Icons.workspace_premium_outlined, widget.job.seniority),
               if (widget.job.salaryText.isNotEmpty)
-                _buildBadge(Icons.payments_outlined, widget.job.salaryText),
+                _buildBadge(
+                  Icons.payments_outlined,
+                  widget.job.salaryText,
+                  color: AppColors.matchGreen,
+                  isPill: true,
+                ),
               if (widget.job.scrapedAgoText.isNotEmpty)
                 _buildBadge(Icons.schedule_outlined, 'Scraped ${widget.job.scrapedAgoText}'),
               if (widget.job.source.isNotEmpty)
@@ -581,22 +591,59 @@ class _JobDetailPanelState extends State<JobDetailPanel> {
     );
   }
 
-  Widget _buildBadge(IconData icon, String text) {
+  Widget _buildBadge(
+    IconData icon,
+    String text, {
+    Color? color,
+    bool isPill = false,
+  }) {
+    if (isPill) {
+      final pillColor = color ?? AppColors.primary;
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: pillColor.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: pillColor.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(icon, size: 13, color: pillColor),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: pillColor,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Icon(icon, size: 15, color: AppColors.onSurfaceVariant),
+        Icon(icon, size: 15, color: color ?? AppColors.onSurfaceVariant),
         const SizedBox(width: 4),
         Flexible(
           child: Text(
             text,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: AppColors.onSurfaceVariant,
+              fontWeight: color != null ? FontWeight.w600 : FontWeight.w500,
+              color: color ?? AppColors.onSurfaceVariant,
             ),
           ),
         ),

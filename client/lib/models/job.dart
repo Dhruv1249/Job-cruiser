@@ -286,6 +286,12 @@ class MatchedJob {
     return '';
   }
 
+  /// Indicates if employment type is a non-standard track like intern, contract, or freelance.
+  bool get isSpecialEmploymentType {
+    final display = employmentTypeDisplay;
+    return display.isNotEmpty && display != 'Full-Time';
+  }
+
   /// Relative human-readable string indicating when the job listing was scraped.
   String get scrapedAgoText {
     if (scrapedAt.isEmpty) return '';
