@@ -1,0 +1,31 @@
+# Dependencies & installs
+node_modules/
+
+# WXT build outputs
+.output/
+.wxt/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Test coverage
+coverage/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test / dev-only pages
+test-pages/
+
+# Logs
+*.log
+npm-debug.log*

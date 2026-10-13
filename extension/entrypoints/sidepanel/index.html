@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Job Cruiser Quick Fill</title>
+    <style>
+      :root {
+        --background-color: #f7f9fb;
+        --card-background: #ffffff;
+        --accent-color: #000000;
+        --text-primary: #191c1e;
+        --text-muted: #45464d;
+        --border-color: #e2e8f0;
+        --success-color: #10b981;
+        --error-color: #ba1a1a;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background-color: var(--background-color);
+        color: var(--text-primary);
+        font-size: 13px;
+        line-height: 1.5;
+        min-width: 320px;
+        max-width: 100%;
+        overflow-x: hidden;
+      }
+
+      #root {
+        width: 100%;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      input, textarea, select, button {
+        font-family: inherit;
+        font-size: 13px;
+      }
+
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: var(--background-color);
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: var(--border-color);
+        border-radius: 3px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--text-muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./App.tsx"></script>
+  </body>
+</html>

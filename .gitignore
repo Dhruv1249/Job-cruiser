@@ -26,3 +26,11 @@
 .idea/
 .DS_Store
 *.log
+
+# Node & Extension artifacts
+node_modules/
+**/node_modules/
+.output/
+**/.output/
+.wxt/
+**/.wxt/
