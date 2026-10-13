@@ -501,22 +501,57 @@ const DEFAULT_CATEGORIES: readonly string[] = [
  * to inject text directly at the current cursor position.
  *
  * @param text - The text payload to copy and inject.
+ * @returns True if insertion into an active webpage field was confirmed, false otherwise.
  */
-async function copyAndInjectAtCursor(text: string): Promise<void> {
+async function copyAndInjectAtCursor(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
   } catch {}
 
+  let injectedSuccessfully = false;
+
   try {
-    const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-    const targetTab = tabs[0];
-    if (targetTab?.id) {
-      await browser.tabs.sendMessage(targetTab.id, {
-        action: 'INJECT_AT_CURSOR',
-        payload: { text },
-      });
+    const backgroundResult = (await browser.runtime.sendMessage({
+      action: 'INJECT_AT_CURSOR',
+      payload: { text },
+    })) as { success?: boolean } | undefined;
+    if (backgroundResult?.success) {
+      injectedSuccessfully = true;
     }
   } catch {}
+
+  if (!injectedSuccessfully) {
+    try {
+      const queryAttempts = [
+        { active: true, lastFocusedWindow: true },
+        { active: true, currentWindow: true },
+        { active: true },
+      ];
+      for (const queryOption of queryAttempts) {
+        const tabs = await browser.tabs.query(queryOption);
+        const validTab = tabs.find(
+          (tab) =>
+            tab.id &&
+            !tab.url?.startsWith('chrome-extension://') &&
+            !tab.url?.startsWith('moz-extension://') &&
+            !tab.url?.startsWith('about:') &&
+            !tab.url?.startsWith('chrome://'),
+        );
+        if (validTab?.id) {
+          const directResult = (await browser.tabs.sendMessage(validTab.id, {
+            action: 'INJECT_AT_CURSOR',
+            payload: { text },
+          })) as { success?: boolean } | undefined;
+          if (directResult?.success) {
+            injectedSuccessfully = true;
+            break;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  return injectedSuccessfully;
 }
 
 /**
@@ -810,31 +845,39 @@ function VaultEditor({
 
   const categoryFilterOptions = ['All', ...availableCategories];
 
-  const copyToClipboard = (key: string, value: string | undefined, label: string) => {
+  const copyToClipboard = async (key: string, value: string | undefined, label: string) => {
     if (!value || !value.trim()) {
       onNotification(`No value set for ${label}. Click pencil to edit.`, 'error');
       return;
     }
-    void copyAndInjectAtCursor(value.trim());
+    const injected = await copyAndInjectAtCursor(value.trim());
     setCopiedKey(key);
     setTimeout(() => {
       setCopiedKey((curr) => (curr === key ? null : curr));
     }, 1600);
-    onNotification(`Copied & inserted "${label}"`, 'success');
+    if (injected) {
+      onNotification(`Copied & inserted "${label}"`, 'success');
+    } else {
+      onNotification(`Copied "${label}" to clipboard (click a field to insert)`, 'success');
+    }
   };
 
-  const handleCopyEverything = () => {
+  const handleCopyEverything = async () => {
     const summary = buildEverythingSummary(profile);
     if (!summary.trim()) {
       onNotification('Profile has no fields to copy', 'error');
       return;
     }
-    void copyAndInjectAtCursor(summary);
+    const injected = await copyAndInjectAtCursor(summary);
     setCopiedKey('everything');
     setTimeout(() => {
       setCopiedKey((curr) => (curr === 'everything' ? null : curr));
     }, 1800);
-    onNotification('Copied all candidate fields to clipboard!', 'success');
+    if (injected) {
+      onNotification('Copied & inserted all candidate fields!', 'success');
+    } else {
+      onNotification('Copied all candidate fields to clipboard!', 'success');
+    }
   };
 
   const handleSaveStandardField = (fieldKey: keyof QuickFillProfile, newValue: string) => {
@@ -1504,9 +1547,9 @@ function SkillsEditor({
   const nextSkillIndex = (safeIndex + 1) % (skillsCount || 1);
   const nextSkill = skills[nextSkillIndex] ?? '';
 
-  const handleCopyCurrentAndAdvance = () => {
+  const handleCopyCurrentAndAdvance = async () => {
     if (!currentSkill) return;
-    void copyAndInjectAtCursor(currentSkill);
+    const injected = await copyAndInjectAtCursor(currentSkill);
     setCopiedSkill(currentSkill);
     setTimeout(() => {
       setCopiedSkill((curr) => (curr === currentSkill ? null : curr));
@@ -1516,23 +1559,52 @@ function SkillsEditor({
     setActiveSkillIndex(advancedIndex);
 
     if (onNotification) {
-      if (skillsCount > 1) {
-        onNotification(`Copied "${currentSkill}"! Next is "${nextSkill}"`, 'success');
+      if (injected) {
+        if (skillsCount > 1) {
+          onNotification(`Copied & inserted "${currentSkill}"! Next is "${nextSkill}"`, 'success');
+        } else {
+          onNotification(`Copied & inserted "${currentSkill}"`, 'success');
+        }
       } else {
-        onNotification(`Copied "${currentSkill}"`, 'success');
+        if (skillsCount > 1) {
+          onNotification(`Copied "${currentSkill}" to clipboard! Next is "${nextSkill}"`, 'success');
+        } else {
+          onNotification(`Copied "${currentSkill}" to clipboard`, 'success');
+        }
       }
     }
   };
 
-  const handleCopySpecificSkill = (skill: string, index: number) => {
-    void copyAndInjectAtCursor(skill);
+  const handleCopySpecificSkill = async (skill: string, index: number) => {
+    const injected = await copyAndInjectAtCursor(skill);
     setCopiedSkill(skill);
     setActiveSkillIndex((index + 1) % skillsCount);
     setTimeout(() => {
       setCopiedSkill((curr) => (curr === skill ? null : curr));
     }, 1500);
     if (onNotification) {
-      onNotification(`Copied "${skill}"`, 'success');
+      if (injected) {
+        onNotification(`Copied & inserted "${skill}"`, 'success');
+      } else {
+        onNotification(`Copied "${skill}" to clipboard`, 'success');
+      }
+    }
+  };
+
+  const handleDumpAllSkills = async () => {
+    if (skillsCount === 0) return;
+    const allSkillsText = skills.join(', ');
+    const injected = await copyAndInjectAtCursor(allSkillsText);
+    setCopiedSkill('__all__');
+    setTimeout(() => {
+      setCopiedSkill((curr) => (curr === '__all__' ? null : curr));
+    }, 1500);
+    if (onNotification) {
+      if (injected) {
+        onNotification(`Copied & inserted all ${skillsCount} skills!`, 'success');
+      } else {
+        onNotification(`Copied all ${skillsCount} skills to clipboard`, 'success');
+      }
     }
   };
 
@@ -1594,7 +1666,35 @@ function SkillsEditor({
 
   return (
     <div style={skillsContainerStyle}>
-      <div style={topActionBarStyle}>
+      <div style={{ ...topActionBarStyle, display: 'flex', gap: '8px', justifyContent: 'space-between' }}>
+        <button
+          type="button"
+          onClick={handleDumpAllSkills}
+          disabled={skillsCount === 0}
+          style={{
+            ...secondaryButtonStyle,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontWeight: 700,
+            backgroundColor: copiedSkill === '__all__' ? '#ECFDF5' : '#FFFFFF',
+            borderColor: copiedSkill === '__all__' ? '#10B981' : '#C6C6CD',
+            color: copiedSkill === '__all__' ? '#065F46' : '#191C1E',
+          }}
+          title="Copy all technical skills joined by comma and insert at cursor"
+        >
+          {copiedSkill === '__all__' ? (
+            <IconCheck size={13} color="#059669" />
+          ) : (
+            <IconCopy size={13} />
+          )}
+          <span>
+            {copiedSkill === '__all__'
+              ? `Copied All (${skillsCount})!`
+              : `Dump All Skills (${skillsCount})`}
+          </span>
+        </button>
+
         <button
           type="button"
           onClick={() => onSaveProfile(profile)}
@@ -1706,6 +1806,38 @@ function SkillsEditor({
             ? 'Types each skill followed by Enter into tag / combobox inputs.'
             : 'Inserts all skills as a single comma-separated text string.'}
         </p>
+        <div style={{ marginTop: '10px' }}>
+          <button
+            type="button"
+            onClick={handleDumpAllSkills}
+            disabled={skillsCount === 0}
+            style={{
+              ...secondaryButtonStyle,
+              width: '100%',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              fontWeight: 600,
+              backgroundColor: copiedSkill === '__all__' ? '#ECFDF5' : '#F1F5F9',
+              borderColor: copiedSkill === '__all__' ? '#10B981' : '#CBD5E1',
+              color: copiedSkill === '__all__' ? '#065F46' : '#1E293B',
+              padding: '8px 12px',
+            }}
+            title="Copy all technical skills joined by comma and insert at cursor"
+          >
+            {copiedSkill === '__all__' ? (
+              <IconCheck size={14} color="#059669" />
+            ) : (
+              <IconCopy size={14} />
+            )}
+            <span>
+              {copiedSkill === '__all__'
+                ? `Copied All (${skillsCount}) Skills!`
+                : `Copy All Skills to Clipboard & Cursor (${skillsCount})`}
+            </span>
+          </button>
+        </div>
       </div>
 
       <div style={cardContainerStyle}>

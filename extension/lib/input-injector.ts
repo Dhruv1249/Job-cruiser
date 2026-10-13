@@ -44,16 +44,52 @@ export class InputInjector {
   }
 
   /**
-   * Injects text value directly at the active cursor position or selection range of an input or textarea element.
-   * Dispatches input and change events without blurring to keep the element focused and interactive.
+   * Injects text value directly at the active cursor position or selection range of an input,
+   * textarea, or contenteditable element. Preserves selection and dispatches reactive events.
    *
-   * @param element - The HTMLInputElement or HTMLTextAreaElement receiving the text insertion.
+   * @param element - The HTMLElement receiving the text insertion.
    * @param value - The text string to inject at the active cursor position.
+   * @param fallbackSelectionStart - Optional saved selection start position.
+   * @param fallbackSelectionEnd - Optional saved selection end position.
    */
   public injectAtCursor(
-    element: HTMLInputElement | HTMLTextAreaElement,
-    value: string
+    element: HTMLElement,
+    value: string,
+    fallbackSelectionStart?: number | null,
+    fallbackSelectionEnd?: number | null
   ): void {
+    if (element.isContentEditable) {
+      element.focus();
+      let didInsert = false;
+      try {
+        didInsert = document.execCommand('insertText', false, value);
+      } catch {
+        didInsert = false;
+      }
+      if (!didInsert) {
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          range.deleteContents();
+          const node = document.createTextNode(value);
+          range.insertNode(node);
+          range.setStartAfter(node);
+          range.setEndAfter(node);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        } else {
+          element.textContent = (element.textContent || '') + value;
+        }
+      }
+      element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      return;
+    }
+
+    if (!(element instanceof HTMLInputElement) && !(element instanceof HTMLTextAreaElement)) {
+      return;
+    }
+
     element.focus();
 
     let didInsertViaCommand = false;
@@ -64,13 +100,30 @@ export class InputInjector {
     }
 
     if (!didInsertViaCommand) {
-      const selectionStart = element.selectionStart ?? element.value.length;
-      const selectionEnd = element.selectionEnd ?? element.value.length;
+      let selectionStart: number | null = null;
+      let selectionEnd: number | null = null;
+      try {
+        selectionStart = element.selectionStart;
+        selectionEnd = element.selectionEnd;
+      } catch {
+        selectionStart = null;
+        selectionEnd = null;
+      }
+
+      if (selectionStart === null && typeof fallbackSelectionStart === 'number') {
+        selectionStart = fallbackSelectionStart;
+      }
+      if (selectionEnd === null && typeof fallbackSelectionEnd === 'number') {
+        selectionEnd = fallbackSelectionEnd;
+      }
+
+      const effectiveStart = selectionStart ?? element.value.length;
+      const effectiveEnd = selectionEnd ?? element.value.length;
       const currentValue = element.value || '';
       const updatedValue =
-        currentValue.slice(0, selectionStart) +
+        currentValue.slice(0, effectiveStart) +
         value +
-        currentValue.slice(selectionEnd);
+        currentValue.slice(effectiveEnd);
 
       const isTextArea = element.tagName.toLowerCase() === 'textarea';
       const prototype = isTextArea
@@ -89,14 +142,28 @@ export class InputInjector {
         element.value = updatedValue;
       }
 
-      const newCursorPosition = selectionStart + value.length;
-      if (typeof element.setSelectionRange === 'function') {
-        element.setSelectionRange(newCursorPosition, newCursorPosition);
+      const newCursorPosition = effectiveStart + value.length;
+      try {
+        if (typeof element.setSelectionRange === 'function') {
+          element.setSelectionRange(newCursorPosition, newCursorPosition);
+        }
+      } catch {}
+
+      try {
+        element.dispatchEvent(
+          new InputEvent('input', {
+            bubbles: true,
+            composed: true,
+            inputType: 'insertText',
+            data: value,
+          })
+        );
+      } catch {
+        element.dispatchEvent(
+          new Event('input', { bubbles: true, composed: true })
+        );
       }
 
-      element.dispatchEvent(
-        new Event('input', { bubbles: true, composed: true })
-      );
       element.dispatchEvent(
         new Event('change', { bubbles: true, composed: true })
       );

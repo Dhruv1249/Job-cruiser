@@ -66,15 +66,27 @@ export default defineContentScript({
       extensionConfiguration = DEFAULT_CONFIGURATION;
     }
 
-    let lastActiveEditableElement: HTMLInputElement | HTMLTextAreaElement | null = null;
+    let lastActiveEditableElement: HTMLElement | null = null;
+    let lastSelectionStart: number | null = null;
+    let lastSelectionEnd: number | null = null;
 
     const trackActiveEditable = (event: Event) => {
       const target = event.target;
       if (
         target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
       ) {
         lastActiveEditableElement = target;
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          try {
+            lastSelectionStart = target.selectionStart;
+            lastSelectionEnd = target.selectionEnd;
+          } catch {
+            lastSelectionStart = null;
+            lastSelectionEnd = null;
+          }
+        }
       }
     };
 
@@ -82,6 +94,8 @@ export default defineContentScript({
     document.addEventListener('focus', trackActiveEditable, true);
     document.addEventListener('click', trackActiveEditable, true);
     document.addEventListener('mouseup', trackActiveEditable, true);
+    document.addEventListener('keyup', trackActiveEditable, true);
+    document.addEventListener('select', trackActiveEditable, true);
 
     const fieldClassifier = new FieldClassifier();
     const inputInjector = new InputInjector();
@@ -154,8 +168,25 @@ export default defineContentScript({
       }
       if (extensionMessage.action === 'INJECT_AT_CURSOR') {
         const textPayload = (extensionMessage.payload as { text?: string })?.text ?? '';
-        if (textPayload && lastActiveEditableElement && lastActiveEditableElement.isConnected) {
-          inputInjector.injectAtCursor(lastActiveEditableElement, textPayload);
+        let target = lastActiveEditableElement;
+        if (!target || !target.isConnected) {
+          const active = document.activeElement;
+          if (
+            active instanceof HTMLInputElement ||
+            active instanceof HTMLTextAreaElement ||
+            (active instanceof HTMLElement && active.isContentEditable)
+          ) {
+            target = active;
+          }
+        }
+
+        if (textPayload && target && target.isConnected) {
+          inputInjector.injectAtCursor(
+            target,
+            textPayload,
+            lastSelectionStart,
+            lastSelectionEnd
+          );
           return { success: true };
         }
         return { success: false };

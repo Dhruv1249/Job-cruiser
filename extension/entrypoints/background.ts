@@ -317,6 +317,72 @@ function setupMessageListeners(): void {
         return { success: false, error: 'Target tab identifier not provided' };
       }
 
+      case 'INJECT_AT_CURSOR': {
+        const textPayload = extensionMessage.payload?.text ?? '';
+        let targetTabId: number | null = null;
+
+        try {
+          const lastFocusedTabs = await browser.tabs.query({
+            active: true,
+            lastFocusedWindow: true,
+          });
+          const validFocusedTab = lastFocusedTabs.find(
+            (tab) =>
+              tab.id &&
+              !tab.url?.startsWith('chrome-extension://') &&
+              !tab.url?.startsWith('moz-extension://'),
+          );
+          if (validFocusedTab?.id) {
+            targetTabId = validFocusedTab.id;
+          }
+        } catch {}
+
+        if (!targetTabId) {
+          try {
+            const currentTabs = await browser.tabs.query({
+              active: true,
+              currentWindow: true,
+            });
+            const validCurrentTab = currentTabs.find(
+              (tab) =>
+                tab.id &&
+                !tab.url?.startsWith('chrome-extension://') &&
+                !tab.url?.startsWith('moz-extension://'),
+            );
+            if (validCurrentTab?.id) {
+              targetTabId = validCurrentTab.id;
+            }
+          } catch {}
+        }
+
+        if (!targetTabId) {
+          try {
+            const allActiveTabs = await browser.tabs.query({ active: true });
+            const validActiveTab = allActiveTabs.find(
+              (tab) =>
+                tab.id &&
+                !tab.url?.startsWith('chrome-extension://') &&
+                !tab.url?.startsWith('moz-extension://'),
+            );
+            if (validActiveTab?.id) {
+              targetTabId = validActiveTab.id;
+            }
+          } catch {}
+        }
+
+        if (targetTabId) {
+          try {
+            return await browser.tabs.sendMessage(targetTabId, {
+              action: 'INJECT_AT_CURSOR',
+              payload: { text: textPayload },
+            });
+          } catch {
+            return { success: false, error: 'Could not communicate with tab' };
+          }
+        }
+        return { success: false, error: 'No active web tab found' };
+      }
+
       default:
         return undefined;
     }

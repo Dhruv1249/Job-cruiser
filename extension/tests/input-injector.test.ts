@@ -168,4 +168,60 @@ describe('InputInjector', () => {
     expect(textareaElement.value).toBe('Start MIDDLE End');
     expect(textareaElement.selectionStart).toBe(12);
   });
+
+  it('uses fallback selection coordinates when element selection is null or blurred', () => {
+    const inputElement = document.createElement('input');
+    inputElement.value = 'PrefixSuffix';
+    document.body.appendChild(inputElement);
+
+    Object.defineProperty(inputElement, 'selectionStart', {
+      value: null,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(inputElement, 'selectionEnd', {
+      value: null,
+      writable: true,
+      configurable: true,
+    });
+
+    injector.injectAtCursor(inputElement, 'Inserted', 6, 6);
+
+    expect(inputElement.value).toBe('PrefixInsertedSuffix');
+  });
+
+  it('injects text into contenteditable elements with input and change events', () => {
+    const editableDiv = document.createElement('div');
+    editableDiv.contentEditable = 'true';
+    document.body.appendChild(editableDiv);
+
+    const inputEventListener = vi.fn();
+    const changeEventListener = vi.fn();
+    editableDiv.addEventListener('input', inputEventListener);
+    editableDiv.addEventListener('change', changeEventListener);
+
+    injector.injectAtCursor(editableDiv, 'Rich text content');
+
+    expect(editableDiv.textContent).toContain('Rich text content');
+    expect(inputEventListener).toHaveBeenCalledTimes(1);
+    expect(changeEventListener).toHaveBeenCalledTimes(1);
+  });
+
+  it('safely handles inputs where setSelectionRange throws', () => {
+    const inputElement = document.createElement('input');
+    inputElement.type = 'email';
+    inputElement.value = 'user@example.com';
+    document.body.appendChild(inputElement);
+
+    inputElement.setSelectionRange = () => {
+      throw new DOMException('The element does not support selection', 'InvalidStateError');
+    };
+
+    expect(() => {
+      injector.injectAtCursor(inputElement, '.backup', 4, 4);
+    }).not.toThrow();
+
+    expect(inputElement.value).toBe('user.backup@example.com');
+  });
 });
+
