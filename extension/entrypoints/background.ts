@@ -112,7 +112,8 @@ function setupMessageListeners(): void {
         const currentConfig = await storageService.getConfig();
         if (
           currentConfig.mode === 'connected' &&
-          currentConfig.apiSecret === receivedToken
+          currentConfig.apiSecret === receivedToken &&
+          !currentConfig.isSessionExpired
         ) {
           return { success: true, alreadyConnected: true };
         }

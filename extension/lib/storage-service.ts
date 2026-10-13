@@ -220,6 +220,11 @@ export class StorageService {
 
       if (!response.ok) {
         if (response.status === 401) {
+          const updatedConfig: ExtensionConfig = {
+            ...activeConfig,
+            isSessionExpired: true,
+          };
+          await this.saveConfig(updatedConfig);
           return {
             success: false,
             error:
@@ -312,6 +317,11 @@ export class StorageService {
 
       if (!response.ok) {
         if (response.status === 401) {
+          const updatedConfiguration: ExtensionConfig = {
+            ...configuration,
+            isSessionExpired: true,
+          };
+          await this.saveConfig(updatedConfiguration);
           return {
             success: false,
             error:
@@ -340,6 +350,7 @@ export class StorageService {
       const updatedConfiguration: ExtensionConfig = {
         ...configuration,
         lastSyncedAt: Date.now(),
+        isSessionExpired: false,
       };
       await this.saveConfig(updatedConfiguration);
 

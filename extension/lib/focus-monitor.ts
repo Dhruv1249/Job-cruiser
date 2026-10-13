@@ -70,7 +70,9 @@ export class FocusMonitor {
     };
 
     document.addEventListener('focusin', this.boundFocusInHandler, true);
+    document.addEventListener('focus', this.boundFocusInHandler, true);
     document.addEventListener('click', this.boundFocusInHandler, true);
+    document.addEventListener('mouseup', this.boundFocusInHandler, true);
 
     if (typeof MutationObserver !== 'undefined' && document.body) {
       this.mutationObserver = new MutationObserver(() => {});
@@ -93,7 +95,9 @@ export class FocusMonitor {
 
     if (this.boundFocusInHandler) {
       document.removeEventListener('focusin', this.boundFocusInHandler, true);
+      document.removeEventListener('focus', this.boundFocusInHandler, true);
       document.removeEventListener('click', this.boundFocusInHandler, true);
+      document.removeEventListener('mouseup', this.boundFocusInHandler, true);
       this.boundFocusInHandler = null;
     }
 
@@ -134,7 +138,11 @@ export class FocusMonitor {
     }
 
     const classification = this.classifier.classify(targetElement);
-    const suggestions = this.buildSuggestionsForClassification(classification);
+    let suggestions = this.buildSuggestionsForClassification(classification);
+
+    if (suggestions.length === 0) {
+      suggestions = this.buildFallbackSuggestions(targetElement);
+    }
 
     if (suggestions.length > 0) {
       this.overlay.show(targetElement, suggestions);
@@ -432,6 +440,108 @@ export class FocusMonitor {
         value: joinedSkills,
       },
     ];
+  }
+
+  private buildFallbackSuggestions(targetElement: HTMLElement): OverlaySuggestion[] {
+    const suggestions: OverlaySuggestion[] = [];
+    const isTextarea = targetElement.tagName.toLowerCase() === 'textarea';
+
+    if (isTextarea && this.profile.bioSummary?.trim()) {
+      suggestions.push({
+        icon: 'file-text',
+        primaryText:
+          this.profile.bioSummary.length > 50
+            ? `${this.profile.bioSummary.slice(0, 47)}...`
+            : this.profile.bioSummary,
+        secondaryText: 'Bio / Summary',
+        value: this.profile.bioSummary,
+        action: 'fill_text',
+      });
+    }
+
+    if (this.profile.fullName?.trim()) {
+      suggestions.push({
+        icon: 'user',
+        primaryText: this.profile.fullName.trim(),
+        secondaryText: 'Full Name',
+        value: this.profile.fullName.trim(),
+        action: 'fill_text',
+      });
+    }
+
+    if (this.profile.email?.trim()) {
+      suggestions.push({
+        icon: 'mail',
+        primaryText: this.profile.email.trim(),
+        secondaryText: 'Email Address',
+        value: this.profile.email.trim(),
+        action: 'fill_text',
+      });
+    }
+
+    if (this.profile.phone?.trim()) {
+      suggestions.push({
+        icon: 'phone',
+        primaryText: this.profile.phone.trim(),
+        secondaryText: 'Phone Number',
+        value: this.profile.phone.trim(),
+        action: 'fill_text',
+      });
+    }
+
+    if (this.profile.location?.trim()) {
+      suggestions.push({
+        icon: 'map-pin',
+        primaryText: this.profile.location.trim(),
+        secondaryText: 'Location',
+        value: this.profile.location.trim(),
+        action: 'fill_text',
+      });
+    }
+
+    if (this.profile.linkedinUrl?.trim()) {
+      suggestions.push({
+        icon: 'link',
+        primaryText: this.profile.linkedinUrl.trim(),
+        secondaryText: 'LinkedIn',
+        value: this.profile.linkedinUrl.trim(),
+        action: 'fill_text',
+      });
+    }
+
+    if (this.profile.githubUrl?.trim()) {
+      suggestions.push({
+        icon: 'link',
+        primaryText: this.profile.githubUrl.trim(),
+        secondaryText: 'GitHub',
+        value: this.profile.githubUrl.trim(),
+        action: 'fill_text',
+      });
+    }
+
+    if (this.profile.portfolioUrl?.trim()) {
+      suggestions.push({
+        icon: 'globe',
+        primaryText: this.profile.portfolioUrl.trim(),
+        secondaryText: 'Portfolio',
+        value: this.profile.portfolioUrl.trim(),
+        action: 'fill_text',
+      });
+    }
+
+    for (const field of this.profile.customFields ?? []) {
+      if (field.value?.trim()) {
+        suggestions.push({
+          icon: 'tag',
+          primaryText: field.value.trim(),
+          secondaryText: field.label,
+          value: field.value.trim(),
+          action: 'fill_text',
+        });
+      }
+    }
+
+    return suggestions.slice(0, 8);
   }
 
   private buildContactSuggestions(

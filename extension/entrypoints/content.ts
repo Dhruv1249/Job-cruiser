@@ -34,28 +34,54 @@ export default defineContentScript({
     let extensionConfiguration: ExtensionConfig = DEFAULT_CONFIGURATION;
 
     try {
-      const fetchedProfile = (await browser.runtime.sendMessage({
-        action: 'GET_PROFILE',
-      })) as QuickFillProfile | undefined;
+      const localStore = await browser.storage.local.get([
+        PROFILE_STORAGE_KEY,
+        CONFIGURATION_STORAGE_KEY,
+      ]);
+      if (localStore[PROFILE_STORAGE_KEY]) {
+        candidateProfile = localStore[PROFILE_STORAGE_KEY] as QuickFillProfile;
+      } else {
+        const fetchedProfile = (await browser.runtime.sendMessage({
+          action: 'GET_PROFILE',
+        })) as QuickFillProfile | undefined;
 
-      if (fetchedProfile) {
-        candidateProfile = fetchedProfile;
+        if (fetchedProfile) {
+          candidateProfile = fetchedProfile;
+        }
+      }
+
+      if (localStore[CONFIGURATION_STORAGE_KEY]) {
+        extensionConfiguration = localStore[CONFIGURATION_STORAGE_KEY] as ExtensionConfig;
+      } else {
+        const fetchedConfiguration = (await browser.runtime.sendMessage({
+          action: 'GET_CONFIG',
+        })) as ExtensionConfig | undefined;
+
+        if (fetchedConfiguration) {
+          extensionConfiguration = fetchedConfiguration;
+        }
       }
     } catch {
       candidateProfile = DEFAULT_PROFILE;
-    }
-
-    try {
-      const fetchedConfiguration = (await browser.runtime.sendMessage({
-        action: 'GET_CONFIG',
-      })) as ExtensionConfig | undefined;
-
-      if (fetchedConfiguration) {
-        extensionConfiguration = fetchedConfiguration;
-      }
-    } catch {
       extensionConfiguration = DEFAULT_CONFIGURATION;
     }
+
+    let lastActiveEditableElement: HTMLInputElement | HTMLTextAreaElement | null = null;
+
+    const trackActiveEditable = (event: Event) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement
+      ) {
+        lastActiveEditableElement = target;
+      }
+    };
+
+    document.addEventListener('focusin', trackActiveEditable, true);
+    document.addEventListener('focus', trackActiveEditable, true);
+    document.addEventListener('click', trackActiveEditable, true);
+    document.addEventListener('mouseup', trackActiveEditable, true);
 
     const fieldClassifier = new FieldClassifier();
     const inputInjector = new InputInjector();
@@ -125,6 +151,14 @@ export default defineContentScript({
         focusMonitor.updateProfile(candidateProfile);
         focusMonitor.start();
         return { success: true };
+      }
+      if (extensionMessage.action === 'INJECT_AT_CURSOR') {
+        const textPayload = (extensionMessage.payload as { text?: string })?.text ?? '';
+        if (textPayload && lastActiveEditableElement && lastActiveEditableElement.isConnected) {
+          inputInjector.injectAtCursor(lastActiveEditableElement, textPayload);
+          return { success: true };
+        }
+        return { success: false };
       }
       return undefined;
     });

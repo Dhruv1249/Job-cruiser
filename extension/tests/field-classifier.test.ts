@@ -270,4 +270,54 @@ describe('FieldClassifier', () => {
     comboboxElement.setAttribute('role', 'combobox');
     expect(classifier.classify(comboboxElement).inputKind).toBe('combobox');
   });
+
+  it('classifies email from input type attribute', () => {
+    const inputElement = document.createElement('input');
+    inputElement.type = 'email';
+    inputElement.name = 'field_1234';
+    document.body.appendChild(inputElement);
+
+    const classification = classifier.classify(inputElement);
+
+    expect(classification.fieldType).toBe('email');
+    expect(classification.confidence).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('classifies phone from input type tel attribute', () => {
+    const inputElement = document.createElement('input');
+    inputElement.type = 'tel';
+    inputElement.name = 'field_5678';
+    document.body.appendChild(inputElement);
+
+    const classification = classifier.classify(inputElement);
+
+    expect(classification.fieldType).toBe('phone');
+    expect(classification.confidence).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('classifies full name from label containing asterisk', () => {
+    const labelElement = document.createElement('label');
+    labelElement.textContent = 'Name *';
+    const inputElement = document.createElement('input');
+    labelElement.appendChild(inputElement);
+    document.body.appendChild(labelElement);
+
+    const classification = classifier.classify(inputElement);
+
+    expect(classification.fieldType).toBe('full_name');
+    expect(classification.confidence).toBe(0.85);
+  });
+
+  it('classifies location from label with asterisk', () => {
+    const labelElement = document.createElement('label');
+    labelElement.textContent = 'Location *';
+    const inputElement = document.createElement('input');
+    labelElement.appendChild(inputElement);
+    document.body.appendChild(labelElement);
+
+    const classification = classifier.classify(inputElement);
+
+    expect(classification.fieldType).toBe('location');
+    expect(classification.confidence).toBe(0.85);
+  });
 });

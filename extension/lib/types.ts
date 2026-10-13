@@ -69,6 +69,7 @@ export interface ExtensionConfig {
   skillsDefaultMode: 'cycle_one_by_one' | 'dump_all';
   isEnabled?: boolean;
   autoShowOverlay?: boolean;
+  isSessionExpired?: boolean;
 }
 
 /**
@@ -111,6 +112,10 @@ export type ExtensionMessage =
   | {
       action: 'INJECT_SKILLS';
       payload: { mode: SkillsInjectionMode; targetTabId: number };
+    }
+  | {
+      action: 'INJECT_AT_CURSOR';
+      payload: { text: string };
     };
 
 /**

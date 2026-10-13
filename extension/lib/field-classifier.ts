@@ -9,15 +9,15 @@ export type { FieldClassification, FieldType, InputKind };
 export const FIELD_PATTERNS: Record<FieldType, RegExp[]> = {
   first_name: [/(first[_\s-]?name|given[_\s-]?name|fname|forename)/i],
   last_name: [/(last[_\s-]?name|family[_\s-]?name|lname|surname)/i],
-  full_name: [/(^name$|full[_\s-]?name|applicant[_\s-]?name|legal[_\s-]?name)/i],
+  full_name: [/(full[_\s-]?name|applicant[_\s-]?name|legal[_\s-]?name|candidate[_\s-]?name|your[_\s-]?name|\bname\s*[*:]?$|^name\b)/i],
   email: [/(e[_\s-]?mail|email[_\s-]?addr)/i],
   phone: [/(phone|mobile|tel|cell|contact[_\s-]?number)/i],
   linkedin: [/(linkedin|linked[_\s-]?in)/i],
   github: [/(github|git[_\s-]?hub)/i],
   portfolio: [/(portfolio|personal[_\s-]?website|personal[_\s-]?url)/i],
   website: [/(website|web[_\s-]?url|homepage)/i],
-  location: [/(^location$|city|^address$|current[_\s-]?location)/i],
-  country: [/(^country$|country[_\s-]?of[_\s-]?residence)/i],
+  location: [/(location|city|address|current[_\s-]?location)/i],
+  country: [/(country|country[_\s-]?of[_\s-]?residence)/i],
   skills: [/(skill|technolog|competenc|proficienc|tech[_\s-]?stack|expertise)/i],
   work_authorization: [/(work[_\s-]?auth|authorized[_\s-]?to[_\s-]?work|legal[_\s-]?right[_\s-]?to[_\s-]?work)/i],
   visa_sponsorship: [/(visa|sponsorship|immigration[_\s-]?status|require[_\s-]?sponsor)/i],
@@ -127,6 +127,7 @@ export class FieldClassifier {
 
     this.scoreByATSSpecificSelectors(element, scores);
     this.scoreByAutocompleteAttribute(element, scores);
+    this.scoreByInputType(element, scores);
     this.scoreByLabelAssociation(element, scores);
     this.scoreByAttributeRegex(element, scores);
 
@@ -171,6 +172,33 @@ export class FieldClassifier {
         if (0.95 > existingScore) {
           scores.set(matchingFieldType, 0.95);
         }
+      }
+    }
+  }
+
+  private scoreByInputType(
+    element: HTMLElement,
+    scores: Map<FieldType, number>
+  ): void {
+    if (element.tagName.toLowerCase() !== 'input') {
+      return;
+    }
+
+    const inputType = (element.getAttribute('type') ?? '').toLowerCase();
+    if (inputType === 'email') {
+      const existingScore = scores.get('email') ?? 0;
+      if (0.9 > existingScore) {
+        scores.set('email', 0.9);
+      }
+    } else if (inputType === 'tel') {
+      const existingScore = scores.get('phone') ?? 0;
+      if (0.9 > existingScore) {
+        scores.set('phone', 0.9);
+      }
+    } else if (inputType === 'url') {
+      const existingScore = scores.get('portfolio') ?? 0;
+      if (0.8 > existingScore) {
+        scores.set('portfolio', 0.8);
       }
     }
   }

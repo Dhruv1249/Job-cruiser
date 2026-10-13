@@ -61,12 +61,22 @@ export class AutocompleteOverlay {
     targetElement: HTMLElement,
     suggestions: OverlaySuggestion[]
   ): void {
+    if (this.focusOutTimeoutIdentifier !== null) {
+      window.clearTimeout(this.focusOutTimeoutIdentifier);
+      this.focusOutTimeoutIdentifier = null;
+    }
+
     if (suggestions.length === 0) {
       this.hide();
       return;
     }
 
-    if (!this.shadowRoot || !this.overlayContainer) {
+    if (
+      !this.shadowRoot ||
+      !this.overlayContainer ||
+      !this.hostElement ||
+      !this.hostElement.isConnected
+    ) {
       this.buildShadowContainer();
     }
 
@@ -139,9 +149,18 @@ export class AutocompleteOverlay {
 
     const host = document.createElement('div');
     host.id = 'jc-quickfill-host';
-    host.style.position = 'relative';
+    host.style.position = 'fixed';
+    host.style.top = '0';
+    host.style.left = '0';
+    host.style.width = '0';
+    host.style.height = '0';
+    host.style.overflow = 'visible';
+    host.style.pointerEvents = 'none';
     host.style.zIndex = '2147483647';
-    document.body.appendChild(host);
+    host.style.display = 'block';
+
+    const mountTarget = document.documentElement || document.body;
+    mountTarget.appendChild(host);
     this.hostElement = host;
 
     const shadow = host.attachShadow({ mode: 'closed' });
@@ -260,6 +279,7 @@ export class AutocompleteOverlay {
     const boundingRectangle = element.getBoundingClientRect();
     const horizontalMargin = 8;
     const overlayWidth = 320;
+    const estimatedHeight = 220;
 
     let leftPosition = boundingRectangle.left;
     if (leftPosition + overlayWidth > window.innerWidth - horizontalMargin) {
@@ -269,10 +289,17 @@ export class AutocompleteOverlay {
       );
     }
 
-    const topPosition = boundingRectangle.bottom + 4;
+    let topPosition = boundingRectangle.bottom + 4;
+    if (
+      topPosition + estimatedHeight > window.innerHeight &&
+      boundingRectangle.top > estimatedHeight
+    ) {
+      topPosition = boundingRectangle.top - estimatedHeight - 4;
+    }
+
     this.overlayContainer.style.position = 'fixed';
-    this.overlayContainer.style.top = `${topPosition}px`;
-    this.overlayContainer.style.left = `${leftPosition}px`;
+    this.overlayContainer.style.top = `${Math.max(4, topPosition)}px`;
+    this.overlayContainer.style.left = `${Math.max(4, leftPosition)}px`;
   }
 
   private handleKeyboardNavigation(event: KeyboardEvent): void {
@@ -354,6 +381,11 @@ export class AutocompleteOverlay {
   }
 
   private removeEventListeners(): void {
+    if (this.focusOutTimeoutIdentifier !== null) {
+      window.clearTimeout(this.focusOutTimeoutIdentifier);
+      this.focusOutTimeoutIdentifier = null;
+    }
+
     if (this.boundKeyboardHandler) {
       if (this.currentTargetElement) {
         this.currentTargetElement.removeEventListener(
@@ -407,6 +439,7 @@ export class AutocompleteOverlay {
         overflow: hidden;
         z-index: 2147483647;
         box-sizing: border-box;
+        pointer-events: auto;
       }
       .overlay-header {
         display: flex;

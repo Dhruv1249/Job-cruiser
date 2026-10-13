@@ -200,6 +200,7 @@ export function App(): JSX.Element {
       })) as { success?: boolean; error?: string } | undefined;
       if (detectResult?.success) {
         await loadInitialData();
+        setConfiguration((prev) => ({ ...prev, isSessionExpired: false }));
         displayNotification(
           'Active web session found! Connected and synced automatically.',
           'success',
@@ -231,9 +232,13 @@ export function App(): JSX.Element {
 
       if (syncResult && syncResult.success) {
         await loadInitialData();
+        setConfiguration((prev) => ({ ...prev, isSessionExpired: false }));
         displayNotification('Synchronized with Job Cruiser', 'success');
       } else {
         const failureReason = syncResult?.error ?? 'Synchronization failed';
+        if (failureReason.includes('401')) {
+          setConfiguration((prev) => ({ ...prev, isSessionExpired: true }));
+        }
         displayNotification(failureReason, 'error');
       }
     } catch (error: unknown) {
@@ -265,6 +270,7 @@ export function App(): JSX.Element {
           return;
         }
         lastHandledToken = token;
+        setConfiguration((prev) => ({ ...prev, isSessionExpired: false }));
         void loadInitialData();
         displayNotification(
           'Connected and synced automatically from web session!',
@@ -314,8 +320,11 @@ export function App(): JSX.Element {
     }
   };
 
+  const isExpired = Boolean(configuration.isSessionExpired);
   const isActuallyConnected =
-    configuration.mode === 'connected' && Boolean(configuration.apiSecret?.trim());
+    configuration.mode === 'connected' &&
+    Boolean(configuration.apiSecret?.trim()) &&
+    !isExpired;
 
   return (
     <div style={containerStyle}>
@@ -345,12 +354,31 @@ export function App(): JSX.Element {
             <span
               style={{
                 ...statusBadgeStyle,
-                backgroundColor: isActuallyConnected ? '#10B98115' : '#F2F4F6',
-                color: isActuallyConnected ? '#059669' : '#515F74',
-                borderColor: isActuallyConnected ? '#10B98140' : '#C6C6CD',
+                backgroundColor: isActuallyConnected
+                  ? '#10B98115'
+                  : isExpired
+                    ? '#FEF2F2'
+                    : '#F2F4F6',
+                color: isActuallyConnected
+                  ? '#059669'
+                  : isExpired
+                    ? '#DC2626'
+                    : '#515F74',
+                borderColor: isActuallyConnected
+                  ? '#10B98140'
+                  : isExpired
+                    ? '#FCA5A5'
+                    : '#C6C6CD',
+                cursor: isExpired ? 'pointer' : 'default',
               }}
+              onClick={isExpired ? handleOpenGoogleWebAuth : undefined}
+              title={isExpired ? 'Session expired. Click to re-connect' : undefined}
             >
-              {isActuallyConnected ? 'Connected' : 'Local'}
+              {isActuallyConnected
+                ? 'Connected'
+                : isExpired
+                  ? 'Expired — Re-connect'
+                  : 'Local'}
             </span>
           </div>
         </div>
@@ -431,6 +459,7 @@ export function App(): JSX.Element {
             onProfileChange={setProfile}
             onConfigurationChange={handleSaveConfiguration}
             onSaveProfile={handleSaveProfile}
+            onNotification={displayNotification}
           />
         )}
 
@@ -459,14 +488,36 @@ interface VaultEditorProperties {
   onOpenConnect: () => void;
 }
 
-const CATEGORY_FILTER_OPTIONS = [
-  'All',
+const DEFAULT_CATEGORIES: readonly string[] = [
   'Personal & Contact',
   'Socials & Links',
   'Work Authorization',
   'Experience & Education',
   'Custom Answers',
-] as const;
+];
+
+/**
+ * Copies specified text to system clipboard and dispatches an insertion command to the active browser tab
+ * to inject text directly at the current cursor position.
+ *
+ * @param text - The text payload to copy and inject.
+ */
+async function copyAndInjectAtCursor(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {}
+
+  try {
+    const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+    const targetTab = tabs[0];
+    if (targetTab?.id) {
+      await browser.tabs.sendMessage(targetTab.id, {
+        action: 'INJECT_AT_CURSOR',
+        payload: { text },
+      });
+    }
+  } catch {}
+}
 
 /**
  * Formats all candidate profile fields into a unified clipboard-ready summary text block.
@@ -534,8 +585,11 @@ function QuickFillCard({
   onDelete,
 }: QuickFillCardProperties): JSX.Element {
   const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const [editLabel, setEditLabel] = useState<string>(label);
   const [editValue, setEditValue] = useState<string>(value);
+
+  const hasMoreContent = value.length > 40 || value.includes('\n');
 
   const handleStartEdit = (event: JSX.TargetedMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -685,15 +739,40 @@ function QuickFillCard({
       </div>
 
       <div style={quickFillCardValueBoxStyle}>
-        <span style={quickFillCardValueTextStyle}>
-          {value ? (
-            value.replaceAll('\n', ' ').trim()
-          ) : (
-            <span style={emptyStateTextStyle}>
-              (Empty — click pencil in corner to set)
-            </span>
-          )}
-        </span>
+        <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+          <span
+            style={{
+              ...quickFillCardValueTextStyle,
+              display: 'block',
+              overflow: isExpanded ? 'visible' : 'hidden',
+              textOverflow: isExpanded ? 'clip' : 'ellipsis',
+              whiteSpace: isExpanded ? 'pre-wrap' : 'nowrap',
+              wordBreak: isExpanded ? 'break-word' : 'normal',
+            }}
+          >
+            {value ? (
+              isExpanded ? value : value.replaceAll('\n', ' ').trim()
+            ) : (
+              <span style={emptyStateTextStyle}>
+                (Empty — click pencil in corner to set)
+              </span>
+            )}
+          </span>
+        </div>
+        {hasMoreContent && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsExpanded(!isExpanded);
+            }}
+            style={expandToggleButtonStyle}
+            title={isExpanded ? 'Collapse content' : 'Expand full content'}
+          >
+            <span>{isExpanded ? 'Less' : 'More'}</span>
+            <span style={{ fontSize: '10px' }}>{isExpanded ? '▴' : '▾'}</span>
+          </button>
+        )}
       </div>
     </div>
   );
@@ -717,18 +796,31 @@ function VaultEditor({
   const [newCustomLabel, setNewCustomLabel] = useState<string>('');
   const [newCustomValue, setNewCustomValue] = useState<string>('');
   const [newCustomCategory, setNewCustomCategory] = useState<string>('Custom Answers');
+  const [isCustomCategoryMode, setIsCustomCategoryMode] = useState<boolean>(false);
+  const [customCategoryInput, setCustomCategoryInput] = useState<string>('');
+
+  const availableCategories = Array.from(
+    new Set([
+      ...DEFAULT_CATEGORIES,
+      ...(profile.customFields ?? [])
+        .map((field) => field.category?.trim())
+        .filter((cat): cat is string => Boolean(cat && cat.length > 0)),
+    ]),
+  );
+
+  const categoryFilterOptions = ['All', ...availableCategories];
 
   const copyToClipboard = (key: string, value: string | undefined, label: string) => {
     if (!value || !value.trim()) {
       onNotification(`No value set for ${label}. Click pencil to edit.`, 'error');
       return;
     }
-    void navigator.clipboard.writeText(value.trim());
+    void copyAndInjectAtCursor(value.trim());
     setCopiedKey(key);
     setTimeout(() => {
       setCopiedKey((curr) => (curr === key ? null : curr));
     }, 1600);
-    onNotification(`Copied "${label}" to clipboard`, 'success');
+    onNotification(`Copied & inserted "${label}"`, 'success');
   };
 
   const handleCopyEverything = () => {
@@ -737,7 +829,7 @@ function VaultEditor({
       onNotification('Profile has no fields to copy', 'error');
       return;
     }
-    void navigator.clipboard.writeText(summary);
+    void copyAndInjectAtCursor(summary);
     setCopiedKey('everything');
     setTimeout(() => {
       setCopiedKey((curr) => (curr === 'everything' ? null : curr));
@@ -848,8 +940,12 @@ function VaultEditor({
       (id) => id.toLowerCase() !== trimmedLabel.toLowerCase(),
     );
 
+    const targetCategory = isCustomCategoryMode
+      ? customCategoryInput.trim() || 'Custom Answers'
+      : newCustomCategory;
+
     let updatedProfile: QuickFillProfile;
-    if (newCustomCategory === 'Socials & Links') {
+    if (targetCategory === 'Socials & Links') {
       const currentLinks = profile.customLinks ?? [];
       updatedProfile = {
         ...profile,
@@ -862,7 +958,7 @@ function VaultEditor({
         id: `custom_${Date.now()}`,
         label: trimmedLabel,
         value: trimmedValue,
-        category: newCustomCategory,
+        category: targetCategory,
       };
       updatedProfile = {
         ...profile,
@@ -874,9 +970,11 @@ function VaultEditor({
     onProfileChange(updatedProfile);
     setNewCustomLabel('');
     setNewCustomValue('');
+    setCustomCategoryInput('');
+    setIsCustomCategoryMode(false);
     setShowAddCustom(false);
     onSaveProfile(updatedProfile);
-    onNotification(`Added "${trimmedLabel}"`, 'success');
+    onNotification(`Added "${trimmedLabel}" in "${targetCategory}"`, 'success');
   };
 
   const isFieldDeleted = (fieldId: string, jobCruiserId?: string): boolean => {
@@ -910,6 +1008,7 @@ function VaultEditor({
       value: profile.fullName ?? '',
       category: 'Personal & Contact',
       onSave: (_, val) => handleSaveStandardField('fullName', val),
+      onDelete: () => handleDeleteStandardField('fullName', 'profile_full_name', 'Full Name'),
     },
     {
       id: 'email',
@@ -1101,13 +1200,45 @@ function VaultEditor({
       onSave: (_, val) => handleSaveStandardField('bioSummary', val),
       onDelete: () => handleDeleteStandardField('bioSummary', 'bio_summary', 'Professional Bio'),
     },
+    ...(profile.skills && profile.skills.length > 0
+      ? [
+          {
+            id: 'skills',
+            jobCruiserId: 'profile_skills',
+            label: 'Technical Skills',
+            value: profile.skills.join(', '),
+            category: 'Experience & Education',
+            isMultiline: true,
+            onSave: (_: string, val: string) => {
+              const updatedSkills = val
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean);
+              const updatedProfile = {
+                ...profile,
+                skills: updatedSkills,
+              };
+              onProfileChange(updatedProfile);
+              onSaveProfile(updatedProfile);
+            },
+            onDelete: () => {
+              const updatedProfile = {
+                ...profile,
+                skills: [],
+              };
+              onProfileChange(updatedProfile);
+              onSaveProfile(updatedProfile);
+            },
+          },
+        ]
+      : []),
     ...(profile.customFields ?? []).map((field, idx) => ({
       id: field.id || `custom_${idx}`,
       label: field.label || 'Custom Answer',
       value: field.value,
-      category: 'Custom Answers',
+      category: field.category || 'Custom Answers',
       isCustom: true,
-      isMultiline: field.value.length > 80 || field.value.includes('\n'),
+      isMultiline: field.value.length > 40 || field.value.includes('\n'),
       onSave: (lbl: string, val: string) => handleSaveCustomField(idx, lbl, val),
       onDelete: () => handleDeleteCustomField(idx),
     })),
@@ -1115,7 +1246,9 @@ function VaultEditor({
 
   const query = searchQuery.trim().toLowerCase();
   const visibleItems = allItems.filter(
-    (item) => !isFieldDeleted(item.id, item.jobCruiserId),
+    (item) =>
+      !isFieldDeleted(item.id, item.jobCruiserId) &&
+      Boolean(item.value && item.value.trim()),
   );
   const filteredItems = visibleItems.filter((item) => {
     const matchesCategory =
@@ -1206,26 +1339,49 @@ function VaultEditor({
               }
               style={{ ...textareaInputStyle, minHeight: '60px' }}
             />
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <label style={fieldLabelStyle}>Category:</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={fieldLabelStyle}>Category</label>
+              <button
+                type="button"
+                onClick={() => setIsCustomCategoryMode(!isCustomCategoryMode)}
+                style={linkToggleButtonStyle}
+              >
+                {isCustomCategoryMode ? 'Choose Existing' : '+ New Category'}
+              </button>
+            </div>
+            {isCustomCategoryMode ? (
+              <input
+                type="text"
+                placeholder="Custom Category Name (e.g. Pitches, Clearances)"
+                value={customCategoryInput}
+                onInput={(e) =>
+                  setCustomCategoryInput((e.target as HTMLInputElement).value)
+                }
+                style={textInputStyle}
+              />
+            ) : (
               <select
                 value={newCustomCategory}
                 onChange={(e) =>
                   setNewCustomCategory((e.target as HTMLSelectElement).value)
                 }
-                style={{ ...compactInputStyle, flex: 1 }}
+                style={{ ...compactInputStyle, width: '100%' }}
               >
-                <option value="Custom Answers">Custom Answers</option>
-                <option value="Socials & Links">Socials & Links</option>
-                <option value="Personal & Contact">Personal & Contact</option>
-                <option value="Work Authorization">Work Authorization</option>
-                <option value="Experience & Education">Experience & Education</option>
+                {availableCategories.map((categoryName) => (
+                  <option key={categoryName} value={categoryName}>
+                    {categoryName}
+                  </option>
+                ))}
               </select>
-            </div>
+            )}
             <div style={quickFillCardEditActionsRowStyle}>
               <button
                 type="button"
-                onClick={() => setShowAddCustom(false)}
+                onClick={() => {
+                  setShowAddCustom(false);
+                  setIsCustomCategoryMode(false);
+                  setCustomCategoryInput('');
+                }}
                 style={secondaryButtonStyle}
               >
                 Cancel
@@ -1268,7 +1424,7 @@ function VaultEditor({
       </div>
 
       <div style={quickFillCategoryChipsContainerStyle}>
-        {CATEGORY_FILTER_OPTIONS.map((cat) => {
+        {categoryFilterOptions.map((cat) => {
           const isSelected = selectedCategory === cat;
           return (
             <button
@@ -1291,7 +1447,9 @@ function VaultEditor({
       {filteredItems.length === 0 ? (
         <div style={{ ...quickFillCardContainerStyle, alignItems: 'center', textAlign: 'center', padding: '24px' }}>
           <p style={emptyStateTextStyle}>
-            No fields found matching "{searchQuery || selectedCategory}".
+            {visibleItems.length === 0
+              ? 'No candidate fields saved yet. Connect to Job Cruiser to sync or click "+ Add Field" above.'
+              : `No fields found matching "${searchQuery || selectedCategory}".`}
           </p>
         </div>
       ) : (
@@ -1321,6 +1479,7 @@ interface SkillsEditorProperties {
   onProfileChange: (updatedProfile: QuickFillProfile) => void;
   onConfigurationChange: (updatedConfig: ExtensionConfig) => void;
   onSaveProfile: (explicitProfile?: QuickFillProfile) => void;
+  onNotification?: (message: string, type: 'success' | 'error') => void;
 }
 
 /**
@@ -1332,10 +1491,64 @@ function SkillsEditor({
   onProfileChange,
   onConfigurationChange,
   onSaveProfile,
+  onNotification,
 }: SkillsEditorProperties): JSX.Element {
   const [newSkillText, setNewSkillText] = useState<string>('');
+  const [activeSkillIndex, setActiveSkillIndex] = useState<number>(0);
+  const [copiedSkill, setCopiedSkill] = useState<string | null>(null);
 
-  const skillsCount = (profile.skills ?? []).length;
+  const skills = profile.skills ?? [];
+  const skillsCount = skills.length;
+  const safeIndex = skillsCount > 0 ? Math.min(activeSkillIndex, skillsCount - 1) : 0;
+  const currentSkill = skills[safeIndex] ?? '';
+  const nextSkillIndex = (safeIndex + 1) % (skillsCount || 1);
+  const nextSkill = skills[nextSkillIndex] ?? '';
+
+  const handleCopyCurrentAndAdvance = () => {
+    if (!currentSkill) return;
+    void copyAndInjectAtCursor(currentSkill);
+    setCopiedSkill(currentSkill);
+    setTimeout(() => {
+      setCopiedSkill((curr) => (curr === currentSkill ? null : curr));
+    }, 1500);
+
+    const advancedIndex = (safeIndex + 1) % skillsCount;
+    setActiveSkillIndex(advancedIndex);
+
+    if (onNotification) {
+      if (skillsCount > 1) {
+        onNotification(`Copied "${currentSkill}"! Next is "${nextSkill}"`, 'success');
+      } else {
+        onNotification(`Copied "${currentSkill}"`, 'success');
+      }
+    }
+  };
+
+  const handleCopySpecificSkill = (skill: string, index: number) => {
+    void copyAndInjectAtCursor(skill);
+    setCopiedSkill(skill);
+    setActiveSkillIndex((index + 1) % skillsCount);
+    setTimeout(() => {
+      setCopiedSkill((curr) => (curr === skill ? null : curr));
+    }, 1500);
+    if (onNotification) {
+      onNotification(`Copied "${skill}"`, 'success');
+    }
+  };
+
+  const handleStepPrev = () => {
+    if (skillsCount === 0) return;
+    setActiveSkillIndex((safeIndex - 1 + skillsCount) % skillsCount);
+  };
+
+  const handleStepNext = () => {
+    if (skillsCount === 0) return;
+    setActiveSkillIndex((safeIndex + 1) % skillsCount);
+  };
+
+  const handleResetStepper = () => {
+    setActiveSkillIndex(0);
+  };
 
   const handleAddSkill = () => {
     const trimmed = newSkillText.trim();
@@ -1390,6 +1603,75 @@ function SkillsEditor({
           Save Skills
         </button>
       </div>
+
+      {skillsCount > 0 && (
+        <div style={cardContainerStyle}>
+          <div style={fieldLabelRowStyle}>
+            <label style={fieldLabelStyle}>Sequential Copier ("Copy & Next")</label>
+            <span style={skillsCountBadgeStyle}>
+              {safeIndex + 1} of {skillsCount}
+            </span>
+          </div>
+          <p style={helpTextStyle}>
+            Click button to copy current skill and advance to next for rapid pasting into job forms.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
+            <button
+              type="button"
+              onClick={handleCopyCurrentAndAdvance}
+              style={{
+                ...primaryButtonStyle,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                padding: '11px 16px',
+                fontSize: '13px',
+                fontWeight: 700,
+                backgroundColor: copiedSkill === currentSkill ? '#059669' : '#006699',
+              }}
+            >
+              {copiedSkill === currentSkill ? (
+                <IconCheck size={15} color="#FFFFFF" />
+              ) : (
+                <IconCopy size={15} />
+              )}
+              <span>
+                {copiedSkill === currentSkill
+                  ? `Copied "${currentSkill}"!`
+                  : `Copy "${currentSkill}" & Next →`}
+              </span>
+            </button>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={handleStepPrev}
+                style={secondaryButtonStyle}
+                title="Previous skill"
+              >
+                ← Prev
+              </button>
+              <button
+                type="button"
+                onClick={handleResetStepper}
+                style={secondaryButtonStyle}
+                title="Reset to first skill"
+              >
+                ↺ Reset
+              </button>
+              <button
+                type="button"
+                onClick={handleStepNext}
+                style={secondaryButtonStyle}
+                title="Skip to next skill"
+              >
+                Skip Next →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={cardContainerStyle}>
         <label style={fieldLabelStyle}>Default Injection Strategy</label>
@@ -1460,19 +1742,45 @@ function SkillsEditor({
           </p>
         ) : (
           <div style={chipsContainerStyle}>
-            {(profile.skills ?? []).map((skill) => (
-              <span key={skill} style={skillChipStyle}>
-                <span>{skill}</span>
-                <button
-                  type="button"
-                  onClick={() => handleRemoveSkill(skill)}
-                  style={removeChipButtonStyle}
-                  title="Remove skill"
+            {skills.map((skill, index) => {
+              const isSelected = index === safeIndex;
+              const isCopied = copiedSkill === skill;
+              return (
+                <span
+                  key={skill}
+                  onClick={() => handleCopySpecificSkill(skill, index)}
+                  style={{
+                    ...skillChipStyle,
+                    cursor: 'pointer',
+                    borderColor: isCopied ? '#10B981' : isSelected ? '#006699' : '#C6C6CD',
+                    backgroundColor: isCopied ? '#ECFDF5' : isSelected ? '#E8F1FF' : '#F7F9FB',
+                    color: isCopied ? '#065F46' : isSelected ? '#004B73' : '#191C1E',
+                    fontWeight: isSelected ? 700 : 500,
+                  }}
+                  title={`Click to copy "${skill}"`}
                 >
-                  ✕
-                </button>
-              </span>
-            ))}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    {isCopied ? (
+                      <IconCheck size={11} color="#059669" />
+                    ) : (
+                      <IconCopy size={11} />
+                    )}
+                    <span>{skill}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemoveSkill(skill);
+                    }}
+                    style={removeChipButtonStyle}
+                    title="Remove skill"
+                  >
+                    ✕
+                  </button>
+                </span>
+              );
+            })}
           </div>
         )}
       </div>
@@ -2140,6 +2448,22 @@ const quickFillCardValueTextStyle: JSX.CSSProperties = {
   color: '#191C1E',
   wordBreak: 'break-word',
   lineHeight: 1.4,
+};
+
+const expandToggleButtonStyle: JSX.CSSProperties = {
+  backgroundColor: '#E2E8F0',
+  border: 'none',
+  borderRadius: '4px',
+  color: '#006699',
+  fontSize: '11px',
+  fontWeight: 700,
+  padding: '2px 6px',
+  cursor: 'pointer',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '3px',
+  flexShrink: 0,
+  marginLeft: '6px',
 };
 
 const quickFillCardEditActionsRowStyle: JSX.CSSProperties = {

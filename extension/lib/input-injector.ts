@@ -44,6 +44,66 @@ export class InputInjector {
   }
 
   /**
+   * Injects text value directly at the active cursor position or selection range of an input or textarea element.
+   * Dispatches input and change events without blurring to keep the element focused and interactive.
+   *
+   * @param element - The HTMLInputElement or HTMLTextAreaElement receiving the text insertion.
+   * @param value - The text string to inject at the active cursor position.
+   */
+  public injectAtCursor(
+    element: HTMLInputElement | HTMLTextAreaElement,
+    value: string
+  ): void {
+    element.focus();
+
+    let didInsertViaCommand = false;
+    try {
+      didInsertViaCommand = document.execCommand('insertText', false, value);
+    } catch {
+      didInsertViaCommand = false;
+    }
+
+    if (!didInsertViaCommand) {
+      const selectionStart = element.selectionStart ?? element.value.length;
+      const selectionEnd = element.selectionEnd ?? element.value.length;
+      const currentValue = element.value || '';
+      const updatedValue =
+        currentValue.slice(0, selectionStart) +
+        value +
+        currentValue.slice(selectionEnd);
+
+      const isTextArea = element.tagName.toLowerCase() === 'textarea';
+      const prototype = isTextArea
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+
+      const propertyDescriptor = Object.getOwnPropertyDescriptor(
+        prototype,
+        'value'
+      );
+      const nativePropertySetter = propertyDescriptor?.set;
+
+      if (nativePropertySetter) {
+        nativePropertySetter.call(element, updatedValue);
+      } else {
+        element.value = updatedValue;
+      }
+
+      const newCursorPosition = selectionStart + value.length;
+      if (typeof element.setSelectionRange === 'function') {
+        element.setSelectionRange(newCursorPosition, newCursorPosition);
+      }
+
+      element.dispatchEvent(
+        new Event('input', { bubbles: true, composed: true })
+      );
+      element.dispatchEvent(
+        new Event('change', { bubbles: true, composed: true })
+      );
+    }
+  }
+
+  /**
    * Injects a selected option into a select dropdown element matching target value or text.
    * Supports exact case-insensitive matches followed by partial substring matches.
    *

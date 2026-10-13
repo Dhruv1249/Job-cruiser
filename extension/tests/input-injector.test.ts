@@ -133,4 +133,39 @@ describe('InputInjector', () => {
     expect(uploadedFile?.type).toBe('application/pdf');
     expect(changeEventListener).toHaveBeenCalledTimes(1);
   });
+
+  it('injects text at cursor position into input element without blurring', () => {
+    const inputElement = document.createElement('input');
+    inputElement.value = 'Hello world';
+    document.body.appendChild(inputElement);
+
+    const inputEventListener = vi.fn();
+    const changeEventListener = vi.fn();
+    inputElement.addEventListener('input', inputEventListener);
+    inputElement.addEventListener('change', changeEventListener);
+
+    inputElement.selectionStart = 5;
+    inputElement.selectionEnd = 5;
+
+    injector.injectAtCursor(inputElement, ' beautiful');
+
+    expect(inputElement.value).toBe('Hello beautiful world');
+    expect(inputEventListener).toHaveBeenCalledTimes(1);
+    expect(changeEventListener).toHaveBeenCalledTimes(1);
+    expect(inputElement.selectionStart).toBe(15);
+  });
+
+  it('replaces selected text range with injected value in textarea', () => {
+    const textareaElement = document.createElement('textarea');
+    textareaElement.value = 'Start REPLACE End';
+    document.body.appendChild(textareaElement);
+
+    textareaElement.selectionStart = 6;
+    textareaElement.selectionEnd = 13;
+
+    injector.injectAtCursor(textareaElement, 'MIDDLE');
+
+    expect(textareaElement.value).toBe('Start MIDDLE End');
+    expect(textareaElement.selectionStart).toBe(12);
+  });
 });

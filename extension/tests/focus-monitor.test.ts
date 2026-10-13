@@ -253,4 +253,28 @@ describe('FocusMonitor', () => {
     inputElement.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
     expect(overlayShowSpy).not.toHaveBeenCalled();
   });
+
+  it('shows fallback profile suggestions when focusing an unclassified form input', () => {
+    focusMonitor.start();
+
+    const inputElement = document.createElement('input');
+    inputElement.name = 'custom_opaque_question_input';
+    document.body.appendChild(inputElement);
+
+    const overlayShowSpy = vi.spyOn(overlay, 'show');
+
+    inputElement.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+
+    expect(overlayShowSpy).toHaveBeenCalledTimes(1);
+    expect(overlayShowSpy).toHaveBeenCalledWith(
+      inputElement,
+      expect.arrayContaining([
+        expect.objectContaining({
+          primaryText: 'Marie Skłodowska Curie',
+        }),
+      ])
+    );
+
+    focusMonitor.stop();
+  });
 });
