@@ -95,11 +95,35 @@ class ApiService {
     return await _storage.read(key: _tokenKey);
   }
 
-  /// Fetches authenticated user profile.
+  /// Fetches authenticated user profile and persists refreshed session token when available.
   Future<Map<String, dynamic>?> fetchProfile() async {
     try {
       final response = await _dio.get('/user/me');
-      return response.data as Map<String, dynamic>?;
+      final profileData = response.data as Map<String, dynamic>?;
+      if (profileData != null && profileData['token'] != null) {
+        await saveToken(profileData['token'] as String);
+      }
+      return profileData;
+    } on DioException catch (e) {
+      _logger.e(e.response?.data);
+      return null;
+    } catch (e) {
+      _logger.e(e);
+      return null;
+    }
+  }
+
+  /// Renews current session token with the backend and updates local storage.
+  Future<String?> refreshToken() async {
+    try {
+      final response = await _dio.post('/auth/refresh');
+      final responseData = response.data as Map<String, dynamic>?;
+      if (responseData != null && responseData['token'] != null) {
+        final renewedToken = responseData['token'] as String;
+        await saveToken(renewedToken);
+        return renewedToken;
+      }
+      return null;
     } on DioException catch (e) {
       _logger.e(e.response?.data);
       return null;

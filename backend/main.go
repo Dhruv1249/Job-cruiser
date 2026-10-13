@@ -228,6 +228,7 @@ func main() {
 	protected.Use(middleware.RequireAuth())
 	{
 		protected.GET("/user/me", authHandler.GetMe)
+		protected.POST("/auth/refresh", authHandler.RefreshToken)
 		protected.GET("/jobs", jobHandler.GetJobs)
 		protected.GET("/jobs/matched", matchedJobsHandler.GetMatchedJobs)
 		protected.GET("/jobs/match-status", matchedJobsHandler.GetMatchStatus)

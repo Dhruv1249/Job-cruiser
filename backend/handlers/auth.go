@@ -102,13 +102,11 @@ type LoginRequest struct {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 
-	// Validate the incoming JSON
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
 		return
 	}
 
-	// Query the database for the user
 	var userID string
 	var passwordHash string
 	var isMasterAdmin bool
@@ -181,7 +179,6 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 			avatar = val.(string)
 		}
 	} else {
-		// Fallback for access_token (common on Flutter Web GIS)
 		userInfoURL := "https://www.googleapis.com/oauth2/v3/userinfo"
 		httpReq, httpErr := http.NewRequestWithContext(context.Background(), "GET", userInfoURL, nil)
 		if httpErr != nil {
@@ -278,7 +275,7 @@ func (h *AuthHandler) GoogleLogin(c *gin.Context) {
 }
 
 /*
-GetMe retrieves the authenticated user's profile details.
+GetMe retrieves the authenticated user's profile details and returns a refreshed session token.
 */
 func (h *AuthHandler) GetMe(c *gin.Context) {
 	userID, exists := c.Get("user_id")
@@ -310,6 +307,12 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 		return
 	}
 
+	refreshedToken, tokenError := utils.GenerateToken(idString)
+	if tokenError != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate refreshed session token"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"id":                  idString,
 		"primary_email":       primaryEmailString,
@@ -318,5 +321,34 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 		"ai_matching_enabled": aiMatchingEnabled,
 		"is_master_admin":     isMasterAdmin,
 		"has_preferences":     hasPreferences,
+		"token":               refreshedToken,
+	})
+}
+
+/*
+RefreshToken renews the session token for the authenticated user with an extended four-month lifespan.
+*/
+func (h *AuthHandler) RefreshToken(c *gin.Context) {
+	userIDValue, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	userID, ok := userIDValue.(string)
+	if !ok || userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid user identification in session"})
+		return
+	}
+
+	refreshedToken, tokenError := utils.GenerateToken(userID)
+	if tokenError != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate refreshed session token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"token":   refreshedToken,
+		"user_id": userID,
 	})
 }
