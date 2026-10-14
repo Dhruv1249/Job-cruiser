@@ -32,7 +32,7 @@ export default defineConfig({
     ],
     browser_specific_settings: {
       gecko: {
-        id: 'jobcruiser-quickfill@local',
+        id: process.env.FIREFOX_EXTENSION_ID || 'jobcruiser-quickfill@jobcruiser.app',
         strict_min_version: '109.0',
       },
     },
