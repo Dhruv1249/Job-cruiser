@@ -1363,6 +1363,10 @@ SCORING INSTRUCTIONS & CONSTRAINTS:
    - Each candidate profile may optionally specify "Notification Criteria".
    - If the candidate profile does NOT contain "Notification Criteria" (or it is empty), set "notification_criteria_met" to true.
    - If the candidate profile DOES specify "Notification Criteria", evaluate whether this job listing satisfies all the candidate's custom criteria. Set "notification_criteria_met" to true IF AND ONLY IF the job satisfies the candidate's criteria, otherwise set to false.
+   - STRICT NEGATIVE FILTERING MANDATE:
+     * Disqualify Standalone Internships: If candidate criteria states "disqualify standalone internships without PPO" or requires direct full-time or internship with PPO, any job with employment_type="intern" or title containing "Intern" that does NOT explicitly promise a PPO (Pre-Placement Offer) or permanent full-time conversion in the text MUST have "notification_criteria_met": false. NEVER set it to true just because technical skills or match_score are high!
+     * Compensation Floor: If candidate criteria sets a compensation floor (e.g. "reject internship < 30k/month", "reject full-time < 10 LPA"): If compensation is stated anywhere in the listing and is below the threshold, "notification_criteria_met" MUST be false. If no compensation is stated in the listing, do NOT reject unless candidate explicitly requires stated compensation.
+     * Reject on Any Violation: If the job violates ANY single condition in the candidate's notification criteria, "notification_criteria_met" MUST be false.
    - INDEPENDENCE MANDATE: "notification_criteria_met" is an isolated alerting flag for push notifications only. It MUST NEVER influence, reduce, cap, or alter "match_score" or "is_matched". Evaluate "match_score" strictly and independently on skills, experience, and location compatibility regardless of whether notification criteria are met.
 
 7. SALARY & EMPLOYMENT TYPE EXTRACTION RULES:
@@ -1370,6 +1374,7 @@ SCORING INSTRUCTIONS & CONSTRAINTS:
      * Values MUST be integer numbers without formatting, currency symbols, commas, or abbreviations (e.g. 120000, 150000, 25000).
      * If Indian compensation is given in LPA (e.g. 12 LPA, 15-20 LPA), convert to full annual integer (12 LPA -> 1200000, 15-20 LPA -> salary_min: 1500000, salary_max: 2000000).
      * If a single exact number is given (e.g. "$120k/year", "₹25,000/month"), set both salary_min and salary_max to that exact integer.
+     * Extract stipends for internships carefully: Look for "Stipend: Up to ₹10,000", "₹15,000/month", "Stipend: 25k/month", etc. Set salary_min and salary_max to the integer (e.g. 10000), salary_currency to "INR", and salary_period to "monthly" or "stipend".
      * If unpaid, volunteer, equity-only, or no numerical salary is found in the JD: set "salary_min", "salary_max", "salary_currency", and "salary_period" strictly to null.
    - "salary_currency": 3-letter ISO code ("USD", "INR", "EUR", "GBP", "CAD", "SGD", etc.). Null if no salary.
    - "salary_period": "yearly", "monthly", "hourly", "weekly", or "stipend". Null if no salary.
@@ -1463,7 +1468,7 @@ func buildBatchMatchUserContent(userProfiles []UserProfileData, jobsBatch []JobS
 		criteriaPrompt := strings.TrimSpace(profile.NotificationPromptCriteria)
 		criteriaLine := ""
 		if criteriaPrompt != "" {
-			criteriaLine = fmt.Sprintf("Notification Criteria (Alerting Only, does NOT affect match score): %s\n", criteriaPrompt)
+			criteriaLine = fmt.Sprintf("CRITICAL NOTIFICATION CRITERIA (Candidate Alert Filter - MUST satisfy to set notification_criteria_met=true):\n%s\n", criteriaPrompt)
 		}
 		fmt.Fprintf(&builder, "User ID: %s\nCandidate Country: %s\nCandidate YoE: %d\nPreferred Locations: %s\nWork Model Preference: %s\nPreferred Roles: %s\n%sProfile & Resume Context:\n%s\n\n",
 			profile.UserID, candidateCountry, profile.ExperienceYears, strings.Join(profile.PreferredLocations, ", "), profile.WorkModel, strings.Join(profile.PreferredRoles, ", "), criteriaLine, combinedProfileText)
@@ -2078,16 +2083,56 @@ func notifyUserOnHighMatch(
 		return
 	}
 
-	var jobTitle, companyName string
+	var (
+		jobTitle       string
+		companyName    string
+		employmentType string
+		salaryMin      int
+		salaryMax      int
+		salaryPeriod   string
+		salaryCurrency string
+		rawDescription string
+	)
 	jobQuery := `
-		SELECT j.title, COALESCE(c.name, 'Company')
+		SELECT 
+			COALESCE(j.title, ''), 
+			COALESCE(c.name, 'Company'),
+			COALESCE(j.employment_type, ''),
+			COALESCE(j.salary_min, 0),
+			COALESCE(j.salary_max, 0),
+			COALESCE(j.salary_period, ''),
+			COALESCE(j.currency, ''),
+			COALESCE(j.raw_desc, '')
 		FROM jobs j
 		LEFT JOIN companies c ON j.company_id = c.id
 		WHERE j.id = $1;
 	`
-	_ = databasePool.QueryRow(ctx, jobQuery, jobID).Scan(&jobTitle, &companyName)
+	_ = databasePool.QueryRow(ctx, jobQuery, jobID).Scan(
+		&jobTitle,
+		&companyName,
+		&employmentType,
+		&salaryMin,
+		&salaryMax,
+		&salaryPeriod,
+		&salaryCurrency,
+		&rawDescription,
+	)
 	if jobTitle == "" {
 		jobTitle = "New Job Match"
+	}
+
+	guardrailPassed := EvaluateNotificationCriteriaGuardrails(
+		profile.NotificationPromptCriteria,
+		jobTitle,
+		employmentType,
+		salaryMin,
+		salaryMax,
+		salaryPeriod,
+		salaryCurrency,
+		rawDescription,
+	)
+	if !guardrailPassed {
+		return
 	}
 
 	notificationTitle := fmt.Sprintf("High Match Found (%d%%): %s", matchScore, jobTitle)
