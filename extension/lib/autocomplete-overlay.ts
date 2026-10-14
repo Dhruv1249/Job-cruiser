@@ -179,7 +179,13 @@ export class AutocompleteOverlay {
 
     const logoBadge = document.createElement('span');
     logoBadge.className = 'logo-badge';
-    logoBadge.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> Quick Fill`;
+    const logoSvg = parseSvgMarkup(
+      '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'
+    );
+    if (logoSvg) {
+      logoBadge.appendChild(logoSvg);
+    }
+    logoBadge.appendChild(document.createTextNode(' Quick Fill'));
     header.appendChild(logoBadge);
 
     const suggestionsList = document.createElement('div');
@@ -199,7 +205,7 @@ export class AutocompleteOverlay {
       return;
     }
 
-    this.suggestionsListContainer.innerHTML = '';
+    this.suggestionsListContainer.replaceChildren();
 
     suggestions.forEach((suggestion, index) => {
       const rowElement = document.createElement('div');
@@ -217,7 +223,10 @@ export class AutocompleteOverlay {
 
       const iconElement = document.createElement('span');
       iconElement.className = 'suggestion-icon';
-      iconElement.innerHTML = getIconSvgMarkup(suggestion.icon);
+      const iconSvg = parseSvgMarkup(getIconSvgMarkup(suggestion.icon));
+      if (iconSvg) {
+        iconElement.appendChild(iconSvg);
+      }
 
       const contentContainer = document.createElement('div');
       contentContainer.className = 'suggestion-content';
@@ -510,6 +519,19 @@ export class AutocompleteOverlay {
     `;
 
     this.shadowRoot.appendChild(styleElement);
+  }
+}
+
+/**
+ * Parses an SVG markup string into a standalone SVG DOM element without using innerHTML.
+ */
+function parseSvgMarkup(svgMarkup: string): Element | null {
+  try {
+    const parser = new DOMParser();
+    const documentNode = parser.parseFromString(svgMarkup, 'image/svg+xml');
+    return documentNode.documentElement;
+  } catch {
+    return null;
   }
 }
 

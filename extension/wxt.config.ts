@@ -33,7 +33,7 @@ export default defineConfig({
     browser_specific_settings: {
       gecko: {
         id: process.env.FIREFOX_EXTENSION_ID || 'jobcruiser-quickfill@jobcruiser.app',
-        strict_min_version: '109.0',
+        strict_min_version: '140.0',
         data_collection_permissions: {
           required: ['none'],
         },
