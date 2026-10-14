@@ -201,3 +201,44 @@ func TestMCPClientUnauthorizedError(t *testing.T) {
 		t.Fatalf("expected authorization error, got nil")
 	}
 }
+
+func TestMCPClientGetUserProfileSuccess(testingContext *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var requestBody map[string]interface{}
+		json.NewDecoder(request.Body).Decode(&requestBody)
+
+		if requestBody["tool"] != "get_user_profile" {
+			http.Error(writer, "invalid tool", http.StatusBadRequest)
+			return
+		}
+
+		args := requestBody["arguments"].(map[string]interface{})
+		if args["projectName"] != "job_applications" || args["format"] != "markdown" || args["section"] != "skills" {
+			http.Error(writer, "invalid args", http.StatusBadRequest)
+			return
+		}
+
+		responsePayload := map[string]interface{}{
+			"success": true,
+			"result": map[string]interface{}{
+				"projectName": "job_applications",
+				"format":      "markdown",
+				"section":     "skills",
+				"content":     "Go, TypeScript, PostgreSQL",
+			},
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(writer).Encode(responsePayload)
+	}))
+	defer mockServer.Close()
+
+	client := services.NewMCPClient(mockServer.URL, "test-token")
+	profileResult, err := client.GetUserProfile(context.Background(), "job_applications", "markdown", "skills")
+	if err != nil {
+		testingContext.Fatalf("expected no error, got: %v", err)
+	}
+	if profileResult["format"] != "markdown" || profileResult["content"] != "Go, TypeScript, PostgreSQL" {
+		testingContext.Fatalf("unexpected profile result: %+v", profileResult)
+	}
+}
+

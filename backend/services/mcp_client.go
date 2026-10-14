@@ -222,6 +222,18 @@ func (client *MCPClient) WriteProjectFile(ctx context.Context, projectName strin
 	return err
 }
 
+/*
+GetUserProfile retrieves candidate profile experience bank or structured JSON from open-overleaf MCP.
+*/
+func (client *MCPClient) GetUserProfile(ctx context.Context, projectName string, format string, section string) (map[string]interface{}, error) {
+	arguments := map[string]interface{}{
+		"projectName": projectName,
+		"format":      format,
+		"section":     section,
+	}
+	return client.executeTool(ctx, "get_user_profile", arguments)
+}
+
 // DeleteFile deletes a file or directory inside an open-overleaf LaTeX project.
 func (client *MCPClient) DeleteFile(ctx context.Context, projectName string, filePath string) error {
 	arguments := map[string]interface{}{
