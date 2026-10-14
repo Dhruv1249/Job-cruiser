@@ -29,7 +29,6 @@ from config import (
 )
 
 from jobspy import scrape_jobs
-from jobspy.direct_careers import load_career_pages, DirectCareers
 from jobspy.model import DescriptionFormat, Site
 
 IS_VERBOSE = (
@@ -192,12 +191,17 @@ SINGLE_CALL_FEED_SITES = [
 KEYWORD_SEARCHABLE_INDIA_SITES = [
     Site.INDEED,
     Site.LINKEDIN,
+    Site.AMAZON,
+    Site.GOOGLE_CAREERS,
+    Site.ORACLE_CLOUD,
 ]
 
 KEYWORD_SEARCHABLE_REMOTE_SITES = [
     Site.INDEED,
     Site.DICE,
     Site.AMAZON,
+    Site.GOOGLE_CAREERS,
+    Site.ORACLE_CLOUD,
 ]
 
 PROXY_REQUIRED_SITES = {
@@ -1355,10 +1359,6 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                             "hours_old": 24,
                             "verbose": 2 if IS_VERBOSE else 1,
                         }
-                        if target_site == Site.DIRECT_CAREERS:
-                            scraping_arguments["results_wanted"] = 5000
-                            scraping_arguments.pop("hours_old", None)
-
                         if target_location:
                             scraping_arguments["location"] = target_location
                         if is_remote_search:
@@ -1446,25 +1446,8 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                             )
                         )
             
-            direct_career_futures = []
-            if target_platform is None or target_platform == Site.DIRECT_CAREERS.value:
-                all_direct_pages = load_career_pages()
-                if "--test" in sys.argv:
-                    all_direct_pages = all_direct_pages[:3]
-                shared_dc_scraper = DirectCareers()
-                for dc_company, dc_url, _ in all_direct_pages:
-                    direct_career_futures.append(
-                        primary_executor.submit(
-                            process_direct_career_company,
-                            dc_company,
-                            dc_url,
-                            shared_dc_scraper,
-                            run_identifier,
-                        )
-                    )
-
             logger.info(
-                f"[orchestrator] Total futures submitted: {len(company_futures) + len(board_futures) + len(direct_career_futures)}"
+                f"[orchestrator] Total futures submitted: {len(company_futures) + len(board_futures)}"
             )
 
             for completed_future in as_completed(company_futures):
@@ -1487,17 +1470,6 @@ def run_orchestration(target_platform: str | None = None) -> dict:
                     enrich_linkedin_descriptions(cooldown_seconds=5, max_jobs=None, since_minutes=1440, max_workers=None)
                 except Exception as enrichment_err:
                     logger.error(f"[enrichment] Enrichment pass failed: {enrichment_err}")
-
-            for completed_future in as_completed(direct_career_futures):
-                execution_result = completed_future.result()
-                run_manifest.append(
-                    {
-                        "company": execution_result["company"],
-                        "platform": execution_result["platform"],
-                        "job_count": len(execution_result.get("jobs", [])),
-                        "status": execution_result["status"],
-                    }
-                )
 
             if discovery_future is not None:
                 try:

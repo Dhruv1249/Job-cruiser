@@ -378,7 +378,6 @@ class TestIngestPipelineEndToEnd(unittest.TestCase):
         mock_start_run.return_value = None
 
         with patch("scrape_all.fetch_ats_slugs", return_value={}), \
-             patch("scrape_all.load_career_pages", return_value=[]), \
              patch("scrape_all.finish_run") as mock_finish:
 
             from scrape_all import run_orchestration
