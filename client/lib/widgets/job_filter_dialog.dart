@@ -75,6 +75,7 @@ class _JobFilterDialogState extends State<JobFilterDialog> {
   late String _viewMode;
   late String _workModel;
   late String _applicationStatus;
+  late String _source;
   late String _sortBy;
   late TextEditingController _customTimeController;
 
@@ -92,6 +93,7 @@ class _JobFilterDialogState extends State<JobFilterDialog> {
     _viewMode = initial.viewMode;
     _workModel = initial.workModel;
     _applicationStatus = initial.applicationStatus;
+    _source = initial.source;
     _sortBy = initial.sortBy;
 
     final isPreset = _recencyPresets.contains(_recencyHours);
@@ -116,6 +118,7 @@ class _JobFilterDialogState extends State<JobFilterDialog> {
       _viewMode = 'all';
       _workModel = 'all';
       _applicationStatus = 'all';
+      _source = 'all';
       _sortBy = 'score_desc';
       _customTimeController.clear();
     });
@@ -148,11 +151,13 @@ class _JobFilterDialogState extends State<JobFilterDialog> {
       viewMode: _viewMode,
       workModel: _workModel,
       applicationStatus: _applicationStatus,
+      source: _source,
       sortBy: _sortBy,
     );
 
     widget.onApply(updated);
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -191,10 +196,15 @@ class _JobFilterDialogState extends State<JobFilterDialog> {
                 const SizedBox(height: 8),
                 _buildViewStatusSelector(),
                 const SizedBox(height: 20),
+                _buildSectionTitle('Job Source / Portal'),
+                const SizedBox(height: 8),
+                _buildSourceSelector(),
+                const SizedBox(height: 20),
                 _buildSectionTitle('Pipeline CRM Status'),
                 const SizedBox(height: 8),
                 _buildApplicationStatusSelector(),
                 const SizedBox(height: 12),
+
               ],
             ),
           ),
@@ -569,7 +579,53 @@ class _JobFilterDialogState extends State<JobFilterDialog> {
     );
   }
 
+  Widget _buildSourceSelector() {
+    final sources = [
+      {'key': 'all', 'label': 'All Sources'},
+      {'key': 'linkedin', 'label': 'LinkedIn'},
+      {'key': 'indeed', 'label': 'Indeed'},
+      {'key': 'oracle_cloud', 'label': 'Oracle Cloud (JPMC)'},
+      {'key': 'google_careers', 'label': 'Google Careers'},
+      {'key': 'amazon', 'label': 'Amazon'},
+      {'key': 'greenhouse', 'label': 'Greenhouse'},
+      {'key': 'lever', 'label': 'Lever'},
+      {'key': 'ashby', 'label': 'Ashby'},
+      {'key': 'dice', 'label': 'Dice'},
+      {'key': 'hn_hiring', 'label': 'Hacker News'},
+      {'key': 'remoteok', 'label': 'RemoteOK'},
+      {'key': 'weworkremotely', 'label': 'WeWorkRemotely'},
+      {'key': 'yc_startup', 'label': 'YC Startups'},
+      {'key': 'smartrecruiters', 'label': 'SmartRecruiters'},
+      {'key': 'themuse', 'label': 'The Muse'},
+      {'key': 'himalayas', 'label': 'Himalayas'},
+    ];
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: sources.map((s) {
+        final isSelected = _source == s['key'];
+        return ChoiceChip(
+          label: Text(s['label']!),
+          selected: isSelected,
+          selectedColor: AppColors.primary,
+          labelStyle: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: isSelected ? Colors.white : AppColors.onSurfaceVariant,
+          ),
+          onSelected: (selected) {
+            if (selected) {
+              setState(() => _source = s['key']!);
+            }
+          },
+        );
+      }).toList(),
+    );
+  }
+
   Widget _buildFooterActions() {
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       child: Row(

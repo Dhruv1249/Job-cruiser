@@ -200,11 +200,23 @@ class ApiService {
   }
 
   /// Fetches raw scraped jobs from the backend.
-  Future<List<MatchedJob>> fetchRawJobs({int limit = 50, int page = 1}) async {
+  Future<List<MatchedJob>> fetchRawJobs({
+    int limit = 50,
+    int page = 1,
+    String searchQuery = '',
+    String source = 'all',
+  }) async {
     try {
+      final queryParams = <String, dynamic>{'limit': limit, 'page': page};
+      if (searchQuery.trim().isNotEmpty) {
+        queryParams['search'] = searchQuery.trim();
+      }
+      if (source != 'all' && source.trim().isNotEmpty) {
+        queryParams['source'] = source.trim();
+      }
       final response = await _dio.get(
         '/jobs',
-        queryParameters: {'limit': limit, 'page': page},
+        queryParameters: queryParams,
       );
       final data = response.data;
       if (data != null && data['data'] is List) {
@@ -236,6 +248,7 @@ class ApiService {
     String sortBy = 'score_desc',
     String applicationStatus = 'all',
     String searchQuery = '',
+    String source = 'all',
     int limit = 50,
     int offset = 0,
   }) async {
@@ -263,11 +276,15 @@ class ApiService {
       if (searchQuery.trim().isNotEmpty) {
         queryParams['search'] = searchQuery.trim();
       }
+      if (source != 'all' && source.trim().isNotEmpty) {
+        queryParams['source'] = source.trim();
+      }
 
       final response = await _dio.get(
         '/jobs/matched',
         queryParameters: queryParams,
       );
+
 
       final data = response.data;
       if (data != null && data['jobs'] is List) {

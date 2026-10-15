@@ -286,9 +286,16 @@ func insertSingleJob(ctx context.Context, tx pgx.Tx, job IngestJobPayload, compa
 	}
 
 	if inferredDomain := utils.ExtractCompanyDomain(job.AbsoluteURL); inferredDomain != "" {
-		updateDomainQuery := `UPDATE companies SET domain = $1 WHERE id = $2 AND (domain IS NULL OR domain = '')`
+		updateDomainQuery := `
+			UPDATE companies 
+			SET domain = $1 
+			WHERE id = $2 
+			  AND (domain IS NULL OR domain = '')
+			  AND NOT EXISTS (SELECT 1 FROM companies WHERE domain = $1)
+		`
 		_, _ = tx.Exec(ctx, updateDomainQuery, inferredDomain, companyID)
 	}
+
 
 	loc := job.Location
 	isRemote := strings.Contains(strings.ToLower(loc), "remote") ||

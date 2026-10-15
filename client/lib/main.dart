@@ -666,6 +666,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       sortBy: _filterState.sortBy,
       applicationStatus: _filterState.applicationStatus,
       searchQuery: _filterState.searchQuery,
+      source: _filterState.source,
       offset: 0,
       limit: 50,
     );
@@ -715,9 +716,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       sortBy: _filterState.sortBy,
       applicationStatus: _filterState.applicationStatus,
       searchQuery: _filterState.searchQuery,
+      source: _filterState.source,
       offset: nextOffset,
       limit: 50,
     );
+
 
     if (!mounted) return;
 

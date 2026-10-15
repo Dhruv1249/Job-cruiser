@@ -112,10 +112,13 @@ class _JobFilterBarState extends State<JobFilterBar> {
                     _buildRecencyPresetChip(isCustomRecency),
                     const SizedBox(width: 6),
                     _buildViewStatusChip(),
+                    const SizedBox(width: 6),
+                    _buildSourceChip(),
                     if (!widget.filterState.isDefault) ...[
                       const SizedBox(width: 8),
                       _buildClearAllChip(),
                     ],
+
                   ],
                 ),
               ),
@@ -565,7 +568,98 @@ class _JobFilterBarState extends State<JobFilterBar> {
     );
   }
 
+  Widget _buildSourceChip() {
+    final isSourceActive = widget.filterState.source != 'all' && widget.filterState.source.isNotEmpty;
+    final Map<String, String> sourceLabels = {
+      'all': 'All Sources',
+      'linkedin': 'LinkedIn',
+      'indeed': 'Indeed',
+      'oracle_cloud': 'Oracle / JPMC',
+      'google_careers': 'Google',
+      'amazon': 'Amazon',
+      'greenhouse': 'Greenhouse',
+      'lever': 'Lever',
+      'ashby': 'Ashby',
+      'dice': 'Dice',
+      'hn_hiring': 'Hacker News',
+      'remoteok': 'RemoteOK',
+      'weworkremotely': 'WeWorkRemotely',
+      'yc_startup': 'YC Startups',
+      'smartrecruiters': 'SmartRecruiters',
+      'themuse': 'The Muse',
+      'himalayas': 'Himalayas',
+    };
+
+    final displayLabel = sourceLabels[widget.filterState.source.toLowerCase()] ??
+        (widget.filterState.source == 'all' ? 'All Sources' : widget.filterState.source);
+
+    return PopupMenuButton<String>(
+      tooltip: 'Filter by job source',
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      onSelected: (selectedSource) {
+        if (selectedSource == 'custom') {
+          widget.onOpenFilterDialog();
+        } else {
+          widget.onFilterChanged(widget.filterState.copyWith(source: selectedSource));
+        }
+      },
+      itemBuilder: (context) => const [
+        PopupMenuItem(value: 'all', child: Text('All Sources')),
+        PopupMenuDivider(),
+        PopupMenuItem(value: 'linkedin', child: Text('LinkedIn')),
+        PopupMenuItem(value: 'indeed', child: Text('Indeed')),
+        PopupMenuItem(value: 'oracle_cloud', child: Text('Oracle Cloud (JPMC)')),
+        PopupMenuItem(value: 'google_careers', child: Text('Google Careers')),
+        PopupMenuItem(value: 'amazon', child: Text('Amazon')),
+        PopupMenuItem(value: 'greenhouse', child: Text('Greenhouse')),
+        PopupMenuItem(value: 'lever', child: Text('Lever')),
+        PopupMenuItem(value: 'ashby', child: Text('Ashby')),
+        PopupMenuItem(value: 'dice', child: Text('Dice')),
+        PopupMenuItem(value: 'hn_hiring', child: Text('Hacker News')),
+        PopupMenuItem(value: 'remoteok', child: Text('RemoteOK')),
+        PopupMenuItem(value: 'weworkremotely', child: Text('WeWorkRemotely')),
+        PopupMenuItem(value: 'yc_startup', child: Text('YC Startups')),
+        PopupMenuItem(value: 'smartrecruiters', child: Text('SmartRecruiters')),
+        PopupMenuItem(value: 'themuse', child: Text('The Muse')),
+        PopupMenuItem(value: 'himalayas', child: Text('Himalayas')),
+        PopupMenuDivider(),
+        PopupMenuItem(value: 'custom', child: Text('More Filters...')),
+      ],
+      child: Container(
+        height: 32,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: isSourceActive ? AppColors.primary : AppColors.surfaceContainerLowest,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSourceActive ? AppColors.primary : AppColors.outlineVariant,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              displayLabel,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: isSourceActive ? Colors.white : AppColors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Icon(
+              Icons.arrow_drop_down,
+              size: 16,
+              color: isSourceActive ? Colors.white : AppColors.onSurfaceVariant,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildClearAllChip() {
+
     return ActionChip(
       avatar: const Icon(Icons.close, size: 14, color: AppColors.error),
       label: const Text('Reset'),

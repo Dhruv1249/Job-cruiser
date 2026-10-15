@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,10 +18,14 @@ type JobHandler struct {
 	DB *pgxpool.Pool
 }
 
-// GetJobs fetches the latest scraped jobs from the database
+/*
+GetJobs fetches scraped jobs from the database supporting pagination, search query, and source filtering.
+*/
 func (h *JobHandler) GetJobs(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	searchQuery := strings.TrimSpace(c.DefaultQuery("search", ""))
+	sourceParam := strings.TrimSpace(c.DefaultQuery("source", "all"))
 
 	if limit > 100 {
 		limit = 100
@@ -30,19 +36,56 @@ func (h *JobHandler) GetJobs(c *gin.Context) {
 
 	offset := (page - 1) * limit
 
-	query := `
+	var conditions []string
+	var queryArguments []interface{}
+
+	conditions = append(conditions, "j.scraped_at >= NOW() - INTERVAL '14 days'")
+
+	if sourceParam != "all" && sourceParam != "" {
+		sourceTokens := strings.Split(sourceParam, ",")
+		var sourceClauses []string
+		for _, token := range sourceTokens {
+			cleanedSource := strings.ToLower(strings.TrimSpace(token))
+			if cleanedSource != "" {
+				queryArguments = append(queryArguments, cleanedSource)
+				sourceClauses = append(sourceClauses, fmt.Sprintf("LOWER(j.source) = $%d", len(queryArguments)))
+			}
+		}
+		if len(sourceClauses) > 0 {
+			conditions = append(conditions, "("+strings.Join(sourceClauses, " OR ")+")")
+		}
+	}
+
+	if searchQuery != "" {
+		queryArguments = append(queryArguments, "%"+searchQuery+"%")
+		searchIndex := len(queryArguments)
+		conditions = append(conditions, fmt.Sprintf(
+			"(j.title ILIKE $%d OR COALESCE(comp.name, '') ILIKE $%d OR COALESCE(j.location, '') ILIKE $%d OR COALESCE(j.summary, '') ILIKE $%d OR COALESCE(j.raw_desc, '') ILIKE $%d OR COALESCE(j.tags::text, '') ILIKE $%d)",
+			searchIndex, searchIndex, searchIndex, searchIndex, searchIndex, searchIndex,
+		))
+	}
+
+	whereClause := "WHERE " + strings.Join(conditions, " AND ")
+
+	queryArguments = append(queryArguments, limit)
+	limitIndex := len(queryArguments)
+	queryArguments = append(queryArguments, offset)
+	offsetIndex := len(queryArguments)
+
+	query := fmt.Sprintf(`
 		SELECT j.id, j.company_id, COALESCE(comp.name, ''), j.title, j.location, j.salary_min, j.salary_max, j.currency, 
 		       j.salary_period, COALESCE(j.employment_type, j.job_type),
 		       j.experience_required, j.job_type, j.is_easy_apply, j.is_remote, j.source, 
 		       j.url, j.posted_date, j.tags, COALESCE(j.summary, ''), COALESCE(j.raw_desc, ''), j.scraped_at 
 		FROM jobs j
 		LEFT JOIN companies comp ON j.company_id = comp.id
-		WHERE j.scraped_at >= NOW() - INTERVAL '14 days'
+		%s
 		ORDER BY j.scraped_at DESC 
-		LIMIT $1 OFFSET $2;
-	`
+		LIMIT $%d OFFSET $%d;
+	`, whereClause, limitIndex, offsetIndex)
 
-	rows, err := h.DB.Query(context.Background(), query, limit, offset)
+	rows, err := h.DB.Query(context.Background(), query, queryArguments...)
+
 	if err != nil {
 		log.Printf("DATABASE ERROR IN GETJOBS: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch jobs"})

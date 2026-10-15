@@ -15,6 +15,7 @@ class JobFilterState {
     this.applicationStatus = 'all',
     this.sortBy = 'score_desc',
     this.searchQuery = '',
+    this.source = 'all',
   }) : recencyHours = recencyHours ?? (recencyDays != null ? recencyDays * 24 : null);
 
   static const String storageKey = 'jobcruiser_filter_state_v1';
@@ -28,6 +29,7 @@ class JobFilterState {
   final String applicationStatus;
   final String sortBy;
   final String searchQuery;
+  final String source;
 
   /// Returns legacy days count calculated from hours.
   int? get recencyDays => recencyHours != null ? (recencyHours! / 24).round() : null;
@@ -42,7 +44,8 @@ class JobFilterState {
         workModel == 'all' &&
         applicationStatus == 'all' &&
         sortBy == 'score_desc' &&
-        searchQuery.isEmpty;
+        searchQuery.isEmpty &&
+        source == 'all';
   }
 
   /// Calculates the number of non-default filter settings currently active.
@@ -56,6 +59,7 @@ class JobFilterState {
     if (applicationStatus != 'all') count++;
     if (sortBy != 'score_desc') count++;
     if (searchQuery.trim().isNotEmpty) count++;
+    if (source != 'all') count++;
     return count;
   }
 
@@ -76,6 +80,7 @@ class JobFilterState {
     String? applicationStatus,
     String? sortBy,
     String? searchQuery,
+    String? source,
   }) {
     int? resolvedHours;
     if (recencyHours != null) {
@@ -97,6 +102,7 @@ class JobFilterState {
       applicationStatus: applicationStatus ?? this.applicationStatus,
       sortBy: sortBy ?? this.sortBy,
       searchQuery: searchQuery ?? this.searchQuery,
+      source: source ?? this.source,
     );
   }
 
@@ -113,6 +119,7 @@ class JobFilterState {
       'application_status': applicationStatus,
       'sort_by': sortBy,
       'search_query': searchQuery,
+      'source': source,
     };
   }
 
@@ -136,8 +143,10 @@ class JobFilterState {
       applicationStatus: json['application_status'] as String? ?? 'all',
       sortBy: json['sort_by'] as String? ?? 'score_desc',
       searchQuery: json['search_query'] as String? ?? '',
+      source: json['source'] as String? ?? 'all',
     );
   }
+
 
   /// Loads saved filter preferences from persistent local storage.
   static Future<JobFilterState> loadFromStorage() async {
@@ -206,6 +215,17 @@ class JobFilterState {
       }
     }
 
+    if (source != 'all' && source.trim().isNotEmpty) {
+      final allowedSources = source
+          .split(',')
+          .map((s) => s.trim().toLowerCase())
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (!allowedSources.contains(job.source.toLowerCase())) {
+        return false;
+      }
+    }
+
     if (searchQuery.trim().isNotEmpty) {
       final query = searchQuery.trim().toLowerCase();
       final titleMatch = job.title.toLowerCase().contains(query);
@@ -213,6 +233,7 @@ class JobFilterState {
       final locationMatch = job.location.toLowerCase().contains(query);
       final summaryMatch = job.summary.toLowerCase().contains(query);
       final reasoningMatch = job.matchReasoning.toLowerCase().contains(query);
+      final jdMatch = job.rawDescription.toLowerCase().contains(query);
       final techMatch = job.techStack.any(
         (tech) => tech.toLowerCase().contains(query),
       );
@@ -221,10 +242,12 @@ class JobFilterState {
           !locationMatch &&
           !summaryMatch &&
           !reasoningMatch &&
-          !techMatch) {
+          !techMatch &&
+          !jdMatch) {
         return false;
       }
     }
+
 
     return true;
   }

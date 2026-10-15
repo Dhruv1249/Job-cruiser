@@ -171,7 +171,7 @@ void main() {
       expect(viewedOnly.matchesJob(unmatchedJob), isTrue);
     });
 
-    test('filters by search query across multiple fields', () {
+    test('filters by search query across multiple fields including JD', () {
       const titleSearch = JobFilterState(searchQuery: 'backend');
       expect(titleSearch.matchesJob(highMatchedJob), isTrue);
       expect(titleSearch.matchesJob(unmatchedJob), isFalse);
@@ -183,7 +183,26 @@ void main() {
       const techSearch = JobFilterState(searchQuery: 'docker');
       expect(techSearch.matchesJob(highMatchedJob), isTrue);
       expect(techSearch.matchesJob(unmatchedJob), isFalse);
+
+      const jdSearch = JobFilterState(searchQuery: 'microservices');
+      expect(jdSearch.matchesJob(highMatchedJob), isTrue);
+      expect(jdSearch.matchesJob(unmatchedJob), isFalse);
     });
+
+    test('filters by source correctly', () {
+      const greenhouseFilter = JobFilterState(source: 'greenhouse');
+      expect(greenhouseFilter.matchesJob(highMatchedJob), isTrue);
+      expect(greenhouseFilter.matchesJob(unmatchedJob), isFalse);
+
+      const leverFilter = JobFilterState(source: 'lever');
+      expect(leverFilter.matchesJob(highMatchedJob), isFalse);
+      expect(leverFilter.matchesJob(unmatchedJob), isTrue);
+
+      const allSourceFilter = JobFilterState(source: 'all');
+      expect(allSourceFilter.matchesJob(highMatchedJob), isTrue);
+      expect(allSourceFilter.matchesJob(unmatchedJob), isTrue);
+    });
+
 
     test('filters by application status correctly', () {
       const unappliedFilter = JobFilterState(applicationStatus: 'unapplied');

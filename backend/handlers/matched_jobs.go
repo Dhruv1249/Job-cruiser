@@ -156,14 +156,31 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 		conditions = append(conditions, fmt.Sprintf("app.status = $%d", len(args)))
 	}
 
+	sourceParam := strings.TrimSpace(c.DefaultQuery("source", "all"))
+	if sourceParam != "all" && sourceParam != "" {
+		sourceTokens := strings.Split(sourceParam, ",")
+		var sourceConditions []string
+		for _, token := range sourceTokens {
+			cleanedSource := strings.ToLower(strings.TrimSpace(token))
+			if cleanedSource != "" {
+				args = append(args, cleanedSource)
+				sourceConditions = append(sourceConditions, fmt.Sprintf("LOWER(j.source) = $%d", len(args)))
+			}
+		}
+		if len(sourceConditions) > 0 {
+			conditions = append(conditions, "("+strings.Join(sourceConditions, " OR ")+")")
+		}
+	}
+
 	if searchQuery != "" {
 		args = append(args, "%"+searchQuery+"%")
 		searchParamIndex := len(args)
 		conditions = append(conditions, fmt.Sprintf(
-			"(j.title ILIKE $%d OR COALESCE(comp.name, '') ILIKE $%d OR COALESCE(j.location, '') ILIKE $%d OR COALESCE(j.summary, '') ILIKE $%d)",
-			searchParamIndex, searchParamIndex, searchParamIndex, searchParamIndex,
+			"(j.title ILIKE $%d OR COALESCE(comp.name, '') ILIKE $%d OR COALESCE(j.location, '') ILIKE $%d OR COALESCE(j.summary, '') ILIKE $%d OR COALESCE(j.raw_desc, '') ILIKE $%d OR COALESCE(j.tags::text, '') ILIKE $%d)",
+			searchParamIndex, searchParamIndex, searchParamIndex, searchParamIndex, searchParamIndex, searchParamIndex,
 		))
 	}
+
 
 	whereClause := ""
 	if len(conditions) > 0 {
