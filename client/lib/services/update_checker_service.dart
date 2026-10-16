@@ -31,7 +31,7 @@ class UpdateCheckerService {
   UpdateCheckerService({Dio? dio}) : _dio = dio ?? Dio();
 
   static const String _releasesApiUrl =
-      'https://api.github.com/repos/Dhruv1249/Job-cruiser/releases/latest';
+      'https://api.github.com/repos/Dhruv1249/Job-cruiser/releases?per_page=20';
 
   static const String _apkAssetPattern = 'JobCruiser-';
 
@@ -46,7 +46,7 @@ class UpdateCheckerService {
       final installedVersion = packageInfo.version;
       final installedBuildNumber = int.tryParse(packageInfo.buildNumber) ?? 0;
 
-      final response = await _dio.get<Map<String, dynamic>>(
+      final response = await _dio.get<dynamic>(
         _releasesApiUrl,
         options: Options(
           headers: {'Accept': 'application/vnd.github+json'},
@@ -58,33 +58,80 @@ class UpdateCheckerService {
         return null;
       }
 
-      final releaseData = response.data!;
-      final tagName = releaseData['tag_name'] as String? ?? '';
-      final latestVersionName = _extractVersionName(tagName);
-      final latestBuildNumber = _extractBuildNumber(tagName);
+      final dynamic responsePayload = response.data;
+      final List<Map<String, dynamic>> releasesList = [];
+      if (responsePayload is List) {
+        for (final item in responsePayload) {
+          if (item is Map<String, dynamic>) {
+            releasesList.add(item);
+          }
+        }
+      } else if (responsePayload is Map<String, dynamic>) {
+        releasesList.add(responsePayload);
+      }
 
-      final hasNewerVersion = isVersionNewer(latestVersionName, installedVersion) ||
-          (isVersionEqual(latestVersionName, installedVersion) &&
-              latestBuildNumber > installedBuildNumber);
-
-      if (!hasNewerVersion) {
+      if (releasesList.isEmpty) {
         return null;
       }
 
-      final apkDownloadUrl = _extractApkDownloadUrl(releaseData);
-      if (apkDownloadUrl.isEmpty) {
+      Map<String, dynamic>? selectedReleaseData;
+      String selectedVersionName = '';
+      int selectedBuildNumber = 0;
+      String selectedApkUrl = '';
+
+      for (final release in releasesList) {
+        final tagName = release['tag_name'] as String? ?? '';
+        if (tagName.startsWith('extension-')) {
+          continue;
+        }
+
+        final apkUrl = _extractApkDownloadUrl(release);
+        if (apkUrl.isEmpty) {
+          continue;
+        }
+
+        final versionName = _extractVersionName(tagName);
+        final buildNumber = _extractBuildNumber(tagName);
+
+        final isCandidateNewer = isVersionNewer(versionName, installedVersion) ||
+            (isVersionEqual(versionName, installedVersion) &&
+                buildNumber > installedBuildNumber);
+
+        if (!isCandidateNewer) {
+          continue;
+        }
+
+        if (selectedReleaseData == null) {
+          selectedReleaseData = release;
+          selectedVersionName = versionName;
+          selectedBuildNumber = buildNumber;
+          selectedApkUrl = apkUrl;
+        } else {
+          final isNewerThanSelected = isVersionNewer(versionName, selectedVersionName) ||
+              (isVersionEqual(versionName, selectedVersionName) &&
+                  buildNumber > selectedBuildNumber);
+          if (isNewerThanSelected) {
+            selectedReleaseData = release;
+            selectedVersionName = versionName;
+            selectedBuildNumber = buildNumber;
+            selectedApkUrl = apkUrl;
+          }
+        }
+      }
+
+      if (selectedReleaseData == null) {
         return null;
       }
 
-      final releaseBody = releaseData['body'] as String? ?? '';
+      final releaseBody = selectedReleaseData['body'] as String? ?? '';
       final releaseNotes = _extractChangelog(releaseBody);
 
       return PendingUpdate(
-        versionName: latestVersionName,
+        versionName: selectedVersionName,
         releaseNotes: releaseNotes,
-        downloadUrl: apkDownloadUrl,
-        tagName: tagName,
-        latestBuildNumber: latestBuildNumber,
+        downloadUrl: selectedApkUrl,
+        tagName: selectedReleaseData['tag_name'] as String? ?? '',
+        latestBuildNumber: selectedBuildNumber,
       );
     } catch (_) {
       return null;

@@ -22,6 +22,7 @@ void main() {
       );
 
       expect(find.text('All Filters'), findsOneWidget);
+      expect(find.text('All Sources'), findsOneWidget);
       expect(find.text('Sort: Score ↓'), findsOneWidget);
       expect(find.text('All Jobs'), findsOneWidget);
       expect(find.text('All Scores'), findsOneWidget);
@@ -29,6 +30,39 @@ void main() {
       await tester.tap(find.text('All Filters'));
       await tester.pump();
       expect(dialogOpened, isTrue);
+    });
+
+    testWidgets('allows selecting a source directly from the starting bar without opening filter dialog', (tester) async {
+      const defaultState = JobFilterState();
+      JobFilterState? updatedState;
+      var dialogOpened = false;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: JobFilterBar(
+              filterState: defaultState,
+              onFilterChanged: (state) => updatedState = state,
+              onOpenFilterDialog: () => dialogOpened = true,
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('All Sources'), findsOneWidget);
+      await tester.tap(find.text('All Sources'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('LinkedIn'), findsOneWidget);
+      expect(find.text('Indeed'), findsOneWidget);
+      expect(find.text('Google Careers'), findsOneWidget);
+
+      await tester.tap(find.text('LinkedIn'));
+      await tester.pumpAndSettle();
+
+      expect(updatedState, isNotNull);
+      expect(updatedState!.source, equals('linkedin'));
+      expect(dialogOpened, isFalse);
     });
 
     testWidgets('renders active count and reset chip when filter is modified', (tester) async {

@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_app/services/update_checker_service.dart';
 
+import 'package:package_info_plus/package_info_plus.dart';
+
 Map<String, dynamic> _buildFakeRelease({
   required String tagName,
   String apkAssetName = '',
@@ -25,7 +27,7 @@ Map<String, dynamic> _buildFakeRelease({
 class _FakeDio extends DioMixin implements Dio {
   _FakeDio({required this.fakeResponse, this.throwError = false});
 
-  final Map<String, dynamic> fakeResponse;
+  final dynamic fakeResponse;
   final bool throwError;
 
   @override
@@ -81,8 +83,18 @@ void main() {
   });
 
   group('UpdateCheckerService API responses', () {
+    setUp(() {
+      PackageInfo.setMockInitialValues(
+        appName: 'Job Cruiser',
+        packageName: 'com.jobcruiser.app',
+        version: '1.0.0',
+        buildNumber: '1',
+        buildSignature: '',
+      );
+    });
+
     test('returns null when network request throws', () async {
-      final testService = UpdateCheckerService(dio: _FakeDio(fakeResponse: {}, throwError: true));
+      final testService = UpdateCheckerService(dio: _FakeDio(fakeResponse: <String, dynamic>{}, throwError: true));
       final update = await testService.checkForUpdate();
       expect(update, isNull);
     });
@@ -92,6 +104,33 @@ void main() {
       final testService = UpdateCheckerService(dio: _FakeDio(fakeResponse: fakeRelease));
       final update = await testService.checkForUpdate();
       expect(update, isNull);
+    });
+
+    test('bypasses extension releases and finds newest client APK release', () async {
+      final mockReleasesList = [
+        {
+          'tag_name': 'extension-v0.1.2',
+          'body': 'Extension build',
+          'assets': [
+            {
+              'name': 'jobcruiser-quickfill-0.1.2-chrome.zip',
+              'browser_download_url': 'https://example.com/ext.zip',
+            }
+          ],
+        },
+        _buildFakeRelease(
+          tagName: 'v9.9.0',
+          apkAssetName: 'JobCruiser-v9.9.0.apk',
+          body: '### What changed\nNew feature released\n### Details\nMore notes',
+        ),
+      ];
+
+      final testService = UpdateCheckerService(dio: _FakeDio(fakeResponse: mockReleasesList));
+      final update = await testService.checkForUpdate();
+      expect(update, isNotNull);
+      expect(update!.versionName, '9.9.0');
+      expect(update.releaseNotes, 'New feature released');
+      expect(update.downloadUrl, contains('JobCruiser-v9.9.0.apk'));
     });
   });
 }

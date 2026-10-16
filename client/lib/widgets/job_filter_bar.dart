@@ -103,6 +103,8 @@ class _JobFilterBarState extends State<JobFilterBar> {
                   children: [
                     _buildAllFiltersButton(activeCount),
                     const SizedBox(width: 8),
+                    _buildSourceChip(),
+                    const SizedBox(width: 6),
                     _buildQuickSortChip(),
                     const SizedBox(width: 6),
                     _buildScopeSelectorChip(),
@@ -112,13 +114,10 @@ class _JobFilterBarState extends State<JobFilterBar> {
                     _buildRecencyPresetChip(isCustomRecency),
                     const SizedBox(width: 6),
                     _buildViewStatusChip(),
-                    const SizedBox(width: 6),
-                    _buildSourceChip(),
                     if (!widget.filterState.isDefault) ...[
                       const SizedBox(width: 8),
                       _buildClearAllChip(),
                     ],
-
                   ],
                 ),
               ),

@@ -6,14 +6,47 @@ import sys
 import urllib.request
 
 
+def parse_semantic_parts(version_string: str) -> tuple[int, int, int] | None:
+    """Extracts major, minor, and patch numbers from a valid client version string."""
+    cleaned_string = version_string.strip()
+    if cleaned_string.startswith("v") or cleaned_string.startswith("V"):
+        cleaned_string = cleaned_string[1:]
+    cleaned_string = cleaned_string.split("+")[0]
+    version_segments = cleaned_string.split(".")
+    if len(version_segments) != 3:
+        return None
+    if not all(segment.isdigit() for segment in version_segments):
+        return None
+    return int(version_segments[0]), int(version_segments[1]), int(version_segments[2])
+
+
+def filter_highest_client_release(releases_payload: list[dict]) -> str | None:
+    """Filters client releases and returns the tag corresponding to the highest semantic version."""
+    candidate_versions: list[tuple[tuple[int, int, int], str]] = []
+    for item in releases_payload:
+        if not isinstance(item, dict):
+            continue
+        if item.get("draft", False) or item.get("prerelease", False):
+            continue
+        tag_name = item.get("tag_name", "")
+        if tag_name.startswith("extension-"):
+            continue
+        parsed_tuple = parse_semantic_parts(tag_name)
+        if parsed_tuple is not None:
+            candidate_versions.append((parsed_tuple, tag_name))
+    if not candidate_versions:
+        return None
+    candidate_versions.sort(key=lambda element: element[0])
+    return candidate_versions[-1][1]
+
+
 def compute_next_version(previous_version_string: str) -> str:
     """Takes a version string and calculates the next version following rollover rules."""
-    cleaned_version = previous_version_string.lstrip("vV").split("+")[0]
-    segments = [int(segment) if segment.isdigit() else 0 for segment in cleaned_version.split(".")]
-    while len(segments) < 3:
-        segments.append(0)
-
-    major, minor, patch = segments[0], segments[1], segments[2]
+    parsed_parts = parse_semantic_parts(previous_version_string)
+    if parsed_parts is not None:
+        major, minor, patch = parsed_parts
+    else:
+        major, minor, patch = 1, 0, 0
 
     if patch < 12:
         patch += 1
@@ -29,18 +62,23 @@ def compute_next_version(previous_version_string: str) -> str:
 
 
 def fetch_latest_release_tag(repository_name: str, authorization_token: str = "") -> str | None:
-    """Fetches the latest published release tag from the GitHub Releases API."""
-    request_headers = {"Accept": "application/vnd.github+json"}
+    """Fetches the latest published client release tag from GitHub Releases."""
+    request_headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "JobCruiser-Version-Calculator",
+    }
     if authorization_token:
         request_headers["Authorization"] = f"token {authorization_token}"
 
-    api_url = f"https://api.github.com/repos/{repository_name}/releases/latest"
+    api_url = f"https://api.github.com/repos/{repository_name}/releases?per_page=100"
     api_request = urllib.request.Request(api_url, headers=request_headers)
 
     try:
         with urllib.request.urlopen(api_request, timeout=10) as response_stream:
-            release_payload = json.loads(response_stream.read().decode())
-            return release_payload.get("tag_name")
+            releases_payload = json.loads(response_stream.read().decode())
+            if not isinstance(releases_payload, list):
+                return None
+            return filter_highest_client_release(releases_payload)
     except Exception:
         return None
 

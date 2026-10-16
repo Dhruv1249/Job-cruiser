@@ -86,6 +86,7 @@ jobs:
             extension/.output/*-chrome.zip
             extension/.output/*-firefox.zip
             extension/.output/*-sources.zip
+          make_latest: false
           draft: false
           prerelease: false
         env:
