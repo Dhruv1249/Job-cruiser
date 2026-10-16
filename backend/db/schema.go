@@ -373,6 +373,11 @@ var schemaQueries = []string{
 	`ALTER TABLE user_overleaf_config ADD COLUMN IF NOT EXISTS sync_interval_hours INTEGER DEFAULT 24;`,
 	`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS salary_period VARCHAR(20);`,
 	`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS employment_type VARCHAR(30);`,
+	`CREATE INDEX IF NOT EXISTS idx_jobs_company_id ON jobs(company_id);`,
+	`CREATE INDEX IF NOT EXISTS idx_user_job_matches_job_user ON user_job_matches(job_id, user_id);`,
+	`CREATE INDEX IF NOT EXISTS idx_applications_user_job ON applications(user_id, job_id);`,
+	`CREATE INDEX IF NOT EXISTS idx_resume_versions_user_job ON resume_versions(user_id, job_id);`,
+	`CREATE INDEX IF NOT EXISTS idx_cover_letter_versions_user_job ON cover_letter_versions(user_id, job_id);`,
 }
 
 // InitSchema executes the queries in sequence.

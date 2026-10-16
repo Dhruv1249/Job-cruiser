@@ -60,8 +60,8 @@ func (h *JobHandler) GetJobs(c *gin.Context) {
 		queryArguments = append(queryArguments, "%"+searchQuery+"%")
 		searchIndex := len(queryArguments)
 		conditions = append(conditions, fmt.Sprintf(
-			"(j.title ILIKE $%d OR COALESCE(comp.name, '') ILIKE $%d OR COALESCE(j.location, '') ILIKE $%d OR COALESCE(j.summary, '') ILIKE $%d OR COALESCE(j.raw_desc, '') ILIKE $%d OR COALESCE(j.tags::text, '') ILIKE $%d)",
-			searchIndex, searchIndex, searchIndex, searchIndex, searchIndex, searchIndex,
+			"(j.title ILIKE $%d OR COALESCE(comp.name, '') ILIKE $%d OR COALESCE(j.location, '') ILIKE $%d OR COALESCE(j.summary, '') ILIKE $%d OR COALESCE(j.tags::text, '') ILIKE $%d)",
+			searchIndex, searchIndex, searchIndex, searchIndex, searchIndex,
 		))
 	}
 

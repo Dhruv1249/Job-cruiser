@@ -176,8 +176,8 @@ func (h *MatchedJobsHandler) GetMatchedJobs(c *gin.Context) {
 		args = append(args, "%"+searchQuery+"%")
 		searchParamIndex := len(args)
 		conditions = append(conditions, fmt.Sprintf(
-			"(j.title ILIKE $%d OR COALESCE(comp.name, '') ILIKE $%d OR COALESCE(j.location, '') ILIKE $%d OR COALESCE(j.summary, '') ILIKE $%d OR COALESCE(j.raw_desc, '') ILIKE $%d OR COALESCE(j.tags::text, '') ILIKE $%d)",
-			searchParamIndex, searchParamIndex, searchParamIndex, searchParamIndex, searchParamIndex, searchParamIndex,
+			"(j.title ILIKE $%d OR COALESCE(comp.name, '') ILIKE $%d OR COALESCE(j.location, '') ILIKE $%d OR COALESCE(j.summary, '') ILIKE $%d OR COALESCE(j.tags::text, '') ILIKE $%d)",
+			searchParamIndex, searchParamIndex, searchParamIndex, searchParamIndex, searchParamIndex,
 		))
 	}
 
@@ -334,31 +334,14 @@ func (h *MatchedJobsHandler) GetMatchStatus(c *gin.Context) {
 		return
 	}
 
-	userIDValue, exists := c.Get("user_id")
 	var count int
-	var queryError error
-
-	if exists {
-		userID := fmt.Sprintf("%v", userIDValue)
-		query := `
-			SELECT COUNT(*) 
-			FROM jobs j
-			WHERE j.scraped_at >= NOW() - INTERVAL '14 days'
-			  AND (j.ai_evaluated = false OR NOT EXISTS (
-				  SELECT 1 FROM user_job_matches ujm
-				  WHERE ujm.job_id = j.id AND ujm.user_id = $1
-			  ));
-		`
-		queryError = h.DB.QueryRow(c.Request.Context(), query, userID).Scan(&count)
-	} else {
-		query := `
-			SELECT COUNT(*) 
-			FROM jobs 
-			WHERE ai_evaluated = false 
-			  AND scraped_at >= NOW() - INTERVAL '14 days';
-		`
-		queryError = h.DB.QueryRow(c.Request.Context(), query).Scan(&count)
-	}
+	query := `
+		SELECT COUNT(*) 
+		FROM jobs 
+		WHERE ai_evaluated = false 
+		  AND scraped_at >= NOW() - INTERVAL '14 days';
+	`
+	queryError := h.DB.QueryRow(c.Request.Context(), query).Scan(&count)
 
 	if queryError != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
